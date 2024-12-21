@@ -1,0 +1,9 @@
+Employee ID,Name,Designation,Department,Joining Date,Salary (USD),Status,Email,Phone
+E001,Alice Johnson,Senior Consultant,Strategy,2020-05-15,110000,Active,alice.johnson@company.com,+1-555-1234
+E002,Bob Smith,IT Specialist,IT,2021-09-01,90000,Active,bob.smith@company.com,+1-555-5678
+E003,Clara Lee,Marketing Manager,Marketing,2019-03-10,105000,Resigned,clara.lee@company.com,+1-555-9012
+E004,David Carter,Financial Analyst,Finance,2022-06-20,95000,Active,david.carter@company.com,+1-555-3456
+E005,Eva Martinez,HR Manager,HR,2018-11-25,115000,Active,eva.martinez@company.com,+1-555-7890
+E006,Frank Miller,Junior Consultant,Strategy,2023-01-15,75000,Active,frank.miller@company.com,+1-555-6543
+E007,Grace Adams,Data Scientist,Analytics,2020-08-05,120000,Active,grace.adams@company.com,+1-555-8765
+E008,Henry Nguyen,Project Manager,Projects,2017-04-30,130000,Active,henry.nguyen@company.com,+1-555-4321

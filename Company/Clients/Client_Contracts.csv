@@ -1,0 +1,11 @@
+Contract ID,Client ID,Project Name,Start Date,End Date,Contract Value (USD),Status
+C001,CL001,Business Strategy Overhaul,2023-01-10,2023-06-30,120000,Completed
+C002,CL002,IT Infrastructure Upgrade,2023-03-15,2024-03-01,250000,Active
+C003,CL003,Marketing Campaign Revamp,2023-05-01,2023-10-15,95000,Completed
+C004,CL004,Financial Restructuring,2023-07-01,2024-01-15,180000,Active
+C005,CL005,Supply Chain Optimization,2023-02-01,2023-12-31,300000,Completed
+C006,CL006,HR Process Automation,2023-08-01,2024-02-28,150000,Active
+C007,CL007,Risk Management Consulting,2023-09-15,2024-04-30,210000,Active
+C008,CL008,Sustainability Roadmap,2023-04-10,2023-11-15,110000,Completed
+C009,CL009,Cloud Migration Services,2023-06-01,2024-06-01,400000,Active
+C010,CL010,Performance Analytics,2023-01-20,2023-09-30,85000,Completed

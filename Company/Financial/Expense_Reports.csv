@@ -1,0 +1,16 @@
+Month,Year,Department,Expense Type,Amount (USD),Description
+January,2023,Sales,Marketing,30000,"Digital ads, print media, and events"
+January,2023,HR,Recruitment,15000,"Job board postings, interview expenses"
+January,2023,IT,Software Licenses,20000,Annual licenses for enterprise software
+February,2023,Sales,Marketing,25000,Social media campaigns and sponsorships
+February,2023,HR,Training,10000,Employee skill development programs
+February,2023,IT,Hardware,15000,Computer upgrades for team
+March,2023,Finance,Professional Fees,40000,Legal consultations and audits
+March,2023,Sales,Marketing,35000,Trade shows and customer outreach
+March,2023,IT,Maintenance,12000,System upgrades and repairs
+April,2023,HR,Employee Benefits,25000,"Health, dental, and retirement programs"
+April,2023,Sales,Marketing,28000,Targeted advertising campaigns
+April,2023,Finance,Travel,18000,Business travel for client meetings
+May,2023,IT,Cloud Services,22000,Cloud storage and security services
+May,2023,HR,Training,14000,External training sessions
+May,2023,Finance,Professional Fees,30000,Legal services for contracts

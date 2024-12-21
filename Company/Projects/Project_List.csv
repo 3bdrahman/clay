@@ -1,0 +1,11 @@
+Project ID,Client ID,Project Name,Start Date,End Date,Project Manager,Status,Budget (USD)
+P001,CL001,Business Strategy Overhaul,2023-01-10,2023-06-30,John Smith,Completed,120000
+P002,CL002,IT Infrastructure Upgrade,2023-03-15,2024-03-01,Emily Johnson,Active,250000
+P003,CL003,Marketing Campaign Revamp,2023-05-01,2023-10-15,Michael Brown,Completed,95000
+P004,CL004,Financial Restructuring,2023-07-01,2024-01-15,Sarah Lee,Active,180000
+P005,CL005,Supply Chain Optimization,2023-02-01,2023-12-31,David Green,Completed,300000
+P006,CL006,HR Process Automation,2023-08-01,2024-02-28,Rachel Adams,Active,150000
+P007,CL007,Risk Management Consulting,2023-09-15,2024-04-30,James Wilson,Active,210000
+P008,CL008,Sustainability Roadmap,2023-04-10,2023-11-15,Olivia Turner,Completed,110000
+P009,CL009,Cloud Migration Services,2023-06-01,2024-06-01,Daniel Scott,Active,400000
+P010,CL010,Performance Analytics,2023-01-20,2023-09-30,Laura Clark,Completed,85000
