@@ -96,40 +96,40 @@ web_search_tool = TavilySearchResults(k=2)
 # Router 
 router_instructions = """ You are highly capable at routing a user question to either a vectorestore, Python, or web search.
 
-The vectorstore contains documents related to information about Nexus Logistics Solutions. 
-The documents introduce the company, office locations and the Employee Development Program.
+The vectorstore contains documents related to information about Aurora Consulting Inc. 
+The documents introduce the company, clients and employees.
 
 - Use the vectorestore for questions about:
-    - Nexus Logistics Solutions as a company
-    - Information about office locations
-    - General information about the Employee Development Program (EDP)
+    - Aurora Consulting as a company
+    - Fact-based information about clients, employees.
+    - General information about the services, policies, revenue. 
 
 - Use the Python API for questions about:
     - Math 
-    - Data Analysis of the EDP
-    - Employee, courses, or offices datasets
-    - EDP performance or utilization 
+    - Analysis of finances
+    - Projects and database questions 
 
-- Use web search only for FACTS. 
+
+- Use web search only for FACTS like stock prices. 
 
 Return JSON with a single key, "datasource", that is "vectorstore", "python", or "websearch" depending on where the information can be found."""
 
 # document grader
 doc_grader_instructions = """
-You are a grader assessing the relavence of a retrieved document to a user questions. 
+You are a grader assessing the relavence and usefulness of a retrieved document to answer a user questions. 
 
-if the document contains keywords(s) or semantic meaning related to the question, gread it as relavent.
+if the document contains keywords(s) or semantic meaning related to the question, grade it as relavent.
 """
 
 # Grader prompt 
-doc_geader_prompt = """Here is the retrieved document: \n\n {document} \n\n Here is the user question: \n\n {question}.
+doc_grader_prompt = """Here is the retrieved document: \n\n {document} \n\n Here is the user question: \n\n {question}.
 
 Think carefully and objectively assess whether the document contains information that is relevant to answering the question. It's sufficient if the document has keywords or terms that are present in the question.
 
 Return JSON with single key, binary_score, that is 'yes' if you think the document could be used to answer the questions or 'no' if not."""
 
 ## Augmented Generation 
-rag_prompt = """You are an internal assistant helping employees by providing accurate information based on multiple data sources.
+rag_prompt = """You are an internal assistant at a consulting agency. You help employees by providing accurate information based on multiple data sources.
 
 Here is the relevant context from different sources:
 
@@ -542,7 +542,7 @@ def grade_documents(state):
     # score each document
     filtered_docs = []
     for d in documents:
-        doc_grader_prompt_formatted = doc_geader_prompt.format(document=d.page_content, question = question)
+        doc_grader_prompt_formatted = doc_grader_prompt.format(document=d.page_content, question = question)
         result = llm_json.invoke([SystemMessage(content=doc_grader_instructions)] + [HumanMessage(content=doc_grader_prompt_formatted)])
         grade = json.loads(result.content)['binary_score']
         # document relavent
