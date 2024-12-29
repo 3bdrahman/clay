@@ -5,4 +5,4 @@
 ## ![Workflow](workflow.png)
 
 ## Demo
-![demo.gif]
+!(demo.gif)
