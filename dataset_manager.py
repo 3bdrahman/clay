@@ -1,17 +1,17 @@
 import pandas as pd
 datasets = {
-        'client_contracts': pd.read_csv('./Company/Clients/Client_Contracts.csv'),
-        'client_feedback': pd.read_csv('./Company/Clients/Client_Feedback.csv'),
-        'client_list': pd.read_csv('./Company/Clients/Client_List.csv'),
-        'employee_list': pd.read_csv('./Company/Employees/Employee_List.csv'),
-        'employee_performance': pd.read_csv('./Company/Employees/Employee_Performance.csv'),
-        'employee_training': pd.read_csv('./Company/Employees/Employee_Training.csv'),
-        'expense_reports': pd.read_csv('./Company/Financial/Expense_Reports.csv'),
-        'project_budgets': pd.read_csv('./Company/Financial/Project_Budgets.csv'),
-        'revenue_reports': pd.read_csv('./Company/Financial/Revenue_Reports.csv'),
-        'project_list': pd.read_csv('./Company/Projects/Project_List.csv'),
-        'project_milestones': pd.read_csv('./Company/Projects/Project_Milestones.csv'),
-        'project_team_members': pd.read_csv('./Company/Projects/Project_Team_Members.csv'),
+        'client_contracts': pd.read_csv('./Company/Clients/client_contracts.csv'),
+        'client_feedback': pd.read_csv('./Company/Clients/client_feedback.csv'),
+        'client_list': pd.read_csv('./Company/Clients/client_list.csv'),
+        'employee_list': pd.read_csv('./Company/Employees/employee_list.csv'),
+        'employee_performance': pd.read_csv('./Company/Employees/employee_performance.csv'),
+        'employee_training': pd.read_csv('./Company/Employees/employee_training.csv'),
+        'expense_reports': pd.read_csv('./Company/Financial/expense_reports.csv'),
+        'project_budgets': pd.read_csv('./Company/Financial/project_budgets.csv'),
+        'revenue_reports': pd.read_csv('./Company/Financial/revenue_reports.csv'),
+        'project_list': pd.read_csv('./Company/Projects/project_list.csv'),
+        'project_milestones': pd.read_csv('./Company/Projects/project_milestones.csv'),
+        'project_team_members': pd.read_csv('./Company/Projects/project_team_members.csv'),
     }
 metadata = {
     "client_contracts": {
@@ -207,15 +207,6 @@ class DatasetManager:
         self.relationships = relationships
 
     def get_analysis_suggestions(self, question):
-        """
-        Suggest relevant datasets and fields based on a user question.
-        
-        Args:
-            question (str): A natural language question.
-        
-        Returns:
-            list[dict]: Relevant datasets, metadata, and matched fields.
-        """
         relevant_datasets = []
         for dataset, meta in self.metadata.items():
             fields_match = any(field.lower() in question.lower() for field in meta['key_fields'])
@@ -229,27 +220,9 @@ class DatasetManager:
         return relevant_datasets
 
     def get_relationships(self, dataset_name):
-        """
-        Retrieve relationships for a specific dataset.
-        
-        Args:
-            dataset_name (str): The name of the dataset.
-        
-        Returns:
-            dict: Datasets related to the specified dataset and shared fields.
-        """
         return self.relationships.get(dataset_name, {}).get('related_to', {})
 
     def generate_code_context(self, question):
-        """
-        Generate a context for code generation based on a user question.
-        
-        Args:
-            question (str): A natural language question.
-        
-        Returns:
-            dict: Context containing relevant datasets, relationships, and schemas.
-        """
         relevant_datasets = self.get_analysis_suggestions(question)
         relevant_dataset_names = [ds['dataset'] for ds in relevant_datasets]
         available_relationships = {
@@ -264,15 +237,6 @@ class DatasetManager:
         }
 
     def explore_dataset(self, dataset_name):
-        """
-        Provide an overview of a dataset, including its schema and sample data.
-        
-        Args:
-            dataset_name (str): The name of the dataset to explore.
-        
-        Returns:
-            dict: Schema and a sample of the dataset.
-        """
         if dataset_name not in self.datasets:
             raise ValueError(f"Dataset '{dataset_name}' does not exist.")
         dataset = self.datasets[dataset_name]
@@ -282,16 +246,6 @@ class DatasetManager:
         }
 
     def join_datasets(self, dataset1, dataset2):
-        """
-        Automatically join two datasets based on their relationships.
-
-        Args:
-            dataset1 (str): The name of the first dataset.
-            dataset2 (str): The name of the second dataset.
-
-        Returns:
-            pd.DataFrame: The joined dataset, if a relationship exists.
-        """
         relationships = self.get_relationships(dataset1)
         if dataset2 not in relationships:
             raise ValueError(f"No relationship exists between '{dataset1}' and '{dataset2}'.")
@@ -303,16 +257,6 @@ class DatasetManager:
         return pd.merge(df1, df2, on=shared_fields, how='inner')
 
     def run_analysis(self, dataset_name, analysis_type):
-        """
-        Run a predefined analysis for a specific dataset.
-
-        Args:
-            dataset_name (str): The name of the dataset.
-            analysis_type (str): The type of analysis to run.
-
-        Returns:
-            Any: The result of the analysis.
-        """
         if dataset_name not in self.datasets:
             raise ValueError(f"Dataset '{dataset_name}' does not exist.")
         if dataset_name not in self.metadata:

@@ -1,0 +1,24 @@
+Project ID,Employee ID,Role,Contribution (%)
+P001,E001,Project Manager,25
+P001,E002,Senior Consultant,40
+P001,E003,Junior Consultant,35
+P002,E004,IT Architect,50
+P002,E005,IT Consultant,30
+P002,E006,Technical Support,20
+P003,E007,Marketing Strategist,30
+P003,E008,Digital Designer,25
+P003,E009,Campaign Manager,45
+P004,E010,Financial Analyst,60
+P004,E011,Consultant,40
+P005,E012,Supply Chain Expert,50
+P005,E013,Consultant,50
+P006,E014,HR Process Lead,60
+P006,E015,HR Automation Expert,40
+P007,E016,Risk Analyst,55
+P007,E017,Consultant,45
+P008,E018,Sustainability Lead,50
+P008,E019,Consultant,50
+P009,E020,Cloud Architect,70
+P009,E021,Cloud Consultant,30
+P010,E022,Data Analyst,50
+P010,E023,Consultant,50

@@ -1,0 +1,11 @@
+Project ID,Client ID,Project Name,Estimated Budget (USD),Budget (USD),Profit/Loss (USD)
+P001,CL001,Business Strategy Overhaul,150000,120000,30000
+P002,CL002,IT Infrastructure Upgrade,300000,270000,30000
+P003,CL003,Marketing Campaign Revamp,100000,95000,5000
+P004,CL004,Financial Restructuring,180000,190000,-10000
+P005,CL005,Supply Chain Optimization,250000,220000,30000
+P006,CL006,HR Process Automation,150000,145000,5000
+P007,CL007,Risk Management Consulting,220000,230000,-10000
+P008,CL008,Sustainability Roadmap,120000,115000,5000
+P009,CL009,Cloud Migration Services,400000,390000,10000
+P010,CL010,Performance Analytics,80000,70000,10000

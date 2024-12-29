@@ -30,6 +30,21 @@ from dataset_manager import DatasetManager
 import numpy as np
 from io import StringIO
 import sys
+
+datasets = {
+        'client_contracts': pd.read_csv('./Company/Clients/client_contracts.csv'),
+        'client_feedback': pd.read_csv('./Company/Clients/client_feedback.csv'),
+        'client_list': pd.read_csv('./Company/Clients/client_list.csv'),
+        'employee_list': pd.read_csv('./Company/Employees/employee_list.csv'),
+        'employee_performance': pd.read_csv('./Company/Employees/employee_performance.csv'),
+        'employee_training': pd.read_csv('./Company/Employees/employee_training.csv'),
+        'expense_reports': pd.read_csv('./Company/Financial/expense_reports.csv'),
+        'project_budgets': pd.read_csv('./Company/Financial/project_budgets.csv'),
+        'revenue_reports': pd.read_csv('./Company/Financial/revenue_reports.csv'),
+        'project_list': pd.read_csv('./Company/Projects/project_list.csv'),
+        'project_milestones': pd.read_csv('./Company/Projects/project_milestones.csv'),
+        'project_team_members': pd.read_csv('./Company/Projects/project_team_members.csv'),
+    }
 @st.cache_resource
 def initialize_llm():
     st.write("Initializing LLM ...")
@@ -101,16 +116,17 @@ The documents introduce the company, clients and employees.
 
 - Use the vectorestore for questions about:
     - Aurora Consulting as a company
-    - Fact-based information about clients, employees.
+    - General information about clients, employees.
     - General information about the services, policies, revenue. 
 
 - Use the Python API for questions about:
     - Math 
+    - Queries about projects, clients, contracts, employees. 
     - Analysis of finances
     - Projects and database questions 
 
 
-- Use web search only for FACTS like stock prices. 
+- Use web search only for facts and General Knowledge questions. 
 
 Return JSON with a single key, "datasource", that is "vectorstore", "python", or "websearch" depending on where the information can be found."""
 
@@ -145,9 +161,9 @@ Instructions:
     - Reference specific numbers and trends
     - Connect the analysis to the question
 4. If you see Python code and results:
-    - Explain what the code did
-    - Interpret the numerical results
-    - Highlight important patterns or findings
+    - Take ownership of the analysis
+    - Interpret the results but never include an ID in you final answer.
+    - Optimally use information from the analysis to answer the user question. 
 5. If you can't answer fully from the context, say so
 6. Name 'references' using filname (source) when they are provided in the relavent context.
 
@@ -182,38 +198,47 @@ Return JSON with two keys:
 # Answer grader instructions 
 answer_grader_instructions = """You are a teacher grading a quiz. 
 You will be given a QUESTION and a STUDENT ANSWER.
-Here is the grade criteria to follow: 
-(1) The STUDENT ANSWER helps to answer the QUESTION
+criteria:
+Does the answer make sense and fully address the question?
 score:
 A score of yes means that the student's answer meets all of the criteria. This is the highest (best) score.
-The student of no means that the studetn's answer doesn't meet all or the criteria. This is the lowest possible score.
+The score of no means that the student's answer doesn't meet all or the criteria. This is the lowest possible score.
 Explain your reasoning in a step-by-step manner to ensure your reasoning and conclusion are correct. 
 Avoid simply stating the correct answer at the outset."""
 
-# Analysis code generation instructions
-code_generation_prompt = """You must analyze data about employee performance using Python.
+code_generation_prompt = """You are an experienced data analyst. Analyze the data using Python.
 
 Question: {question}
 
-Available datasets (loaded and ready to use): {dataset_names}
-Dataset columns: {available_datasets}
+Available datasets: {dataset_names}
+Columns: {columns}
 
-Return a JSON object with exactly this structure:
+Return a JSON object with:
 {{
     "code": "<your full python code here>",
     "explanation": "<your explanation here>"
 }}
 
-Your code MUST:
-1. Start with imports
-2. Use the existing dataframes (they're already loaded)
-3. Store the final answer in a variable named 'result'
-4. Strive to make the result look clean. For example, round large floats and improve the plot appearance. 
+Requirements:
+1. Read the datasets needed from './Company/datasets'
+2. Handle empty DataFrames:
+   - Check DataFrame lengths with len(df) > 0
+   - Place empty checks before any operations
+   - Return meaningful message if empty
+3. For aggregations (max/min/sum):
+   - Verify the group/column exists
+   - Check if result is empty before accessing
+   - Use .iloc[0] for single row access
+4. When merging:
+   - Verify merge columns exist
+   - Check merged result length
+5. Store final answer in 'result' variable
+6. Never include IDs in final results
 
-Example valid response:
+Example:
 {{
-    "code": "import pandas as pd\\n\\n# Calculate average scores\\nresult = df['score'].mean()",
-    "explanation": "Calculated the mean score from the dataset"
+    "code": "import pandas as pd\\n\\n# Verify data\\nif len(df1) > 0 and len(df2) > 0:\\n    # Process\\n    result = processed_data.iloc[0].to_dict()\\nelse:\\n    result = {{'error': 'No data available'}}",
+    "explanation": "Calculated result with empty data handling"
 }}"""
 
 error_correction_prompt = """Your previous code generation had an error: {error}
@@ -401,25 +426,27 @@ def python_data_analysis(state):
     """Generate and execute python code"""
     update_progress("Analysis with Python")
     question = state["question"]
-    dm = DatasetManager()
+    # dm = DatasetManager()
     max_retries = 2
     retry_count = 0
     last_error = None
     previous_analysis = state.get("python_analysis", {})
+    if previous_analysis is None:
+        previous_analysis = {}
     while retry_count <= max_retries:
         try:
             # Format the appropriate prompt based on retry status
             if last_error:
                 formatted_prompt = error_correction_prompt.format(
                     error=last_error,
-                    failed_code=state.get("python_analysis", {}).get("code", "No previous code")
+                    failed_code=previous_analysis.get("code", "No previous code")
                 )
                 update_progress(f"Attempting code correction (Attempt {retry_count + 1})")
             else:
                 formatted_prompt = code_generation_prompt.format(
                     question=question,
-                    dataset_names=", ".join(dm.datasets.keys()),
-                    available_datasets=json.dumps({name: list(df.columns) for name, df in dm.datasets.items()})
+                    dataset_names=", ".join(datasets.keys()),
+                    columns=json.dumps({name: list(df.columns) for name, df in datasets.items()})
                 )
                 update_progress("Generating analysis code")
 
@@ -441,7 +468,7 @@ def python_data_analysis(state):
             
             # Set up execution environment
             execution_namespace = {
-                **dm.datasets,
+                **datasets,
                 'pd': pd,
                 'plt': plt,
                 'np': np,
@@ -607,13 +634,15 @@ def grade_generation_documents_and_question(state):
     """
     Determines whether the generation is grounded in the document and answers questions
     args: state(dict): current graph state
-    returns: str: decision for next node to call"""
+    returns: str: decision for next node to call
+    """
     update_progress("Evaluating Relevance")
     question = state["question"]
     generation = state["generation"]
     max_retries = state.get("max_retries", 3)
     context_sources = []
     print("Python analysis @ beginning of grade_generation_documents_and_question:", state.get("python_analysis"))
+    
     if state.get("documents"):
         context_sources.append("Vector Store Documents:\n" + format_docs(state["documents"]))
     
@@ -634,16 +663,41 @@ def grade_generation_documents_and_question(state):
             return "not supported"
         return "max_retries"
     
+    def parse_llm_response(response):
+        """Helper function to safely parse LLM JSON response"""
+        try:
+            # Clean the response - remove any leading/trailing whitespace or quotes
+            cleaned_response = response.content.strip().strip('"\'')
+            result = json.loads(cleaned_response)
+            # Ensure we have the expected field
+            if "binary_score" not in result:
+                print(f"Unexpected response format: {result}")
+                return None
+            return result["binary_score"].lower()
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse JSON response: {e}")
+            print(f"Raw response: {response.content}")
+            return None
+        except Exception as e:
+            print(f"Unexpected error parsing response: {e}")
+            return None
+
     # Grade hallucination
     hallucination_grader_prompt_formatted = hallucination_grader_prompt.format(
         documents=full_context,
         generation=generation.content
     )
+    
     result = llm_json.invoke(
         [SystemMessage(content=hallucination_grader_instructions)]
         + [HumanMessage(content=hallucination_grader_prompt_formatted)]
     )
-    hallucination_grade = json.loads(result.content)["binary_score"].lower()
+    
+    hallucination_grade = parse_llm_response(result)
+    if hallucination_grade is None:
+        if state["loop_step"] <= max_retries:
+            return "not supported"
+        return "max_retries"
 
     # If not hallucinating, check if it answers the question
     if hallucination_grade == "yes":
@@ -655,8 +709,13 @@ def grade_generation_documents_and_question(state):
             [SystemMessage(content=answer_grader_instructions)]
             + [HumanMessage(content=answer_grader_prompt_formatted)]
         )
-        answer_grade = json.loads(result.content)["binary_score"].lower()
         
+        answer_grade = parse_llm_response(result)
+        if answer_grade is None:
+            if state["loop_step"] <= max_retries:
+                return "not useful"
+            return "max_retries"
+            
         if answer_grade == "yes":
             return "useful"
         elif state["loop_step"] <= max_retries:
@@ -779,7 +838,7 @@ def process_user_message(user_input, chat_history):
     return response, final_state.get("chat_history")
 
 def initialize_interface():
-    st.title("RAG Agent")
+    st.title("Clay")
     chat_container = st.container()
     # Display history
     with chat_container:
