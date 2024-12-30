@@ -8,8 +8,8 @@
 ![demo](demo.gif)
 
 ## TODO
-- Add a casual chat channel. 
-- Allow for the selection of different base models (Llama, Sonnet, ChatGPT)
-- Add the selection of different agentic workflows:
-    - Data-Analysis, Knowledge Retrieval, Communication, Task Automation, Technical, Multi-agent.
-- Include employee profile & privileges in the decision-making. 
+- Add a Graph RAG Pipeline
+- Allow base model selection.
+- Agent/workflow presets including the option for multi-agent workflow.
+- Make the workflow less vertical with the ability to combine sources(DB, Python, Web) when needed. 
+- Add more function calls like access to the company calendar.
