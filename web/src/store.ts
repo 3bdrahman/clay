@@ -133,9 +133,19 @@ export const useAppStore = create<AppState>()(
       sandboxDocuments: [],
       sandboxProcessing: [],
       updateSettings: patch =>
-        set(state => ({
-          settings: { ...state.settings, ...patch },
-        })),
+        set(state => {
+          const next = { ...state.settings, ...patch };
+          if (
+            patch.provider !== undefined &&
+            patch.provider !== state.settings.provider &&
+            state.settings.provider === 'local' &&
+            patch.provider !== 'local'
+          ) {
+            next.localCatalog = [];
+            next.localCatalogFetchedAt = 0;
+          }
+          return { settings: next };
+        }),
       createConversation: () => {
         const conv = makeConversation();
         set(state => ({

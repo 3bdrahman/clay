@@ -80,6 +80,7 @@ export function pickLocalModels(picks: LocalModelPicks): PickedModels {
 export interface ResolvedModels {
   catalog: ModelInfo[];
   picked: PickedModels;
+  warnings: string[];
 }
 
 export function resolveModels(
@@ -88,9 +89,25 @@ export function resolveModels(
 ): ResolvedModels {
   if (settings.provider === 'local') {
     const picked = pickLocalModels(settings.localModels);
-    return { catalog: settings.localCatalog, picked };
+    const warnings: string[] = [];
+    if (settings.localCatalog.length === 0) {
+      warnings.push(
+        'Local catalog is empty. Click Discover in Settings to fetch models from the server.',
+      );
+    } else {
+      const catalogIds = new Set(settings.localCatalog.map(m => m.id));
+      for (const role of ['routing', 'codeGen', 'answer', 'eval', 'embedding'] as const) {
+        const model = picked[role];
+        if (model && !catalogIds.has(model)) {
+          warnings.push(
+            `${role} model "${model}" is not in the catalog. Re-pick or refresh the catalog.`,
+          );
+        }
+      }
+    }
+    return { catalog: settings.localCatalog, picked, warnings };
   }
-  return { catalog: nimCatalog, picked: pickBestModels(nimCatalog) };
+  return { catalog: nimCatalog, picked: pickBestModels(nimCatalog), warnings: [] };
 }
 
 function isEmbedding(id: string): boolean {

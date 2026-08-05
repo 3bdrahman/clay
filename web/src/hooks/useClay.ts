@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as aq from 'arquero';
 import { createLLMClient, LLMConfigError, type LLMClient } from '../lib/llm';
 import { createDemoLLMClient } from '../lib/demo-llm';
@@ -359,7 +359,7 @@ export function useClay(): {
     clearSandbox();
   }, [clearSandbox, sandboxDatasets]);
 
-  const pickedModels: PickedModels = (() => {
+  const pickedModels: PickedModels = useMemo(() => {
     if (settings.provider === 'local') {
       const def = (s: string) => s.trim() || undefined;
       return {
@@ -371,7 +371,7 @@ export function useClay(): {
       };
     }
     return resolveModels(settings, availableModels).picked;
-  })();
+  }, [settings, availableModels]);
 
   return {
     services,

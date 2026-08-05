@@ -341,5 +341,33 @@ describe('resolveModels', () => {
     expect(out.picked.routing).toBe('llama3.1:8b');
     expect(out.picked.embedding).toBeUndefined();
     expect(out.catalog).toBe(localCatalog);
+    expect(out.warnings).toEqual([]);
+  });
+
+  it('warns when local catalog is empty', () => {
+    const out = resolveModels(
+      { ...baseSettings, provider: 'local', localCatalog: [] },
+      fakeModels,
+    );
+    expect(out.warnings.some(w => w.includes('Local catalog is empty'))).toBe(true);
+  });
+
+  it('warns when a picked model is not in the catalog', () => {
+    const out = resolveModels(
+      {
+        ...baseSettings,
+        provider: 'local',
+        localModels: {
+          routing: 'llama3.1:8b',
+          codeGen: 'nonexistent-model',
+          answer: 'llama3.1:8b',
+          eval: '',
+          embedding: '',
+        },
+        localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
+      },
+      fakeModels,
+    );
+    expect(out.warnings.some(w => w.includes('codeGen') && w.includes('nonexistent-model'))).toBe(true);
   });
 });

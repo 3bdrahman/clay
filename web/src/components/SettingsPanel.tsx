@@ -1,8 +1,31 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
-import { NIM_FREE_KEY_URL, LOCAL_PROVIDER_HINT } from '../lib/providers';
+import {
+  NIM_FREE_KEY_URL,
+  LOCAL_PROVIDER_HINT,
+  OLLAMA_CORS_HINT,
+  isOllamaUrl,
+} from '../lib/providers';
 import { modelClass } from '../lib/models';
 import type { LocalModelPicks } from '../lib/types';
+
+function validateLocalServerUrl(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return 'Server URL is required.';
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return 'Not a valid URL. Include the scheme, e.g. http://localhost:11434/v1';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return 'URL must use http:// or https://';
+  }
+  if (!parsed.hostname) {
+    return 'URL is missing a hostname.';
+  }
+  return null;
+}
 
 type LocalModelKey = keyof LocalModelPicks;
 
@@ -30,6 +53,18 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
   const modelsError = useAppStore(s => s.modelsError);
   const [showKey, setShowKey] = useState(false);
   const [showEmbKey, setShowEmbKey] = useState(false);
+  const [showCorsHint, setShowCorsHint] = useState(false);
+
+  const urlValidationError = settings.provider === 'local'
+    ? validateLocalServerUrl(settings.localServerUrl)
+    : null;
+  const showOllamaHint = settings.provider === 'local' && isOllamaUrl(settings.localServerUrl);
+
+  useEffect(() => {
+    if (!modelsError) {
+      setShowCorsHint(false);
+    }
+  }, [modelsError]);
 
   if (!open) return null;
 
@@ -95,7 +130,13 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                 <div className="text-[10px] text-ink-500 dark:text-ink-400 font-normal">cloud · needs key</div>
              </button>
               <button
-                onClick={() => updateSettings({ provider: 'local' })}
+                onClick={() => {
+                  const switching = !isLocal;
+                  updateSettings({ provider: 'local' });
+                  if (switching && settings.localServerUrl.trim() && !urlValidationError && localCatalog.length === 0) {
+                    void refreshModels();
+                  }
+                }}
                 className={`px-3 py-2 rounded-lg border text-sm font-medium ${
                   isLocal
                     ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30'
@@ -105,7 +146,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
               >
                 Local server
                 <div className="text-[10px] text-ink-500 dark:text-ink-400 font-normal">Ollama / LM Studio / vLLM</div>
-             </button>
+            </button>
            </div>
          </div>
 
@@ -139,35 +180,59 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
                   Local server URL
-               </label>
+              </label>
                 <input
                   type="text"
                   value={settings.localServerUrl}
                   onChange={e => updateSettings({ localServerUrl: e.target.value })}
                   placeholder="http://localhost:11434/v1"
-                  className="w-full px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none font-mono"
+                  className={`w-full px-3 py-2 border rounded-lg bg-white dark:bg-ink-800 text-sm focus:ring-2 dark:focus:ring-brand-900 outline-none font-mono ${
+                    urlValidationError
+                      ? 'border-rose-400 dark:border-rose-600 focus:border-rose-500 focus:ring-rose-200'
+                      : 'border-ink-200 dark:border-ink-700 focus:border-brand-500 focus:ring-brand-200'
+                  }`}
                 />
-                <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5">
-                  Ollama default is <span className="font-mono">http://localhost:11434/v1</span>.
-                  LM Studio: <span className="font-mono">http://localhost:1234/v1</span>.
-                  vLLM: <span className="font-mono">http://localhost:8000/v1</span>.
-               </p>
-             </div>
+                {urlValidationError ? (
+                  <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-1.5">
+                    {urlValidationError}
+                 </p>
+                ) : (
+                  <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5">
+                    Ollama default is <span className="font-mono">http://localhost:11434/v1</span>.
+                    LM Studio: <span className="font-mono">http://localhost:1234/v1</span>.
+                    vLLM: <span className="font-mono">http://localhost:8000/v1</span>.
+                 </p>
+                )}
+                {showOllamaHint && !modelsError && (
+                  <button
+                    onClick={() => setShowCorsHint(s => !s)}
+                    className="mt-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:underline"
+                    type="button"
+                  >
+                    Ollama detected — need CORS help?
+                 </button>
+                )}
+                {showOllamaHint && showCorsHint && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-2 py-1.5 mt-1.5">
+                    {OLLAMA_CORS_HINT}
+                 </p>
+                )}
+            </div>
 
               <div className="rounded-lg border border-ink-200 dark:border-ink-700 p-3 space-y-3 bg-ink-50/50 dark:bg-ink-800/30">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400">
                       Local catalog
-                   </div>
+                  </div>
                     <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-0.5">
                       Fetched from <span className="font-mono">{settings.localServerUrl || '(unset)'}/models</span>.
                       Pick a model per task below.
-                   </p>
-                 </div>
+                  </p>
+                </div>
                   <button
                     onClick={refreshModels}
-                    disabled={!settings.localServerUrl.trim() || modelsLoading}
+                    disabled={!!urlValidationError || modelsLoading}
                     className="px-2 py-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                     type="button"
                     title="Fetch /models from the local server"
@@ -186,21 +251,33 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                       />
                    </svg>
                     {modelsLoading ? 'Loading…' : 'Discover'}
-                 </button>
-               </div>
+                </button>
+              </div>
 
                 {modelsError && (
-                  <div className="text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 rounded px-2 py-1.5">
-                    {modelsError}
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 rounded px-2 py-1.5">
+                      {modelsError}
+                   </div>
+                    {showOllamaHint && (
+                      <details className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-2 py-1.5">
+                        <summary className="cursor-pointer font-semibold">
+                          Ollama detected — likely CORS issue
+                       </summary>
+                        <p className="mt-1.5 whitespace-pre-line">{OLLAMA_CORS_HINT}</p>
+                     </details>
+                    )}
                  </div>
                 )}
 
                 {localCatalog.length === 0 && !modelsLoading && !modelsError && (
                   <div className="text-[11px] text-ink-500 dark:text-ink-400 italic px-1">
-                    Set a server URL, then click Discover to load available models.
+                    {urlValidationError
+                      ? 'Fix the URL above, then click Discover.'
+                      : 'Click Discover to load available models.'}
                  </div>
                 )}
-             </div>
+            </div>
 
               <div className="space-y-3">
                 {tasks.map(t => (

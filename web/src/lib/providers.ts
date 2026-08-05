@@ -24,6 +24,19 @@ export const LOCAL_DEFAULT_BASE_URL = 'http://localhost:11434/v1';
 export const LOCAL_PROVIDER_HINT =
   'Any OpenAI-compatible endpoint — Ollama, LM Studio, vLLM, llama.cpp server.';
 
+export const OLLAMA_CORS_HINT =
+  'If using Ollama, browser CORS blocks requests unless OLLAMA_ORIGINS is set. ' +
+  'Run: OLLAMA_ORIGINS="*" ollama serve  (or add your deployed origin to OLLAMA_ORIGINS).';
+
+export function isOllamaUrl(url: string): boolean {
+  try {
+    const u = new URL(url.trim());
+    return u.port === '11434' || u.hostname.endsWith('.ollama') || u.pathname.includes('ollama');
+  } catch {
+    return false;
+  }
+}
+
 import type { Settings } from './types';
 
 export interface ProviderEndpoint {
