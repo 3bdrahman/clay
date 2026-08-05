@@ -9,7 +9,8 @@ export interface SampleLoadResult {
 
 // Get the base path for correct asset loading on GitHub Pages
 const getBasePath = (): string => {
-  return import.meta.env.BASE_URL || '/';
+  const base = import.meta.env.BASE_URL || '/';
+  return base.endsWith('/') ? base : base + '/';
 };
 
 export async function loadSampleDatasets(): Promise<SampleLoadResult> {
