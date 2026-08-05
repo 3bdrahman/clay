@@ -7,12 +7,18 @@ export interface SampleLoadResult {
   rawCsv: Record<string, string>;
 }
 
+// Get the base path for correct asset loading on GitHub Pages
+const getBasePath = (): string => {
+  return import.meta.env.BASE_URL || '/';
+};
+
 export async function loadSampleDatasets(): Promise<SampleLoadResult> {
   const tables = new Map<string, unknown>();
   const metadata: DatasetMeta = {};
   const rawCsv: Record<string, string> = {};
 
-  const indexResp = await fetch('/data/datasets/index.json', { cache: 'no-store' });
+  const basePath = getBasePath();
+  const indexResp = await fetch(`${basePath}data/datasets/index.json`, { cache: 'no-store' });
   let names: string[] = [];
   if (indexResp.ok) {
     const idx = (await indexResp.json()) as { files?: string[] };
@@ -25,7 +31,7 @@ export async function loadSampleDatasets(): Promise<SampleLoadResult> {
     names.map(async fileName => {
       const name = fileName.replace(/\.csv$/i, '');
       try {
-        const resp = await fetch(`/data/datasets/${fileName}`, { cache: 'no-store' });
+        const resp = await fetch(`${basePath}data/datasets/${fileName}`, { cache: 'no-store' });
         if (!resp.ok) return;
         const text = await resp.text();
         const table = aq.fromCSV(text);
