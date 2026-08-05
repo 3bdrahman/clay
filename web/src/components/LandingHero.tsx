@@ -49,7 +49,15 @@ const EXAMPLE_QUERIES = [
   { category: 'Web', queries: ['Latest AI trends for business', 'Best practices for RAG', 'Compare cloud ML platforms'] },
 ];
 
-export function LandingHero({ onGetStarted, onLoadSample }: { onGetStarted: () => void; onLoadSample: () => void }) {
+export function LandingHero({
+  onGetStarted,
+  onLoadSample,
+  onExampleSelect,
+}: {
+  onGetStarted: () => void;
+  onLoadSample: () => void;
+  onExampleSelect?: (q: string) => void;
+}) {
   const [showMore, setShowMore] = useState(false);
   const settings = useAppStore(s => s.settings);
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
@@ -139,10 +147,11 @@ export function LandingHero({ onGetStarted, onLoadSample }: { onGetStarted: () =
                     {group.queries.map((q) => (
                       <button
                         key={q}
+                        onClick={() => onExampleSelect?.(q)}
                         className="w-full text-left px-3 py-2 text-sm text-ink-700 dark:text-ink-200 bg-ink-50 dark:bg-ink-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/30 hover:border-brand-300 border transition-colors"
                       >
                         {q}
-                      </button>
+                     </button>
                     ))}
                   </div>
                 </div>

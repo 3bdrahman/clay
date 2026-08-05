@@ -186,10 +186,11 @@ const showExamples = messages.length === 0 && !isRunning;
         aria-label="Chat messages"
       >
         <div className="max-w-4xl mx-auto space-y-5">
-          {isDemoMode ? (
+          {isDemoMode && messages.length === 0 ? (
             <LandingHero
               onGetStarted={onOpenSettings}
               onLoadSample={loadSampleData}
+              onExampleSelect={handleSubmit}
             />
           ) : showExamples ? (
             <div className="pt-8">
