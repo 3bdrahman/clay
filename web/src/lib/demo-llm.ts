@@ -60,80 +60,91 @@ function matchDemoResponse(input: string): string {
   return DEMO_ANSWERS.default;
 }
 
-export function createDemoLLMClient(): LLMClient {
-  return {
-    async invoke(req: LLMRequest): Promise<LLMResponse> {
-      // Simulate network delay
-      await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
-      
-      const userContent = req.messages.find(m => m.role === 'user')?.content || '';
-      const systemPrompt = req.system || '';
-      const matched = matchDemoResponse(userContent);
-      
-      // Special handling for different task types
-      if (req.jsonMode) {
-        // Try to return valid JSON
-        try {
-          JSON.parse(matched);
-          return { content: matched, usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 }, model: 'demo-model' };
-        } catch {
-          // Return appropriate JSON based on system prompt
-          if (systemPrompt.includes('router') || systemPrompt.includes('Router')) {
+function buildDemoClient(): LLMClient {
+  async function invoke(req: LLMRequest): Promise<LLMResponse> {
+    // Simulate network delay
+    await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
+    
+    const userContent = req.messages.find(m => m.role === 'user')?.content || '';
+    const systemPrompt = req.system || '';
+    const matched = matchDemoResponse(userContent);
+    
+    // JSON mode: used for routing, grading, evaluation, code generation
+    if (req.jsonMode) {
+      // Try to return valid JSON directly
+      try {
+        JSON.parse(matched);
+        return { content: matched, usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 }, model: 'demo-model' };
+      } catch {
+        // Return appropriate JSON based on system prompt
+        if (systemPrompt.includes('router') || systemPrompt.includes('Router')) {
+          // Route based on question content
+          if (userContent.includes('salary') || userContent.includes('average') || userContent.includes('budget') || userContent.includes('count') || userContent.includes('project') || userContent.includes('status') || userContent.includes('feedback') || userContent.includes('rating')) {
+            return { content: '{"datasource":"python"}', usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 }, model: 'demo-model' };
+          }
+          if (userContent.includes('document') || userContent.includes('summarize') || userContent.includes('theme') || userContent.includes('action item')) {
             return { content: '{"datasource":"vectorstore"}', usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 }, model: 'demo-model' };
           }
-          if (systemPrompt.includes('relevance') || systemPrompt.includes('grade')) {
-            return { content: '{"binary_score":"yes"}', usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 }, model: 'demo-model' };
-          }
-          if (systemPrompt.includes('hallucination')) {
-            return { content: '{"binary_score":"yes","explanation":"The answer is grounded in the provided facts."}', usage: { promptTokens: 100, completionTokens: 30, totalTokens: 130 }, model: 'demo-model' };
-          }
-          if (systemPrompt.includes('grade whether')) {
-            return { content: '{"binary_score":"yes","explanation":"The answer directly addresses the question."}', usage: { promptTokens: 100, completionTokens: 30, totalTokens: 130 }, model: 'demo-model' };
-          }
-          if (systemPrompt.includes('data analyst') || systemPrompt.includes('Arquero')) {
-            if (userContent.includes('salary') || userContent.includes('average')) {
-              const code = "result = employees.groupby('department').rollup({ avg_salary: d => op.mean(d.salary_usd) })";
-              return { content: JSON.stringify({ code, explanation: "Average salary by department" }), usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 }, model: 'demo-model' };
-            }
-            if (userContent.includes('project') && userContent.includes('status')) {
-              const code = "result = projects.groupby('status').count()";
-              return { content: JSON.stringify({ code, explanation: "Project count by status" }), usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 }, model: 'demo-model' };
-            }
-            if (userContent.includes('budget')) {
-              const code = "result = projects.groupby('status').rollup({ total_budget: d => op.sum(d.budget_usd) })";
-              return { content: JSON.stringify({ code, explanation: "Total budget by project status" }), usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 }, model: 'demo-model' };
-            }
-            if (userContent.includes('feedback') || userContent.includes('rating')) {
-              const code = "result = feedback.groupby('project_id').rollup({ avg_rating: d => op.mean(d.rating) })";
-              return { content: JSON.stringify({ code, explanation: "Average rating per project" }), usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 }, model: 'demo-model' };
-            }
-            if (userContent.includes('count') || userContent.includes('how many')) {
-              const code = "result = employees.count()";
-              return { content: JSON.stringify({ code, explanation: "Total employee count" }), usage: { promptTokens: 200, completionTokens: 50, totalTokens: 250 }, model: 'demo-model' };
-            }
-          }
+          return { content: '{"datasource":"websearch"}', usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 }, model: 'demo-model' };
+        }
+        if (systemPrompt.includes('relevance') || systemPrompt.includes('grade')) {
           return { content: '{"binary_score":"yes"}', usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 }, model: 'demo-model' };
         }
+        if (systemPrompt.includes('hallucination')) {
+          return { content: '{"binary_score":"yes","explanation":"The answer is grounded in the provided facts."}', usage: { promptTokens: 100, completionTokens: 30, totalTokens: 130 }, model: 'demo-model' };
+        }
+        if (systemPrompt.includes('grade whether')) {
+          return { content: '{"binary_score":"yes","explanation":"The answer directly addresses the question."}', usage: { promptTokens: 100, completionTokens: 30, totalTokens: 130 }, model: 'demo-model' };
+        }
+        if (systemPrompt.includes('data analyst') || systemPrompt.includes('Arquero')) {
+          if (userContent.includes('salary') || userContent.includes('average')) {
+            const code = "result = employees.groupby('department').rollup({ avg_salary: d => op.mean(d.salary_usd) })";
+            return { content: JSON.stringify({ code, explanation: "Average salary by department" }), usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 }, model: 'demo-model' };
+          }
+          if (userContent.includes('project') && userContent.includes('status')) {
+            const code = "result = projects.groupby('status').count()";
+            return { content: JSON.stringify({ code, explanation: "Project count by status" }), usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 }, model: 'demo-model' };
+          }
+          if (userContent.includes('budget')) {
+            const code = "result = projects.groupby('status').rollup({ total_budget: d => op.sum(d.budget_usd) })";
+            return { content: JSON.stringify({ code, explanation: "Total budget by project status" }), usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 }, model: 'demo-model' };
+          }
+          if (userContent.includes('feedback') || userContent.includes('rating')) {
+            const code = "result = feedback.groupby('project_id').rollup({ avg_rating: d => op.mean(d.rating) })";
+            return { content: JSON.stringify({ code, explanation: "Average rating per project" }), usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 }, model: 'demo-model' };
+          }
+          if (userContent.includes('count') || userContent.includes('how many')) {
+            const code = "result = employees.count()";
+            return { content: JSON.stringify({ code, explanation: "Total employee count" }), usage: { promptTokens: 200, completionTokens: 50, totalTokens: 250 }, model: 'demo-model' };
+          }
+        }
+        return { content: '{"binary_score":"yes"}', usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 }, model: 'demo-model' };
       }
-      
-      // Streaming response - return full content
-      return { content: matched, usage: { promptTokens: 200, completionTokens: 100, totalTokens: 300 }, model: 'demo-model' };
-    },
+    }
     
-    async stream(req: LLMRequest, onToken: (token: string) => void, signal?: AbortSignal): Promise<LLMResponse> {
-      const response = await this.invoke(req);
-      const content = response.content || '';
-      
-      // Simulate streaming by sending chunks
-      const words = content.split(' ');
-      for (let i = 0; i < words.length; i++) {
-        if (signal?.aborted) break;
-        const token = words[i] + (i < words.length - 1 ? ' ' : '');
-        onToken(token);
-        await new Promise(r => setTimeout(r, 10 + Math.random() * 30));
-      }
-      
-      return response;
-    },
-  };
+    // Streaming mode (jsonMode=false): used for final answer generation
+    return { content: matched, usage: { promptTokens: 200, completionTokens: 100, totalTokens: 300 }, model: 'demo-model' };
+  }
+  
+  async function stream(req: LLMRequest, onToken: (token: string) => void, signal?: AbortSignal): Promise<LLMResponse> {
+    const response = await invoke(req);
+    const content = response.content || '';
+    
+    // Simulate streaming by sending chunks
+    const words = content.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      if (signal?.aborted) break;
+      const token = words[i] + (i < words.length - 1 ? ' ' : '');
+      onToken(token);
+      await new Promise(r => setTimeout(r, 10 + Math.random() * 30));
+    }
+    
+    return response;
+  }
+
+  return { invoke, stream };
+}
+
+export function createDemoLLMClient(): LLMClient {
+  return buildDemoClient();
 }

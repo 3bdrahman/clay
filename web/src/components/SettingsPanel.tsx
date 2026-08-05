@@ -480,16 +480,16 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
            </button>
          </div>
 
-          <div className="pt-4 border-t border-ink-200 dark:border-ink-700 text-xs text-ink-500 dark:text-ink-400 space-y-1.5">
+<div className="pt-4 border-t border-ink-200 dark:border-ink-700 text-xs text-ink-500 dark:text-ink-400 space-y-1.5">
             <p className="font-semibold">Clay — AI Internal Assistant</p>
             <p>
-              100% client-side. No backend. Your API key never leaves your browser except to your configured
+              Runs entirely in your browser. No backend. Your API key never leaves your browser except to your configured
               provider.
-           </p>
+            </p>
             <p className="text-[10px] opacity-70">
               Built for static deployment on GitHub Pages or any static host.
-           </p>
-         </div>
+            </p>
+          </div>
        </div>
      </div>
    </div>

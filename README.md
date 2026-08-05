@@ -7,8 +7,8 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-6.0-646CFF.svg)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-06B6D4.svg)](https://tailwindcss.com/)
-[![Tests](https://img.shields.io/badge/Tests-130_passing-brightgreen.svg)](https://github.com/yourusername/clay/actions)
-[![Deploy](https://img.shields.io/badge/Deploy-GitHub_Pages-2ea44f.svg)](https://github.com/yourusername/clay/actions)
+[![Tests](https://img.shields.io/badge/Tests-130_passing-brightgreen.svg)](https://github.com/usef/clay/actions)
+[![Deploy](https://img.shields.io/badge/Deploy-GitHub_Pages-2ea44f.svg)](https://github.com/usef/clay/actions)
 
 Clay combines three retrieval paths behind a single chat surface:
 
@@ -24,7 +24,7 @@ All processing runs in the browser. Two outbound paths are supported for LLM inf
 
 ## Live Demo
 
-**Try it now:** [https://yourusername.github.io/clay](https://yourusername.github.io/clay)
+**Try it now:** [https://3bdrahman.github.io/clay](https://3bdrahman.github.io/clay)
 
 The demo runs in **demo mode** — no API key required! Click "Load Sample Data" to try data analysis queries, or add your own files and an API key for full AI capabilities.
 

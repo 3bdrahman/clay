@@ -28,7 +28,7 @@ export function ChatPanel({ onOpenSettings }: { onOpenSettings: () => void }) {
   const updateMessage = useAppStore(s => s.updateMessage);
   const isRunning = useAppStore(s => s.isRunning);
   const setRunning = useAppStore(s => s.setRunning);
-  const { services, loading, error, needsConfiguration } = useClay();
+  const { services, loading, error, needsConfiguration, loadSampleData } = useClay();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [streamingContent, setStreamingContent] = useState('');
@@ -189,10 +189,7 @@ const showExamples = messages.length === 0 && !isRunning;
           {isDemoMode ? (
             <LandingHero
               onGetStarted={onOpenSettings}
-              onLoadSample={() => {
-                const { loadSampleData } = useClay();
-                loadSampleData();
-              }}
+              onLoadSample={loadSampleData}
             />
           ) : showExamples ? (
             <div className="pt-8">

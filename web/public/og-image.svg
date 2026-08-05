@@ -42,11 +42,11 @@
     <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">embedding:  nvidia/nv-embedqa-e5-v5</text>
 </g>
 
-  <text x="620" y="340" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">100% client-side</text>
+  <text x="620" y="340" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Runs in your browser</text>
   <text x="620" y="372" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">One NVIDIA NIM key</text>
   <text x="620" y="404" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Drop your own data</text>
   <text x="620" y="436" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Live workflow visualization</text>
   <text x="620" y="468" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Self-correcting with retries</text>
 
-  <text x="80" y="600" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="500" fill="#64748b">github.com/YOUR-USERNAME/clay</text>
+  <text x="80" y="600" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="500" fill="#64748b">github.com/3bdrahman/clay</text>
 </svg>

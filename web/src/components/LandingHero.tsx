@@ -29,10 +29,10 @@ const FEATURES = [
     description: 'LLM-as-judge evaluates every answer for hallucinations and relevance. Automatically retries with different sources if quality is low.',
     color: 'text-purple-600 bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400',
   },
-  {
+{
     icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',
-    title: '100% Client-Side',
-    description: 'No backend, no server. Your data and API key never leave your browser. Deploy anywhere as static files.',
+    title: 'Runs in Your Browser',
+    description: 'No backend server. Your data stays local; only queries go to your LLM provider. Deploy anywhere as static files.',
     color: 'text-rose-600 bg-rose-50 dark:bg-rose-900/30 dark:text-rose-400',
   },
   {
@@ -136,10 +136,10 @@ export function LandingHero({ onGetStarted, onLoadSample }: { onGetStarted: () =
                 <div key={group.category} className="p-4 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800">
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-3">{group.category}</h3>
                   <div className="space-y-2">
-                    {group.queries.map((q, i) => (
+                    {group.queries.map((q) => (
                       <button
                         key={q}
-                        className="w-full text-left px-3 py-2 text-sm text-ink-700 dark:text-ink-200 bg-ink-50 dark:bg-ink-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/30 hover:border-brand-300 border transition-colors text-left"
+                        className="w-full text-left px-3 py-2 text-sm text-ink-700 dark:text-ink-200 bg-ink-50 dark:bg-ink-700 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/30 hover:border-brand-300 border transition-colors"
                       >
                         {q}
                       </button>
@@ -179,7 +179,7 @@ export function LandingHero({ onGetStarted, onLoadSample }: { onGetStarted: () =
 
         {/* Keyboard Shortcuts */}
         <details className="group mb-10">
-          <summary className="cursor-pointer flex items-center justify-center gap-2 text-sm text-ink-500 dark:text-ink-400 hover:text-ink-700 dark:hover:text-ink-200 p-3 rounded-lg hover:bg-ink-50 dark:hover:bg-ink-800">
+          <summary className="cursor-pointer flex items-center justify-center gap-2 text-sm text-ink-500 dark:text-ink-400 hover:text-ink-700 dark:hover:text-ink-200 p-3 rounded-lg hover:bg-ink-50 dark:hover:bg-ink-800" onClick={() => setShowMore(!showMore)}>
             <svg className={`w-4 h-4 transition-transform ${showMore ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
             </svg>

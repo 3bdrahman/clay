@@ -4,6 +4,15 @@ on:
   push:
     branches: [master, main]
   workflow_dispatch:
+    inputs:
+      base-path:
+        description: 'Base path for deployment (use "/" for user/org pages, "/repo-name" for project pages)'
+        required: false
+        default: '/clay'
+        type: choice
+        options:
+          - '/'
+          - '/clay'
 
 permissions:
   contents: read
@@ -34,7 +43,7 @@ jobs:
       - name: Build
         working-directory: web
         env:
-          BASE_PATH: '/clay'  # Change to your repo name, or '/' for user/org pages
+          BASE_PATH: ${{ github.event.inputs.base-path || '/clay' }}
         run: |
           npm run build
           # Add a 404.html for SPA routing on GitHub Pages

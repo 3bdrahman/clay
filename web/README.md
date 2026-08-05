@@ -1,6 +1,6 @@
 # Clay — AI Internal Assistant
 
-> A 100% client-side Retrieval-Augmented Generation assistant. Drop your own CSVs, PDFs, or text files and query them with natural language.
+> A browser-based Retrieval-Augmented Generation assistant. Drop your own CSVs, PDFs, or text files and query them with natural language.
 
 Clay combines three retrieval paths behind a single chat surface:
 - **Vector search** over uploaded documents (PDFs, markdown, text)

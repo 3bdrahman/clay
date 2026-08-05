@@ -1,3 +1,5 @@
 .env
 faiss_index
-.png
+.omo/
+.playwright-mcp/
+*.local
