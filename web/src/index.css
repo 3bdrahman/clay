@@ -1,0 +1,119 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #f7f8fa;
+  color: #1f242e;
+}
+
+.dark body {
+  background: #12161e;
+  color: #eef0f3;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #dadee5;
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #414858;
+}
+
+/* Markdown content styling */
+.markdown-content {
+  @apply text-sm leading-relaxed;
+}
+
+.markdown-content p {
+  @apply my-2;
+}
+
+.markdown-content h1, .markdown-content h2, .markdown-content h3 {
+  @apply font-semibold mt-4 mb-2;
+}
+
+.markdown-content h1 { @apply text-xl; }
+.markdown-content h2 { @apply text-lg; }
+.markdown-content h3 { @apply text-base; }
+
+.markdown-content ul, .markdown-content ol {
+  @apply my-2 pl-6;
+}
+
+.markdown-content ul { @apply list-disc; }
+.markdown-content ol { @apply list-decimal; }
+
+.markdown-content code:not(pre code) {
+  @apply bg-ink-100 dark:bg-ink-800 px-1.5 py-0.5 rounded text-xs font-mono;
+}
+
+.markdown-content pre {
+  @apply bg-ink-100 dark:bg-ink-800 rounded-md p-3 my-2 overflow-x-auto text-xs;
+}
+
+.markdown-content pre code {
+  @apply font-mono;
+}
+
+.markdown-content table {
+  @apply border-collapse my-2 text-xs;
+}
+
+.markdown-content th, .markdown-content td {
+  @apply border border-ink-200 dark:border-ink-700 px-2 py-1;
+}
+
+.markdown-content th {
+  @apply bg-ink-50 dark:bg-ink-800 font-semibold;
+}
+
+.markdown-content blockquote {
+  @apply border-l-4 border-ink-200 dark:border-ink-700 pl-3 my-2 text-ink-600 dark:text-ink-400;
+}
+
+.markdown-content a {
+  @apply text-brand-600 dark:text-brand-400 hover:underline;
+}
+
+/* Shimmer effect */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s linear infinite;
+}

@@ -1,0 +1,44 @@
+{
+  "name": "clay-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Clay — AI Internal Assistant (web app)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc -b --noEmit",
+    "lint": "oxlint src --deny-warnings",
+    "lint:fix": "oxlint src --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "eval": "vitest run src/eval/eval.test.ts",
+    "verify": "npm run type-check && npm run lint && npm run test && npm run build"
+  },
+  "dependencies": {
+    "arquero": "^8.0.3",
+    "autoprefixer": "^10.5.4",
+    "dompurify": "^3.4.12",
+    "marked": "^18.0.7",
+    "pdfjs-dist": "^5.7.284",
+    "postcss": "^8.5.25",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "recharts": "^3.10.1",
+    "tailwindcss": "^3.4.19",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@types/dompurify": "^3.0.5",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "happy-dom": "^15.11.7",
+    "oxlint": "^1.75.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0",
+    "vitest": "^2.1.9"
+  }
+}

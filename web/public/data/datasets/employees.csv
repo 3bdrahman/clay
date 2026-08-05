@@ -1,0 +1,11 @@
+id,name,department,role,salary_usd,start_date,status
+1,Alice Chen,Engineering,Senior Engineer,145000,2021-03-15,Active
+2,Bob Smith,Engineering,Junior Engineer,95000,2023-06-01,Active
+3,Carol Davis,Sales,Sales Manager,120000,2020-01-10,Active
+4,David Wilson,Sales,Account Executive,85000,2022-09-20,Active
+5,Eve Brown,Marketing,Marketing Lead,110000,2021-11-05,Active
+6,Frank Garcia,Engineering,DevOps Engineer,135000,2020-07-22,Active
+7,Grace Lee,Marketing,Content Writer,75000,2023-02-14,Active
+8,Henry Martinez,Operations,Operations Manager,105000,2019-04-30,Active
+9,Iris Patel,Engineering,Engineering Manager,165000,2018-08-12,Active
+10,Jack Thompson,Sales,Sales Rep,70000,2024-01-08,Active
