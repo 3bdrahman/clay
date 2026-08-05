@@ -2,6 +2,7 @@
 
 import type {
   Citation,
+  Document,
   Settings,
   SourceType,
   StepTrace,
@@ -123,6 +124,35 @@ export function createWorkflowOrchestrator(
     state.citations = citations;
   }
 
+  type GradeOutcome = 'relevant' | 'irrelevant' | 'keep-on-error';
+
+  async function gradeDocRelevance(doc: Document): Promise<GradeOutcome> {
+    try {
+      const resp = await deps.llm.invoke({
+        system: DOC_GRADER_INSTRUCTIONS,
+        messages: [
+          {
+            role: 'user',
+            content: DOC_GRADER_PROMPT
+              .replace('{document}', doc.content.slice(0, 1500))
+              .replace('{question}', question),
+          },
+        ],
+        jsonMode: true,
+        temperature: 0,
+        model: deps.pickedModels.eval,
+      });
+      try {
+        const parsed = JSON.parse(resp.content || '{}');
+        return (parsed.binary_score || '').toLowerCase() === 'yes' ? 'relevant' : 'irrelevant';
+      } catch {
+        return 'irrelevant';
+      }
+    } catch {
+      return 'keep-on-error';
+    }
+  }
+
   async function runVectorstorePath(signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) return;
     beginStep('retrieve', NODE_LABELS.retrieve);
@@ -134,24 +164,8 @@ export function createWorkflowOrchestrator(
     const filtered: typeof docs = [];
     for (const doc of docs) {
       if (signal?.aborted) return;
-      try {
-        const resp = await deps.llm.invoke({
-          system: DOC_GRADER_INSTRUCTIONS,
-          messages: [
-            {
-              role: 'user',
-              content: DOC_GRADER_PROMPT
-                .replace('{document}', doc.content.slice(0, 1500))
-                .replace('{question}', question),
-            },
-          ],
-          jsonMode: true,
-          temperature: 0,
-          model: deps.pickedModels.eval,
-        });
-        const parsed = JSON.parse(resp.content || '{}');
-        if ((parsed.binary_score || '').toLowerCase() === 'yes') filtered.push(doc);
-      } catch {
+      const outcome = await gradeDocRelevance(doc);
+      if (outcome === 'relevant' || outcome === 'keep-on-error') {
         filtered.push(doc);
       }
     }
@@ -175,16 +189,33 @@ export function createWorkflowOrchestrator(
     }
   }
 
-  async function runWebSearchStep(): Promise<void> {
+  async function runWebSearchStep(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return;
     beginStep('web_search', NODE_LABELS.web_search);
     const results = await deps.webSearch.search(question, 4);
     state.webResults = results;
     endStep('web_search', { detail: `${results.length} results` });
   }
 
-  async function runWebSearchPath(signal?: AbortSignal): Promise<void> {
+  function clearSourceData(source: SourceType): void {
+    if (source === 'vectorstore') state.documents = [];
+    else if (source === 'python') state.dataAnalysis = undefined;
+    else if (source === 'websearch') state.webResults = [];
+  }
+
+  async function runPath(source: SourceType, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) return;
-    await runWebSearchStep();
+    switch (source) {
+      case 'vectorstore':
+        await runVectorstorePath(signal);
+        break;
+      case 'python':
+        await runPythonPath(signal);
+        break;
+      case 'websearch':
+        await runWebSearchStep(signal);
+        break;
+    }
   }
 
   async function generate(): Promise<void> {
@@ -313,39 +344,26 @@ export function createWorkflowOrchestrator(
       state.routing = source;
       endStep('route', { detail: `-> ${source}` });
 
-      switch (source) {
-        case 'vectorstore':
-          await runVectorstorePath(signal);
-          break;
-        case 'python':
-          await runPythonPath(signal);
-          break;
-        case 'websearch':
-          await runWebSearchPath(signal);
-          break;
-      }
+      await runPath(source, signal);
 
       let useful = false;
       const maxRetries = deps.settings.maxRetries ?? 3;
-      let attempt = 0;
-      while (!useful && attempt < maxRetries) {
+      while (!useful && state.retryCount < maxRetries) {
         if (signal?.aborted) {
           state.error = 'Aborted';
           break;
         }
         await generate();
         useful = await evaluate();
-        if (!useful) {
+        if (!useful && state.retryCount < maxRetries) {
           state.retryCount++;
           beginStep('decide', 'Re-routing');
-          const fallback: SourceType = state.routing === 'vectorstore' ? 'websearch' : 'vectorstore';
-
+          const previousSource = state.routing;
+          const fallback: SourceType = previousSource === 'vectorstore' ? 'websearch' : 'vectorstore';
           state.routing = fallback;
           endStep('decide', { detail: `-> ${fallback}` });
-          if (fallback === 'websearch') {
-            await runWebSearchStep();
-          }
-          attempt++;
+          clearSourceData(previousSource);
+          await runPath(fallback, signal);
         }
       }
 

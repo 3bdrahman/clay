@@ -170,15 +170,16 @@ describe('createWorkflowOrchestrator', () => {
     (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       content: JSON.stringify({ datasource: 'vectorstore' }),
     });
-    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) }) // grader
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'no', explanation: 'Hallucinated' }) }); // eval 1 hallucination
     (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       content: 'Bad answer',
       usage: undefined,
       model: 'answer-model',
-    });
-    // Hallucination check fails
-    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      content: JSON.stringify({ binary_score: 'no', explanation: 'Hallucinated' }),
     });
     // Fallback to websearch — returns results so generate() uses them
     (mockWebSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -198,6 +199,142 @@ describe('createWorkflowOrchestrator', () => {
 
     expect(state.retryCount).toBeGreaterThanOrEqual(1);
     expect(state.answer).toBe('Good answer');
+  });
+
+  it('clears stale vectorstore documents when falling back to websearch', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore' }),
+    });
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) }) // grader
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'no' }) }); // eval 1 hallucination
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Bad answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    // Websearch fallback — returns results so generate() uses them
+    (mockWebSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { type: 'web_search', title: 'Web', content: 'Web content', url: 'http://x.com' },
+    ]);
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Web-derived answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    // Eval 2 passes
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) });
+
+    const state = await orchestrator.run();
+
+    expect(state.routing).toBe('websearch');
+    expect(state.documents).toHaveLength(0);
+    expect(state.webResults.length).toBeGreaterThan(0);
+    expect(state.answer).toBe('Web-derived answer');
+  });
+
+  it('clears stale data analysis when falling back from python to vectorstore', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'python' }),
+    });
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockResolvedValue({
+      type: 'data_analysis',
+      question: 'test',
+      code: 'result = 42',
+      explanation: 'A bad analysis result',
+      resultType: 'scalar',
+      result: 42,
+      attempts: 1,
+      durationMs: 100,
+      timestamp: Date.now(),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Bad data answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    // Eval 1: hallucination fails on the python result
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ binary_score: 'no' }),
+    });
+    // Fallback to vectorstore — returns new docs
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '2', content: 'fresh doc', source: 'fresh.pdf', score: 0.9 },
+    ]);
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) }) // grader
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) }) // eval 2 hallucination
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) }); // eval 2 answer-usefulness
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Fresh vectorstore answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+
+    const state = await orchestrator.run();
+
+    expect(state.routing).toBe('vectorstore');
+    expect(state.dataAnalysis).toBeUndefined();
+    expect(state.documents).toHaveLength(1);
+    expect(state.answer).toBe('Fresh vectorstore answer');
+  });
+
+  it('drops docs that get malformed grader JSON (parse error path)', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore' }),
+    });
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', content: 'doc A', source: 'a.pdf', score: 0.9 },
+      { id: '2', content: 'doc B', source: 'b.pdf', score: 0.8 },
+    ]);
+    // First grader call returns malformed JSON (parse error → drop doc A)
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: 'not-json-at-all' })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Answer from doc B only',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) });
+
+    const state = await orchestrator.run();
+
+    expect(state.documents).toHaveLength(1);
+    expect(state.documents[0].id).toBe('2');
+  });
+
+  it('keeps doc on grader invoke error (network-style fallback)', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore' }),
+    });
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+    // Grader call throws (network error) → keep doc
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) });
+
+    const state = await orchestrator.run();
+
+    expect(state.documents).toHaveLength(1);
+    expect(state.documents[0].id).toBe('1');
   });
 
   it('respects maxRetries limit', async () => {
