@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { useAppStore } from '../store';
 import { useConfirm } from '../hooks/useConfirm';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 interface Props {
   open: boolean;
@@ -21,6 +22,7 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [confirm, renderConfirmDialog] = useConfirm();
+  const { dialogRef, stopBackdrop } = useModalFocus(open);
 
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
@@ -107,8 +109,12 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
     <div className="fixed inset-0 z-50 flex" onClick={onClose}>
       <div className="absolute inset-0 bg-black/30 animate-fade-in" />
       <div
+        ref={dialogRef}
         className="relative ml-auto w-full max-w-lg bg-white dark:bg-ink-900 shadow-2xl overflow-y-auto animate-slide-up"
-        onClick={e => e.stopPropagation()}
+        onClick={stopBackdrop}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Data sandbox"
       >
         <div className="sticky top-0 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-700 px-6 py-4 flex items-center justify-between">
           <div>

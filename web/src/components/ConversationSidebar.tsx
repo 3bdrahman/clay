@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAppStore, type Conversation } from '../store';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 interface Props {
   open: boolean;
@@ -17,6 +18,8 @@ export function ConversationSidebar({ open, onClose }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const { dialogRef, stopBackdrop } = useModalFocus(open);
 
   function startEdit(c: Conversation) {
     setEditingId(c.id);
@@ -75,9 +78,14 @@ export function ConversationSidebar({ open, onClose }: Props) {
         onClick={onClose}
       />
       <aside
+        ref={dialogRef}
         className={`fixed left-0 top-0 bottom-0 w-64 bg-white dark:bg-ink-900 border-r border-ink-200 dark:border-ink-700 z-40 flex flex-col transition-transform duration-200 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Conversations"
+        onClick={stopBackdrop}
       >
         <div className="px-3 py-3 border-b border-ink-200 dark:border-ink-700">
           <button

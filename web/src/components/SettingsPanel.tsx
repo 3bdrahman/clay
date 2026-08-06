@@ -9,6 +9,7 @@ import {
 import { modelClass } from '../lib/models';
 import type { LocalModelPicks } from '../lib/types';
 import { useConfirm } from '../hooks/useConfirm';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 function validateLocalServerUrl(url: string): string | null {
   const trimmed = url.trim();
@@ -56,6 +57,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
   const [showEmbKey, setShowEmbKey] = useState(false);
   const [showCorsHint, setShowCorsHint] = useState(false);
   const [confirm, renderConfirmDialog] = useConfirm();
+  const { dialogRef, stopBackdrop } = useModalFocus(open);
 
   const handleResetAll = async () => {
     const ok = await confirm({
@@ -109,9 +111,13 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
   return (
     <div className="fixed inset-0 z-50 flex" onClick={onClose}>
       <div className="absolute inset-0 bg-black/30 animate-fade-in" />
-      <div
+       <div
+        ref={dialogRef}
         className="relative ml-auto w-full max-w-md bg-white dark:bg-ink-900 shadow-2xl overflow-y-auto animate-slide-up"
-        onClick={e => e.stopPropagation()}
+        onClick={stopBackdrop}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
       >
         <div className="sticky top-0 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-700 px-6 py-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Settings</h2>

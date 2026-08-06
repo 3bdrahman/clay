@@ -2,6 +2,11 @@ import { useAppStore } from '../store';
 import type { PickedModels } from '../lib/models';
 import { useConfirm } from '../hooks/useConfirm';
 
+function countActivateMessages(state: { conversations: { id: string; messages: unknown[] }[]; activeConversationId: string | null }): number {
+  const conv = state.conversations.find(c => c.id === state.activeConversationId);
+  return conv?.messages.length ?? 0;
+}
+
 interface Props {
   onOpenSettings: () => void;
   onOpenData: () => void;
@@ -12,10 +17,8 @@ interface Props {
 
 export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedModels, provider }: Props) {
   const settings = useAppStore(s => s.settings);
-  const messageCount = useAppStore(s => {
-    const conv = s.conversations.find(c => c.id === s.activeConversationId);
-    return conv?.messages.length ?? 0;
-  });
+  const updateSettings = useAppStore(s => s.updateSettings);
+  const messageCount = useAppStore(countActivateMessages);
   const clearMessages = useAppStore(s => s.clearMessages);
   const availableModels = useAppStore(s => s.availableModels);
   const modelsLoading = useAppStore(s => s.modelsLoading);
@@ -32,6 +35,17 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
     });
     if (ok) clearMessages();
   };
+
+  const cycleTheme = () => {
+    const order: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];
+    const next = order[(order.indexOf(settings.theme) + 1) % order.length];
+    updateSettings({ theme: next });
+  };
+
+  const themeLabel =
+    settings.theme === 'light' ? 'Light theme' :
+    settings.theme === 'dark' ? 'Dark theme' :
+    'System theme';
 
   const isLocal = provider === 'local';
   const hasKey = !isLocal && settings.apiKey.length > 0;
@@ -84,6 +98,7 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
           onClick={onToggleSidebar}
           className="px-2.5 py-1.5 text-xs text-ink-600 dark:text-ink-300 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition"
           title="Conversations"
+          aria-label="Toggle conversations sidebar"
           type="button"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -103,24 +118,47 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
            </svg>
          </button>
         )}
-        <a
-          href={providerDocsUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="px-2.5 py-1.5 text-xs text-ink-600 dark:text-ink-300 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition hidden sm:inline-flex items-center gap-1"
-          title={providerDocsLabel}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-         </svg>
-          {providerDocsLabel}
-       </a>
-        <button
-          onClick={onOpenData}
-          className="px-2.5 py-1.5 text-xs text-ink-700 dark:text-ink-200 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition flex items-center gap-1.5"
-          title="Data sandbox"
-          type="button"
-        >
+         <a
+           href={providerDocsUrl}
+           target="_blank"
+           rel="noreferrer"
+           className="px-2.5 py-1.5 text-xs text-ink-600 dark:text-ink-300 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition hidden sm:inline-flex items-center gap-1"
+           title={providerDocsLabel}
+           aria-label={`Open ${providerDocsLabel} in a new tab`}
+         >
+           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+           {providerDocsLabel}
+        </a>
+         <button
+           onClick={cycleTheme}
+           className="px-2.5 py-1.5 text-xs text-ink-600 dark:text-ink-300 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition"
+           title={themeLabel}
+           aria-label={`Switch theme (currently ${settings.theme})`}
+           type="button"
+         >
+           {settings.theme === 'light' ? (
+             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+               <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+             </svg>
+           ) : settings.theme === 'dark' ? (
+             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+               <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+             </svg>
+           ) : (
+             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+               <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+             </svg>
+           )}
+         </button>
+         <button
+           onClick={onOpenData}
+           className="px-2.5 py-1.5 text-xs text-ink-700 dark:text-ink-200 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition flex items-center gap-1.5"
+           title="Data sandbox"
+           aria-label="Open data sandbox"
+           type="button"
+         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2h-5l-2-2H6a2 2 0 00-2 2zM4 13h16" />
          </svg>
@@ -131,12 +169,13 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
            </span>
           )}
        </button>
-        <button
-          onClick={onOpenSettings}
-          className="px-2.5 py-1.5 text-xs text-ink-700 dark:text-ink-200 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition flex items-center gap-1.5"
-          title="Settings"
-          type="button"
-        >
+         <button
+           onClick={onOpenSettings}
+           className="px-2.5 py-1.5 text-xs text-ink-700 dark:text-ink-200 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition flex items-center gap-1.5"
+           title="Settings"
+           aria-label="Open settings"
+           type="button"
+         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
