@@ -8,6 +8,7 @@ import {
 } from '../lib/providers';
 import { modelClass } from '../lib/models';
 import type { LocalModelPicks } from '../lib/types';
+import { useConfirm } from '../hooks/useConfirm';
 
 function validateLocalServerUrl(url: string): string | null {
   const trimmed = url.trim();
@@ -54,6 +55,21 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
   const [showKey, setShowKey] = useState(false);
   const [showEmbKey, setShowEmbKey] = useState(false);
   const [showCorsHint, setShowCorsHint] = useState(false);
+  const [confirm, renderConfirmDialog] = useConfirm();
+
+  const handleResetAll = async () => {
+    const ok = await confirm({
+      title: 'Reset everything?',
+      message: 'Reset all settings, chat history, sandbox data, and vector store. This cannot be undone.',
+      confirmLabel: 'Reset everything',
+      destructive: true,
+    });
+    if (ok) {
+      clearSandboxData();
+      resetAll();
+      onClose();
+    }
+  };
 
   const urlValidationError = settings.provider === 'local'
     ? validateLocalServerUrl(settings.localServerUrl)
@@ -543,13 +559,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
 
           <div className="pt-4 border-t border-ink-200 dark:border-ink-700">
             <button
-              onClick={() => {
-                if (confirm('Reset all settings, chat history, sandbox data, and vector store?')) {
-                  clearSandboxData();
-                  resetAll();
-                  onClose();
-                }
-              }}
+              onClick={handleResetAll}
               className="text-sm text-rose-600 dark:text-rose-400 hover:underline"
               type="button"
             >
@@ -569,6 +579,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
           </div>
        </div>
      </div>
+     {renderConfirmDialog()}
    </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useAppStore } from '../store';
 import type { PickedModels } from '../lib/models';
+import { useConfirm } from '../hooks/useConfirm';
 
 interface Props {
   onOpenSettings: () => void;
@@ -20,6 +21,17 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
   const modelsLoading = useAppStore(s => s.modelsLoading);
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
+  const [confirm, renderConfirmDialog] = useConfirm();
+
+  const clearChat = async () => {
+    const ok = await confirm({
+      title: 'Clear chat history?',
+      message: 'All messages in the current conversation will be removed.',
+      confirmLabel: 'Clear chat',
+      destructive: true,
+    });
+    if (ok) clearMessages();
+  };
 
   const isLocal = provider === 'local';
   const hasKey = !isLocal && settings.apiKey.length > 0;
@@ -80,12 +92,11 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
         </button>
         {messageCount > 0 && (
           <button
-            onClick={() => {
-              if (confirm('Clear chat history?')) clearMessages();
-            }}
+            onClick={clearChat}
             className="px-2.5 py-1.5 text-xs text-ink-600 dark:text-ink-300 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition"
             title="Clear chat"
             type="button"
+            aria-label="Clear chat history"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -132,7 +143,8 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
         </svg>
           <span className="hidden sm:inline">Settings</span>
       </button>
-    </div>
-  </header>
+     </div>
+     {renderConfirmDialog()}
+   </header>
   );
 }

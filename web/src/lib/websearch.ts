@@ -19,6 +19,61 @@ export interface WebSearchClient {
   search(query: string, k?: number): Promise<WebResult[]>;
 }
 
+// Order matters: named entities (other than &) must be decoded first so
+// that a literal '&' produced by decoding one entity is not double-decoded
+// when & runs last.
+export function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/</g, '<')
+    .replace(/>/g, '>')
+    .replace(/"/g, '"')
+    .replace(/'/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&/g, '&');
+}
+
+export function extractRealUrl(ddgUrl: string): string {
+  try {
+    const u = new URL(ddgUrl);
+    const uddg = u.searchParams.get('uddg');
+    return uddg || ddgUrl;
+  } catch {
+    return ddgUrl;
+  }
+}
+
+export function parseDuckDuckGoHtml(html: string, k: number): WebResult[] {
+  const results: WebResult[] = [];
+  const resultRegex =
+    /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+
+  let m: RegExpExecArray | null;
+  while ((m = resultRegex.exec(html)) !== null && results.length < k) {
+    const url = m[1];
+    const title = m[2];
+    const snippetRaw = m[3];
+    const snippet = snippetRaw.replace(/<[^>]*>/g, '').trim();
+    results.push({
+      type: 'web_search',
+      title: decodeHtmlEntities(title.trim()),
+      content: decodeHtmlEntities(snippet),
+      url: extractRealUrl(url),
+    });
+  }
+  if (results.length === 0) {
+    return [
+      {
+        type: 'web_search',
+        title: 'Web search unavailable in demo mode',
+        content:
+          'Configure a Serper API key in Settings for live Google results, or enable DuckDuckGo (no key required).',
+        url: 'https://serper.dev',
+      },
+    ];
+  }
+  return results;
+}
+
 export function createWebSearchClient(settings: Settings): WebSearchClient {
   async function searchSerper(query: string, k: number): Promise<WebResult[]> {
     const resp = await fetch('https://google.serper.dev/search', {
@@ -40,57 +95,6 @@ export function createWebSearchClient(settings: Settings): WebSearchClient {
     }));
   }
 
-  function decodeEntities(s: string): string {
-    return s
-      .replace(/&/g, '&')
-      .replace(/</g, '<')
-      .replace(/>/g, '>')
-      .replace(/"/g, '"')
-      .replace(/'/g, "'");
-  }
-
-  function extractRealUrl(ddgUrl: string): string {
-    try {
-      const u = new URL(ddgUrl);
-      const uddg = u.searchParams.get('uddg');
-      return uddg || ddgUrl;
-    } catch {
-      return ddgUrl;
-    }
-  }
-
-  function parseDuckDuckGo(html: string, k: number): WebResult[] {
-    const results: WebResult[] = [];
-    const resultRegex =
-      /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-
-    let m: RegExpExecArray | null;
-    while ((m = resultRegex.exec(html)) !== null && results.length < k) {
-      const url = m[1];
-      const title = m[2];
-      const snippetRaw = m[3];
-      const snippet = snippetRaw.replace(/<[^>]*>/g, '').trim();
-      results.push({
-        type: 'web_search',
-        title: decodeEntities(title.trim()),
-        content: decodeEntities(snippet),
-        url: extractRealUrl(url),
-      });
-    }
-    if (results.length === 0) {
-      return [
-        {
-          type: 'web_search',
-          title: 'Web search unavailable in demo mode',
-          content:
-            'Configure a Serper API key in Settings for live Google results, or enable DuckDuckGo (no key required).',
-          url: 'https://serper.dev',
-        },
-      ];
-    }
-    return results;
-  }
-
   async function searchDuckDuckGo(query: string, k: number): Promise<WebResult[]> {
     const url = `${DDG_BASE_URL}/html/?q=${encodeURIComponent(query)}`;
     try {
@@ -108,7 +112,7 @@ export function createWebSearchClient(settings: Settings): WebSearchClient {
         ];
       }
       const html = await resp.text();
-      return parseDuckDuckGo(html, k);
+      return parseDuckDuckGoHtml(html, k);
     } catch {
       return [
         {

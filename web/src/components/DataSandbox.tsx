@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { useAppStore } from '../store';
+import { useConfirm } from '../hooks/useConfirm';
 
 interface Props {
   open: boolean;
@@ -19,6 +20,7 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
   const [isWorking, setIsWorking] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [confirm, renderConfirmDialog] = useConfirm();
 
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
@@ -87,10 +89,14 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
     }
   };
 
-  const handleClearAll = () => {
-    if (confirm('Clear all loaded data? This empties the sandbox.')) {
-      clearSandboxData();
-    }
+  const handleClearAll = async () => {
+    const ok = await confirm({
+      title: 'Clear all loaded data?',
+      message: 'This empties the sandbox.',
+      confirmLabel: 'Clear all',
+      destructive: true,
+    });
+    if (ok) clearSandboxData();
   };
 
   if (!open) return null;
@@ -112,7 +118,7 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
                   ? 'Empty. Drop your CSVs, PDFs, or text files to query them.'
                   : `${sandboxDatasets.length} dataset${sandboxDatasets.length === 1 ? '' : 's'} · ${sandboxDocuments.length} document${sandboxDocuments.length === 1 ? '' : 's'}`}
            </p>
-         </div>
+          </div>
           <button
             onClick={onClose}
             className="text-ink-500 hover:text-ink-800 dark:hover:text-ink-200"
@@ -341,9 +347,10 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
             >
               Or load the small sample dataset to try things out
            </button>
-          )}
+           )}
        </div>
      </div>
+     {renderConfirmDialog()}
    </div>
   );
 }

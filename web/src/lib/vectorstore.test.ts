@@ -118,4 +118,65 @@ describe('createVectorStore', () => {
     await vectorstore.load();
     expect(vectorstore.stats.entries).toBe(0);
   });
+
+  it('skips entries with invalid embedding arrays', async () => {
+    localStorage.setItem(
+      'clay-vector-entries-v1',
+      JSON.stringify([
+        { id: '1', text: 'a', source: 's', embedding: [NaN, 0.2] },
+        { id: '2', text: 'b', source: 's', embedding: [Infinity, 0.2] },
+        { id: '3', text: 'c', source: 's', embedding: [null, 0.2] },
+        { id: '4', text: 'd', source: 's', embedding: 'not-an-array' },
+      ]),
+    );
+    await vectorstore.load();
+    expect(vectorstore.stats.entries).toBe(0);
+  });
+
+  it('skips entries with missing required fields', async () => {
+    localStorage.setItem(
+      'clay-vector-entries-v1',
+      JSON.stringify([
+        { id: '1', text: 'a', embedding: [0.1] }, // missing source
+        { text: 'b', source: 's', embedding: [0.1] }, // missing id
+        { id: '3', source: 's', embedding: [0.1] }, // missing text
+        null,
+        'string-entry',
+      ]),
+    );
+    await vectorstore.load();
+    expect(vectorstore.stats.entries).toBe(0);
+  });
+
+  it('preserves numeric page field when present', async () => {
+    const entries = [
+      {
+        id: '1',
+        text: 'p1',
+        source: 'a.pdf',
+        page: 3,
+        embedding: new Array(4).fill(0.1),
+      },
+    ];
+    vectorstore.addEntries(entries);
+    const vs2 = createVectorStore(mockEmbeddings);
+    await vs2.load();
+    expect(vs2.stats.entries).toBe(1);
+    const results = await vs2.similaritySearch('x', 1);
+    expect(results[0].page).toBe(3);
+  });
+
+  it('accepts legacy cache where embedding was stored as a sparse object', async () => {
+    const obj: Record<string, number> = {};
+    obj['0'] = 0.1;
+    obj['1'] = 0.2;
+    obj['2'] = 0.3;
+    localStorage.setItem(
+      'clay-vector-entries-v1',
+      JSON.stringify([{ id: '1', text: 'a', source: 's', embedding: obj }]),
+    );
+    const vs2 = createVectorStore(mockEmbeddings);
+    await vs2.load();
+    expect(vs2.stats.entries).toBe(1);
+  });
 });

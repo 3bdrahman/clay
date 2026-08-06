@@ -24,15 +24,37 @@ function loadCache(): VectorEntry[] {
   try {
     const raw = localStorage.getItem(VECTOR_CACHE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.map(e => ({
-      ...e,
-      embedding: Array.isArray(e.embedding) ? e.embedding : Object.values(e.embedding),
-    }));
+    return parsed.flatMap((rawEntry): VectorEntry[] => {
+      if (!rawEntry || typeof rawEntry !== 'object') return [];
+      const e = rawEntry as Record<string, unknown>;
+      if (typeof e.id !== 'string' || typeof e.text !== 'string' || typeof e.source !== 'string') return [];
+      const embedding = coerceEmbedding(e.embedding);
+      if (embedding === null) return [];
+      const entry: VectorEntry = {
+        id: e.id,
+        text: e.text,
+        source: e.source,
+        embedding,
+      };
+      if (typeof e.page === 'number') entry.page = e.page;
+      return [entry];
+    });
   } catch {
     return [];
   }
+}
+
+function coerceEmbedding(value: unknown): number[] | null {
+  if (Array.isArray(value)) {
+    return value.every(n => typeof n === 'number' && Number.isFinite(n)) ? (value as number[]) : null;
+  }
+  if (value && typeof value === 'object') {
+    const values = Object.values(value as Record<string, unknown>);
+    if (values.every(n => typeof n === 'number' && Number.isFinite(n))) return values as number[];
+  }
+  return null;
 }
 
 function saveCache(entries: VectorEntry[]): void {
