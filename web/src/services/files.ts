@@ -1,7 +1,7 @@
 import * as aq from 'arquero';
 import type { ColumnTable } from 'arquero';
-import { extractPdfText } from './pdf';
-import { chunkText, prepareForChunking } from './chunker';
+import { extractPdfText, type ExtractedPage } from './pdf';
+import { chunkText, type Chunk, type ChunkContext } from './chunker';
 import type { EmbeddingsClient } from '../lib/embeddings';
 
 export type SupportedKind = 'csv' | 'pdf' | 'text' | 'unsupported';
@@ -17,6 +17,7 @@ export interface ProcessedDataset {
 export interface ProcessedDocument {
   kind: 'document';
   source: string;
+  sourceHash: string;
   chunks: Array<{ id: string; text: string; page?: number }>;
 }
 
@@ -46,7 +47,33 @@ export function detectKind(fileName: string, mimeType?: string): SupportedKind {
 }
 
 function deriveName(fileName: string): string {
-  return fileName.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'dataset';
+  return fileName
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-zA-Z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'dataset';
+}
+
+/** djb2 hash (zero deps) for stable sourceHash. */
+export function hashText(text: string): string {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) {
+    h = ((h << 5) + h + text.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(36);
+}
+
+function toChunks(
+  baseId: string,
+  text: string,
+  ctx: ChunkContext,
+  page?: number,
+): Array<{ id: string; text: string; page?: number }> {
+  const pieces: Chunk[] = chunkText(text, {}, { ...ctx, startPage: page });
+  return pieces.map((c) => ({
+    id: `${baseId}-${c.index}`,
+    text: c.text,
+    page,
+  }));
 }
 
 async function processCsv(file: File): Promise<ProcessedDataset> {
@@ -65,30 +92,29 @@ async function processCsv(file: File): Promise<ProcessedDataset> {
 
 async function processText(file: File): Promise<ProcessedDocument> {
   const text = await file.text();
-  const chunks = chunkText(text);
+  const sourceHash = hashText(text);
+  const ctx: ChunkContext = { source: file.name, sourceHash, modelId: 'chunker-v2' };
+  const base = deriveName(file.name);
   return {
     kind: 'document',
     source: file.name,
-    chunks: chunks.map((c, i) => ({ id: `${deriveName(file.name)}-${i}`, text: c.text })),
+    sourceHash,
+    chunks: toChunks(base, text, ctx),
   };
 }
 
 async function processPdf(file: File): Promise<ProcessedDocument> {
   const buffer = await file.arrayBuffer();
-  const pages = await extractPdfText(buffer);
+  const pages: ExtractedPage[] = await extractPdfText(buffer);
+  const fullText = pages.map((p) => p.text).join('\n');
+  const sourceHash = hashText(fullText);
+  const ctx: ChunkContext = { source: file.name, sourceHash, modelId: 'chunker-v2' };
   const base = deriveName(file.name);
   const chunks: Array<{ id: string; text: string; page?: number }> = [];
   for (const page of pages) {
-    const pageChunks = chunkText(page.text);
-    for (let i = 0; i < pageChunks.length; i++) {
-      chunks.push({
-        id: `${base}-p${page.pageNumber}-${i}`,
-        text: pageChunks[i].text,
-        page: page.pageNumber,
-      });
-    }
+    chunks.push(...toChunks(`${base}-p${page.pageNumber}`, page.text, ctx, page.pageNumber));
   }
-  return { kind: 'document', source: file.name, chunks };
+  return { kind: 'document', source: file.name, sourceHash, chunks };
 }
 
 export async function processFile(file: File): Promise<ProcessedFile> {
@@ -124,20 +150,57 @@ export async function processFile(file: File): Promise<ProcessedFile> {
   }
 }
 
+export interface EmbeddedChunk {
+  id: string;
+  text: string;
+  source: string;
+  sourceHash: string;
+  page?: number;
+  heading?: string;
+  embedding: number[];
+  charStart: number;
+  charEnd: number;
+  chunkIndex: number;
+  tokenCount: number;
+}
+
+/**
+ * Returns the set of sourceHashes currently present in the vectorstore for
+ * the given source. Used to short-circuit re-embedding unchanged content.
+ */
+export async function existingSourceHashes(
+  vs: { stats: { entries: number }; similaritySearch: (q: string, k: number) => Promise<Array<{ metadata?: Record<string, unknown> }>> },
+  source: string,
+): Promise<Set<string>> {
+  const hits = await vs.similaritySearch(source, vs.stats.entries || 1);
+  const hashes = new Set<string>();
+  for (const h of hits) {
+    const hash = h.metadata?.['sourceHash'];
+    if (typeof hash === 'string' && hash.length > 0) hashes.add(hash);
+  }
+  return hashes;
+}
+
 export async function embedDocumentChunks(
   document: ProcessedDocument,
   embeddings: EmbeddingsClient,
-): Promise<Array<{ id: string; text: string; source: string; page?: number; embedding: number[] }>> {
+): Promise<EmbeddedChunk[]> {
   if (document.chunks.length === 0) return [];
-  const texts = document.chunks.map(c => c.text);
+  const texts = document.chunks.map((c) => c.text);
   const vectors = await embeddings.embed(texts, { inputType: 'passage' });
-  return document.chunks.map((c, i) => ({
-    id: c.id,
-    text: c.text,
-    source: document.source,
-    page: c.page,
-    embedding: vectors[i] ?? [],
-  }));
+  return document.chunks.map((c, i) => {
+    const vec = vectors[i] ?? [];
+    return {
+      id: c.id,
+      text: c.text,
+      source: document.source,
+      sourceHash: document.sourceHash,
+      page: c.page,
+      embedding: vec,
+      charStart: 0,
+      charEnd: c.text.length,
+      chunkIndex: i,
+      tokenCount: Math.max(1, Math.ceil(c.text.length / 4)),
+    };
+  });
 }
-
-export { prepareForChunking };

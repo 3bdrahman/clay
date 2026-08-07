@@ -1,6 +1,6 @@
 // CitationPanel — shows retrieved documents, web results, and analysis results
 
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useState, useId } from 'react';
 import type { Citation, DataAnalysisResult, Document, WebResult } from '../lib/types';
 
 const ChartRenderer = lazy(() => import('./ChartRenderer'));
@@ -15,16 +15,18 @@ interface Props {
 type Tab = 'docs' | 'web' | 'analysis' | 'citations';
 
 export function CitationPanel({ documents, webResults, analysis, citations }: Props) {
-  const [tab, setTab] = useState<Tab>('docs');
-
   const docCount = documents.length;
   const webCount = webResults.length;
   const hasAnalysis = !!analysis && analysis.resultType !== 'error';
   const hasErrorAnalysis = !!analysis && analysis.resultType === 'error';
+  const analysisVisible = hasAnalysis || hasErrorAnalysis;
+  const defaultTab: Tab = docCount > 0 ? 'docs' : webCount > 0 ? 'web' : analysisVisible ? 'analysis' : 'citations';
+  const [tab, setTab] = useState<Tab>(defaultTab);
+  const tablistId = useId();
 
   if (docCount + webCount + (analysis ? 1 : 0) === 0) {
     return (
-      <div className="text-center text-sm text-ink-400 dark:text-ink-500 py-8">
+      <div className="text-center text-sm text-ink-400 dark:text-ink-500 py-8" role="status">
         No sources for this query.
       </div>
     );
@@ -32,40 +34,107 @@ export function CitationPanel({ documents, webResults, analysis, citations }: Pr
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-1 border-b border-ink-200 dark:border-ink-700 overflow-x-auto">
-        <TabBtn active={tab === 'docs'} onClick={() => setTab('docs')} disabled={docCount === 0}>
+      <div role="tablist" aria-label="Source types" className="flex gap-1 border-b border-ink-200 dark:border-ink-700 overflow-x-auto" id={tablistId}>
+        <TabBtn
+          role="tab"
+          id={`${tablistId}-tab-docs`}
+          ariaControls={`${tablistId}-panel-docs`}
+          ariaSelected={tab === 'docs'}
+          active={tab === 'docs'}
+          onClick={() => setTab('docs')}
+          disabled={docCount === 0}
+        >
           <span>Documents</span>
           <Badge>{docCount}</Badge>
         </TabBtn>
-        <TabBtn active={tab === 'web'} onClick={() => setTab('web')} disabled={webCount === 0}>
+        <TabBtn
+          role="tab"
+          id={`${tablistId}-tab-web`}
+          ariaControls={`${tablistId}-panel-web`}
+          ariaSelected={tab === 'web'}
+          active={tab === 'web'}
+          onClick={() => setTab('web')}
+          disabled={webCount === 0}
+        >
           <span>Web</span>
           <Badge>{webCount}</Badge>
         </TabBtn>
         {(hasAnalysis || hasErrorAnalysis) && (
-          <TabBtn active={tab === 'analysis'} onClick={() => setTab('analysis')}>
+          <TabBtn
+            role="tab"
+            id={`${tablistId}-tab-analysis`}
+            ariaControls={`${tablistId}-panel-analysis`}
+            ariaSelected={tab === 'analysis'}
+            active={tab === 'analysis'}
+            onClick={() => setTab('analysis')}
+          >
             <span>Analysis</span>
           </TabBtn>
         )}
-        <TabBtn active={tab === 'citations'} onClick={() => setTab('citations')} disabled={citations.length === 0}>
+        <TabBtn
+          role="tab"
+          id={`${tablistId}-tab-citations`}
+          ariaControls={`${tablistId}-panel-citations`}
+          ariaSelected={tab === 'citations'}
+          active={tab === 'citations'}
+          onClick={() => setTab('citations')}
+          disabled={citations.length === 0}
+        >
           <span>Citations</span>
           <Badge>{citations.length}</Badge>
         </TabBtn>
       </div>
 
-      {tab === 'docs' && <DocsTab documents={documents} />}
-      {tab === 'web' && <WebTab results={webResults} />}
-      {tab === 'analysis' && analysis && <AnalysisTab analysis={analysis} />}
-      {tab === 'citations' && <CitationsTab citations={citations} />}
+      {tab === 'docs' && (
+        <DocsTab
+          id={`${tablistId}-panel-docs`}
+          role="tabpanel"
+          ariaLabelledby={`${tablistId}-tab-docs`}
+          documents={documents}
+        />
+      )}
+      {tab === 'web' && (
+        <WebTab
+          id={`${tablistId}-panel-web`}
+          role="tabpanel"
+          ariaLabelledby={`${tablistId}-tab-web`}
+          results={webResults}
+        />
+      )}
+      {tab === 'analysis' && analysis && (
+        <AnalysisTab
+          id={`${tablistId}-panel-analysis`}
+          role="tabpanel"
+          ariaLabelledby={`${tablistId}-tab-analysis`}
+          analysis={analysis}
+        />
+      )}
+      {tab === 'citations' && (
+        <CitationsTab
+          id={`${tablistId}-panel-citations`}
+          role="tabpanel"
+          ariaLabelledby={`${tablistId}-tab-citations`}
+          citations={citations}
+        />
+      )}
     </div>
   );
 }
 
 function TabBtn({
+  role,
+  id,
+  ariaControls,
+  ariaSelected,
   active,
   onClick,
   disabled,
   children,
 }: {
+  role: 'tab';
+  id: string;
+  ariaControls: string;
+  ariaSelected: boolean;
   active: boolean;
   onClick: () => void;
   disabled?: boolean;
@@ -73,8 +142,14 @@ function TabBtn({
 }) {
   return (
     <button
+      role={role}
+      id={id}
+      aria-controls={ariaControls}
+      aria-selected={ariaSelected}
+      aria-disabled={disabled}
       onClick={onClick}
       disabled={disabled}
+      tabIndex={active ? 0 : -1}
       className={`px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition flex items-center gap-1.5 ${
         active
           ? 'border-brand-500 text-brand-600 dark:text-brand-400'
@@ -88,21 +163,31 @@ function TabBtn({
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="text-[10px] bg-ink-100 dark:bg-ink-800 text-ink-600 dark:text-ink-300 px-1.5 py-0.5 rounded-full">
+    <span className="text-[10px] bg-ink-100 dark:bg-ink-800 text-ink-600 dark:text-ink-300 px-1.5 py-0.5 rounded-full" aria-hidden="true">
       {children}
     </span>
   );
 }
 
-function DocsTab({ documents }: { documents: Document[] }) {
+function DocsTab({
+  id,
+  role,
+  ariaLabelledby,
+  documents,
+}: {
+  id: string;
+  role: 'tabpanel';
+  ariaLabelledby: string;
+  documents: Document[];
+}) {
   if (documents.length === 0) return <Empty msg="No documents retrieved" />;
   return (
-    <div className="space-y-2">
+    <div id={id} role={role} aria-labelledby={ariaLabelledby} className="space-y-2">
       {documents.map((doc, i) => (
         <div key={doc.id || i} className="border border-ink-200 dark:border-ink-700 rounded-lg p-3 bg-white dark:bg-ink-800">
           <div className="flex items-center justify-between gap-2 mb-1.5">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 dark:text-brand-400">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               <span className="truncate">{doc.source}</span>
@@ -122,14 +207,24 @@ function DocsTab({ documents }: { documents: Document[] }) {
   );
 }
 
-function WebTab({ results }: { results: WebResult[] }) {
+function WebTab({
+  id,
+  role,
+  ariaLabelledby,
+  results,
+}: {
+  id: string;
+  role: 'tabpanel';
+  ariaLabelledby: string;
+  results: WebResult[];
+}) {
   if (results.length === 0) return <Empty msg="No web results" />;
   return (
-    <div className="space-y-2">
+    <div id={id} role={role} aria-labelledby={ariaLabelledby} className="space-y-2">
       {results.map((r, i) => (
         <div key={i} className="border border-ink-200 dark:border-ink-700 rounded-lg p-3 bg-white dark:bg-ink-800">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 dark:text-brand-400 mb-1.5">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
             </svg>
             <span className="truncate">{r.title}</span>
@@ -146,12 +241,22 @@ function WebTab({ results }: { results: WebResult[] }) {
   );
 }
 
-function AnalysisTab({ analysis }: { analysis: DataAnalysisResult }) {
+function AnalysisTab({
+  id,
+  role,
+  ariaLabelledby,
+  analysis,
+}: {
+  id: string;
+  role: 'tabpanel';
+  ariaLabelledby: string;
+  analysis: DataAnalysisResult;
+}) {
   return (
-    <div className="space-y-3">
+    <div id={id} role={role} aria-labelledby={ariaLabelledby} className="space-y-3">
       <div className="border border-ink-200 dark:border-ink-700 rounded-lg p-3 bg-white dark:bg-ink-800">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 mb-2">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
           </svg>
           <span>Generated Code (Arquero)</span>
@@ -174,7 +279,7 @@ function AnalysisTab({ analysis }: { analysis: DataAnalysisResult }) {
       )}
 
       {analysis.resultType === 'error' && (
-        <div className="border border-rose-300 dark:border-rose-700 rounded-lg p-3 bg-rose-50 dark:bg-rose-900/20">
+        <div className="border border-rose-300 dark:border-rose-700 rounded-lg p-3 bg-rose-50 dark:bg-rose-900/20" role="alert">
           <div className="text-xs font-semibold text-rose-700 dark:text-rose-300 mb-1">Error</div>
           <pre className="text-xs font-mono text-rose-700 dark:text-rose-300 whitespace-pre-wrap">
             {String(analysis.result)}
@@ -192,10 +297,20 @@ function AnalysisTab({ analysis }: { analysis: DataAnalysisResult }) {
   );
 }
 
-function CitationsTab({ citations }: { citations: Citation[] }) {
+function CitationsTab({
+  id,
+  role,
+  ariaLabelledby,
+  citations,
+}: {
+  id: string;
+  role: 'tabpanel';
+  ariaLabelledby: string;
+  citations: Citation[];
+}) {
   if (citations.length === 0) return <Empty msg="No inline citations" />;
   return (
-    <div className="space-y-1.5">
+    <div id={id} role={role} aria-labelledby={ariaLabelledby} className="space-y-1.5">
       {citations.map((c, i) => (
         <div key={i} className="flex gap-2 text-xs border-l-2 border-brand-400 pl-2 py-1">
           <span className="font-mono text-ink-400">[{i + 1}]</span>
@@ -214,13 +329,13 @@ function CitationsTab({ citations }: { citations: Citation[] }) {
 }
 
 function Empty({ msg }: { msg: string }) {
-  return <div className="text-center text-sm text-ink-400 dark:text-ink-500 py-6">{msg}</div>;
+  return <div className="text-center text-sm text-ink-400 dark:text-ink-500 py-6" role="status">{msg}</div>;
 }
 
 function ResultRenderer({ result, chartConfig }: { result: unknown; chartConfig?: DataAnalysisResult['chartConfig'] }) {
   if (chartConfig) {
     return (
-      <Suspense fallback={<div className="text-xs text-ink-400">Loading chart…</div>}>
+      <Suspense fallback={<div className="text-xs text-ink-400" role="status">Loading chart…</div>}>
         <ChartRenderer config={chartConfig} />
       </Suspense>
     );

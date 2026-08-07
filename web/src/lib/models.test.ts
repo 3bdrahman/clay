@@ -263,35 +263,29 @@ describe('listLocalCatalog', () => {
 });
 
 describe('pickLocalModels', () => {
-  it('maps Settings.localModels into PickedModels', () => {
+  it('fans the single chat field into all 4 chat roles and keeps embeddings separate', () => {
     const picks: LocalModelPicks = {
-      routing: 'llama3.1:8b',
-      codeGen: 'qwen2.5-coder:7b',
-      answer: 'llama3.1:70b',
-      eval: 'mistral:7b',
-      embedding: 'nomic-embed-text',
+      chat: 'llama3.1:8b',
+      embeddings: 'nomic-embed-text',
     };
     expect(pickLocalModels(picks)).toEqual({
       routing: 'llama3.1:8b',
-      codeGen: 'qwen2.5-coder:7b',
-      answer: 'llama3.1:70b',
-      eval: 'mistral:7b',
+      codeGen: 'llama3.1:8b',
+      answer: 'llama3.1:8b',
+      eval: 'llama3.1:8b',
       embedding: 'nomic-embed-text',
     });
   });
 
-  it('returns undefined for empty / whitespace entries', () => {
+  it('returns undefined for empty / whitespace chat and embeddings', () => {
     const picks: LocalModelPicks = {
-      routing: '   ',
-      codeGen: '',
-      answer: 'llama3.1:8b',
-      eval: '',
-      embedding: '  ',
+      chat: '   ',
+      embeddings: '',
     };
     const out = pickLocalModels(picks);
     expect(out.routing).toBeUndefined();
     expect(out.codeGen).toBeUndefined();
-    expect(out.answer).toBe('llama3.1:8b');
+    expect(out.answer).toBeUndefined();
     expect(out.eval).toBeUndefined();
     expect(out.embedding).toBeUndefined();
   });
@@ -308,7 +302,7 @@ describe('resolveModels', () => {
     maxRetries: 3,
     theme: 'system',
     localServerUrl: LOCAL_DEFAULT_BASE_URL,
-    localModels: { routing: '', codeGen: '', answer: '', eval: '', embedding: '' },
+    localModels: { chat: '', embeddings: '' },
     localCatalog: [],
     localCatalogFetchedAt: 0,
   };
@@ -322,24 +316,25 @@ describe('resolveModels', () => {
   it('uses pickLocalModels and the local catalog when provider=local', () => {
     const localCatalog: ModelInfo[] = [
       { id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 },
+      { id: 'nomic-embed-text', ownedBy: 'ollama', created: 0 },
     ];
     const out = resolveModels(
       {
         ...baseSettings,
         provider: 'local',
         localModels: {
-          routing: 'llama3.1:8b',
-          codeGen: '',
-          answer: 'llama3.1:8b',
-          eval: 'llama3.1:8b',
-          embedding: '',
+          chat: 'llama3.1:8b',
+          embeddings: 'nomic-embed-text',
         },
         localCatalog,
       },
       fakeModels,
     );
     expect(out.picked.routing).toBe('llama3.1:8b');
-    expect(out.picked.embedding).toBeUndefined();
+    expect(out.picked.codeGen).toBe('llama3.1:8b');
+    expect(out.picked.answer).toBe('llama3.1:8b');
+    expect(out.picked.eval).toBe('llama3.1:8b');
+    expect(out.picked.embedding).toBe('nomic-embed-text');
     expect(out.catalog).toBe(localCatalog);
     expect(out.warnings).toEqual([]);
   });
@@ -352,22 +347,45 @@ describe('resolveModels', () => {
     expect(out.warnings.some(w => w.includes('Local catalog is empty'))).toBe(true);
   });
 
-  it('warns when a picked model is not in the catalog', () => {
+  it('warns when chat model is not in the catalog', () => {
     const out = resolveModels(
       {
         ...baseSettings,
         provider: 'local',
         localModels: {
-          routing: 'llama3.1:8b',
-          codeGen: 'nonexistent-model',
-          answer: 'llama3.1:8b',
-          eval: '',
-          embedding: '',
+          chat: 'nonexistent-chat-model',
+          embeddings: 'nomic-embed-text',
+        },
+        localCatalog: [
+          { id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 },
+          { id: 'nomic-embed-text', ownedBy: 'ollama', created: 0 },
+        ],
+      },
+      fakeModels,
+    );
+    expect(
+      out.warnings.some(w => w.includes('chat') && w.includes('nonexistent-chat-model')),
+    ).toBe(true);
+  });
+
+  it('warns when embeddings model is not in the catalog, separately from chat', () => {
+    const out = resolveModels(
+      {
+        ...baseSettings,
+        provider: 'local',
+        localModels: {
+          chat: 'llama3.1:8b',
+          embeddings: 'nonexistent-embed-model',
         },
         localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
       },
       fakeModels,
     );
-    expect(out.warnings.some(w => w.includes('codeGen') && w.includes('nonexistent-model'))).toBe(true);
+    expect(out.warnings.some(w => w.includes('chat'))).toBe(false);
+    expect(
+      out.warnings.some(
+        w => w.includes('embeddings') && w.includes('nonexistent-embed-model'),
+      ),
+    ).toBe(true);
   });
 });

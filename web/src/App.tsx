@@ -35,12 +35,18 @@ export default function App() {
     };
     apply(settings.theme);
 
+    let handler: (() => void) | undefined;
     if (settings.theme === 'system') {
       const mq = window.matchMedia('(prefers-color-scheme: dark)');
-      const handler = () => apply('system');
+      handler = () => apply('system');
       mq.addEventListener('change', handler);
-      return () => mq.removeEventListener('change', handler);
     }
+    return () => {
+      if (handler) {
+        const mq = window.matchMedia('(prefers-color-scheme: dark)');
+        mq.removeEventListener('change', handler);
+      }
+    };
   }, [settings.theme]);
 
   const openSettings = () => setSettingsOpen(true);
@@ -59,7 +65,7 @@ export default function App() {
       <div className="flex-1 flex min-h-0">
         <ConversationSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         <div className="flex-1 flex min-h-0">
-          <ChatPanel onOpenSettings={openSettings} />
+          <ChatPanel onOpenSettings={openSettings} onOpenData={openData} />
         </div>
       </div>
       <Suspense fallback={null}>

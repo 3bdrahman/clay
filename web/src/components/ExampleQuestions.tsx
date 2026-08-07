@@ -37,8 +37,8 @@ export function ExampleQuestions({ onSelect }: Props) {
         <h2 className="text-2xl font-bold text-ink-900 dark:text-ink-50">Try Clay</h2>
         <p className="text-sm text-ink-500 dark:text-ink-400 mt-1">
           Click any example below, or ask your own question above.
-       </p>
-     </div>
+        </p>
+      </div>
 
       {hasData && (
         <Group
@@ -76,7 +76,7 @@ export function ExampleQuestions({ onSelect }: Props) {
         questions={WEB_QUESTIONS}
         onSelect={onSelect}
       />
-   </div>
+    </div>
   );
 }
 
@@ -98,25 +98,27 @@ function Group({
   return (
     <div>
       <div className="flex items-center gap-2 mb-2.5">
-        <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${color}`}>
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+        <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${color}`} aria-hidden="true">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d={icon} />
-         </svg>
-       </span>
+          </svg>
+        </span>
         <h3 className="text-sm font-semibold text-ink-700 dark:text-ink-200">{category}</h3>
-     </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="list" aria-label={category}>
         {questions.map((q, i) => (
           <button
             key={i}
             onClick={() => onSelect(q)}
             disabled={disabled}
-            className="text-left px-3 py-2.5 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-lg hover:border-brand-400 hover:shadow-sm transition text-xs text-ink-700 dark:text-ink-200 leading-relaxed disabled:opacity-40 disabled:cursor-not-allowed"
+            role="listitem"
+            aria-disabled={disabled}
+            className="text-left px-3 py-2.5 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-lg hover:border-brand-400 hover:shadow-sm transition text-xs text-ink-700 dark:text-ink-200 leading-relaxed disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-ink-900"
           >
             {q}
-         </button>
+          </button>
         ))}
-     </div>
-   </div>
+      </div>
+    </div>
   );
 }

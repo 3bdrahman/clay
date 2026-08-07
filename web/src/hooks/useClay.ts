@@ -7,7 +7,7 @@ import { createWebSearchClient, type WebSearchClient } from '../lib/websearch';
 import { createVectorStore, type VectorStore } from '../lib/vectorstore';
 import { createDataAnalyzer, type DataAnalyzer, type DatasetMeta } from '../services/analyzer';
 import { loadSampleDatasets } from '../services/datasets';
-import { processFile, embedDocumentChunks, type ProcessedFile } from '../services/files';
+import { processFile, embedDocumentChunks, existingSourceHashes, type ProcessedFile } from '../services/files';
 import {
   registerSandboxTable,
   unregisterSandboxTable,
@@ -18,6 +18,7 @@ import {
   listNimModels,
   listLocalCatalog,
   resolveModels,
+  pickLocalModels,
   type ModelInfo,
   type PickedModels,
 } from '../lib/models';
@@ -282,8 +283,27 @@ export function useClay(): {
           }
           if (processed.document) {
             updateSandboxProcessingItem(file.name, { status: 'embedding' });
+            const hashes = await existingSourceHashes(sv.vectorstore, processed.document.source);
+            if (hashes.has(processed.document.sourceHash)) {
+              updateSandboxProcessingItem(file.name, { status: 'done' });
+              addSandboxDocument({
+                id: processed.document.source,
+                fileName: file.name,
+                source: processed.document.source,
+                chunkCount: processed.document.chunks.length,
+                loadedAt: Date.now(),
+                chunks: processed.document.chunks,
+              });
+              continue;
+            }
             const embedded = await embedDocumentChunks(processed.document, sv.embeddings);
-            sv.vectorstore.addEntries(embedded);
+            sv.vectorstore.addEntries(embedded.map(e => ({
+              id: e.id,
+              text: e.text,
+              source: e.source,
+              page: e.page,
+              embedding: e.embedding,
+            })));
             addSandboxDocument({
               id: processed.document.source,
               fileName: file.name,
@@ -361,14 +381,7 @@ export function useClay(): {
 
   const pickedModels: PickedModels = useMemo(() => {
     if (settings.provider === 'local') {
-      const def = (s: string) => s.trim() || undefined;
-      return {
-        routing: def(settings.localModels.routing),
-        codeGen: def(settings.localModels.codeGen),
-        answer: def(settings.localModels.answer),
-        eval: def(settings.localModels.eval),
-        embedding: def(settings.localModels.embedding),
-      };
+      return pickLocalModels(settings.localModels);
     }
     return resolveModels(settings, availableModels).picked;
   }, [settings, availableModels]);

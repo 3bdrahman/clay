@@ -52,10 +52,12 @@ const EXAMPLE_QUERIES = [
 export function LandingHero({
   onGetStarted,
   onLoadSample,
+  onAddData,
   onExampleSelect,
 }: {
   onGetStarted: () => void;
   onLoadSample: () => void;
+  onAddData: () => void;
   onExampleSelect?: (q: string) => void;
 }) {
   const [showMore, setShowMore] = useState(false);
@@ -98,7 +100,7 @@ export function LandingHero({
               Load Sample Data & Try It
             </button>
             <button
-              onClick={onGetStarted}
+              onClick={onAddData}
               className="inline-flex items-center gap-2 px-6 py-3 border-2 border-ink-200 dark:border-ink-700 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-700 dark:text-ink-200 font-medium rounded-lg transition-colors text-base"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>

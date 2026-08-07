@@ -26,6 +26,12 @@ export interface DataAnalyzerDeps {
   codeGenModel?: string;
 }
 
+/**
+ * Create a data analyzer that generates and executes Arquero code for CSV analysis.
+ * Uses LLM to generate JavaScript, executes safely via new Function(), detects chart config.
+ * @param deps - LLM client, embeddings client, dataset Map, metadata, optional codeGenModel
+ * @returns DataAnalyzer with analyze(), listDatasets(), getDatasetSummary()
+ */
 export function createDataAnalyzer(deps: DataAnalyzerDeps): DataAnalyzer {
   const { llm, metadata } = deps;
 

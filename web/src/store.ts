@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ChatMessage, Settings, ModelInfo } from './lib/types';
 import { LOCAL_DEFAULT_BASE_URL } from './lib/providers';
+import { migrateLegacyLocalModels, type LegacyLocalModelPicks } from './lib/localModelsMigrate';
 
 export interface SandboxDataset {
   name: string;
@@ -82,11 +83,8 @@ const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   localServerUrl: LOCAL_DEFAULT_BASE_URL,
   localModels: {
-    routing: '',
-    codeGen: '',
-    answer: '',
-    eval: '',
-    embedding: '',
+    chat: '',
+    embeddings: '',
   },
   localCatalog: [],
   localCatalogFetchedAt: 0,
@@ -119,167 +117,169 @@ function deriveTitle(msg: ChatMessage): string {
 export const useAppStore = create<AppState>()(
   persist(
     set => {
-      const initialConv = makeConversation();
       return {
         settings: DEFAULT_SETTINGS,
-        conversations: [initialConv],
-        activeConversationId: initialConv.id,
-      isRunning: false,
-      availableModels: [],
-      modelsLoading: false,
-      modelsError: null,
-      modelsFetchedAt: 0,
-      sandboxDatasets: [],
-      sandboxDocuments: [],
-      sandboxProcessing: [],
-      updateSettings: patch =>
-        set(state => {
-          const next = { ...state.settings, ...patch };
-          if (
-            patch.provider !== undefined &&
-            patch.provider !== state.settings.provider &&
-            state.settings.provider === 'local' &&
-            patch.provider !== 'local'
-          ) {
-            next.localCatalog = [];
-            next.localCatalogFetchedAt = 0;
-          }
-          return { settings: next };
-        }),
-      createConversation: () => {
-        const conv = makeConversation();
-        set(state => ({
-          conversations: [conv, ...state.conversations],
-          activeConversationId: conv.id,
-          isRunning: false,
-        }));
-        return conv.id;
-      },
-      deleteConversation: id =>
-        set(state => {
-          const remaining = state.conversations.filter(c => c.id !== id);
-          const nextActive =
-            state.activeConversationId === id
-              ? (remaining[0]?.id ?? null)
-              : state.activeConversationId;
-          return {
-            conversations: remaining,
-            activeConversationId: nextActive,
-            isRunning: false,
-          };
-        }),
-      renameConversation: (id, title) =>
-        set(state => ({
-          conversations: state.conversations.map(c =>
-            c.id === id ? { ...c, title, updatedAt: Date.now() } : c,
-          ),
-        })),
-      switchConversation: id =>
-        set({ activeConversationId: id, isRunning: false }),
-      addMessage: msg =>
-        set(state => {
-          const activeId = state.activeConversationId;
-          if (!activeId) return {};
-          const conversations = state.conversations.map(c => {
-            if (c.id !== activeId) return c;
-            const messages = [...c.messages, msg];
-            let title = c.title;
-            if (c.title === 'New chat' && msg.role === 'user' && msg.content.trim()) {
-              title = deriveTitle(msg);
+        conversations: [],
+        activeConversationId: null,
+        isRunning: false,
+        availableModels: [],
+        modelsLoading: false,
+        modelsError: null,
+        modelsFetchedAt: 0,
+        sandboxDatasets: [],
+        sandboxDocuments: [],
+        sandboxProcessing: [],
+        updateSettings: patch =>
+          set(state => {
+            const next = { ...state.settings, ...patch };
+            if (
+              patch.provider !== undefined &&
+              patch.provider !== state.settings.provider &&
+              state.settings.provider === 'local' &&
+              patch.provider !== 'local'
+            ) {
+              next.localCatalog = [];
+              next.localCatalogFetchedAt = 0;
             }
-            return { ...c, messages, title, updatedAt: Date.now() };
+            return { settings: next };
+          }),
+        createConversation: () => {
+          const conv = makeConversation();
+          set(state => ({
+            conversations: [conv, ...state.conversations],
+            activeConversationId: conv.id,
+            isRunning: false,
+          }));
+          return conv.id;
+        },
+        deleteConversation: id =>
+          set(state => {
+            const remaining = state.conversations.filter(c => c.id !== id);
+            const nextActive =
+              state.activeConversationId === id
+                ? (remaining[0]?.id ?? null)
+                : state.activeConversationId;
+            return {
+              conversations: remaining,
+              activeConversationId: nextActive,
+              isRunning: false,
+            };
+          }),
+        renameConversation: (id, title) =>
+          set(state => ({
+            conversations: state.conversations.map(c =>
+              c.id === id ? { ...c, title, updatedAt: Date.now() } : c,
+            ),
+          })),
+        switchConversation: id =>
+          set({ activeConversationId: id, isRunning: false }),
+        addMessage: msg =>
+          set(state => {
+            let activeId = state.activeConversationId;
+            // If no active conversation, create one
+            if (!activeId || !state.conversations.some(c => c.id === activeId)) {
+              const conv = makeConversation(msg.role === 'user' ? deriveTitle(msg) : 'New chat');
+              conv.messages = [msg];
+              return {
+                conversations: [conv, ...state.conversations],
+                activeConversationId: conv.id,
+              };
+            }
+            const conversations = state.conversations.map(c => {
+              if (c.id !== activeId) return c;
+              const messages = [...c.messages, msg];
+              let title = c.title;
+              if (c.title === 'New chat' && msg.role === 'user' && msg.content.trim()) {
+                title = deriveTitle(msg);
+              }
+              return { ...c, messages, title, updatedAt: Date.now() };
+            });
+            return { conversations };
+          }),
+        updateMessage: (id, updater) =>
+          set(state => {
+            const activeId = state.activeConversationId;
+            if (!activeId) return {};
+            return {
+              conversations: state.conversations.map(c =>
+                c.id === activeId
+                  ? {
+                      ...c,
+                      messages: c.messages.map(m => (m.id === id ? updater(m) : m)),
+                      updatedAt: Date.now(),
+                    }
+                  : c,
+              ),
+            };
+          }),
+        clearMessages: () =>
+          set(state => {
+            const activeId = state.activeConversationId;
+            if (!activeId) return {};
+            return {
+              conversations: state.conversations.map(c =>
+                c.id === activeId ? { ...c, messages: [], title: 'New chat', updatedAt: Date.now() } : c,
+              ),
+            };
+          }),
+        setRunning: running => set({ isRunning: running }),
+        setModels: models => set({ availableModels: models, modelsFetchedAt: Date.now() }),
+        setModelsLoading: loading => set({ modelsLoading: loading }),
+        setModelsError: err => set({ modelsError: err }),
+        setLocalCatalog: models =>
+          set(state => ({
+            settings: {
+              ...state.settings,
+              localCatalog: models,
+              localCatalogFetchedAt: Date.now(),
+            },
+          })),
+        addSandboxDataset: d =>
+          set(state => ({
+            sandboxDatasets: [...state.sandboxDatasets.filter(x => x.name !== d.name), d],
+          })),
+        addSandboxDocument: d =>
+          set(state => ({
+            sandboxDocuments: [...state.sandboxDocuments.filter(x => x.id !== d.id), d],
+          })),
+        removeSandboxDataset: name =>
+          set(state => ({
+            sandboxDatasets: state.sandboxDatasets.filter(x => x.name !== name),
+          })),
+        removeSandboxDocument: fileName =>
+          set(state => ({
+            sandboxDocuments: state.sandboxDocuments.filter(x => x.fileName !== fileName),
+          })),
+        setSandboxProcessing: items => set({ sandboxProcessing: items }),
+        updateSandboxProcessingItem: (fileName, patch) =>
+          set(state => ({
+            sandboxProcessing: state.sandboxProcessing.map(p =>
+              p.fileName === fileName ? { ...p, ...patch } : p,
+            ),
+          })),
+        clearSandbox: () =>
+          set({ sandboxDatasets: [], sandboxDocuments: [], sandboxProcessing: [] }),
+        resetAll: () => {
+          const freshConv = makeConversation();
+          set({
+            settings: DEFAULT_SETTINGS,
+            conversations: [freshConv],
+            activeConversationId: freshConv.id,
+            isRunning: false,
+            availableModels: [],
+            modelsLoading: false,
+            modelsError: null,
+            modelsFetchedAt: 0,
+            sandboxDatasets: [],
+            sandboxDocuments: [],
+            sandboxProcessing: [],
           });
-          if (!state.conversations.some(c => c.id === activeId)) {
-            const conv = makeConversation(deriveTitle(msg) || 'New chat');
-            conv.messages = [msg];
-            return { conversations: [conv, ...state.conversations], activeConversationId: conv.id };
-          }
-          return { conversations };
-        }),
-      updateMessage: (id, updater) =>
-        set(state => {
-          const activeId = state.activeConversationId;
-          if (!activeId) return {};
-          return {
-            conversations: state.conversations.map(c =>
-              c.id === activeId
-                ? {
-                    ...c,
-                    messages: c.messages.map(m => (m.id === id ? updater(m) : m)),
-                    updatedAt: Date.now(),
-                  }
-                : c,
-            ),
-          };
-        }),
-      clearMessages: () =>
-        set(state => {
-          const activeId = state.activeConversationId;
-          if (!activeId) return {};
-          return {
-            conversations: state.conversations.map(c =>
-              c.id === activeId ? { ...c, messages: [], title: 'New chat', updatedAt: Date.now() } : c,
-            ),
-          };
-        }),
-      setRunning: running => set({ isRunning: running }),
-      setModels: models => set({ availableModels: models, modelsFetchedAt: Date.now() }),
-      setModelsLoading: loading => set({ modelsLoading: loading }),
-      setModelsError: err => set({ modelsError: err }),
-      setLocalCatalog: models =>
-        set(state => ({
-          settings: {
-            ...state.settings,
-            localCatalog: models,
-            localCatalogFetchedAt: Date.now(),
-          },
-        })),
-      addSandboxDataset: d =>
-        set(state => ({
-          sandboxDatasets: [...state.sandboxDatasets.filter(x => x.name !== d.name), d],
-        })),
-      addSandboxDocument: d =>
-        set(state => ({
-          sandboxDocuments: [...state.sandboxDocuments.filter(x => x.id !== d.id), d],
-        })),
-      removeSandboxDataset: name =>
-        set(state => ({
-          sandboxDatasets: state.sandboxDatasets.filter(x => x.name !== name),
-        })),
-      removeSandboxDocument: fileName =>
-        set(state => ({
-          sandboxDocuments: state.sandboxDocuments.filter(x => x.fileName !== fileName),
-        })),
-      setSandboxProcessing: items => set({ sandboxProcessing: items }),
-      updateSandboxProcessingItem: (fileName, patch) =>
-        set(state => ({
-          sandboxProcessing: state.sandboxProcessing.map(p =>
-            p.fileName === fileName ? { ...p, ...patch } : p,
-          ),
-        })),
-      clearSandbox: () =>
-        set({ sandboxDatasets: [], sandboxDocuments: [], sandboxProcessing: [] }),
-      resetAll: () => {
-        const freshConv = makeConversation();
-        set({
-          settings: DEFAULT_SETTINGS,
-          conversations: [freshConv],
-          activeConversationId: freshConv.id,
-          isRunning: false,
-          availableModels: [],
-          modelsLoading: false,
-          modelsError: null,
-          modelsFetchedAt: 0,
-          sandboxDatasets: [],
-          sandboxDocuments: [],
-          sandboxProcessing: [],
-        });
-      },
+        },
       };
     },
     {
       name: 'clay-settings-v1',
-      version: 3,
+      version: 5,
       migrate: (persistedState, _version) => {
         const state = (persistedState ?? {}) as Partial<{
           settings: Partial<Settings>;
@@ -289,28 +289,30 @@ export const useAppStore = create<AppState>()(
           sandboxDatasets: SandboxDataset[];
           sandboxDocuments: SandboxDocument[];
         }>;
+        const persistedLocalModels = (state.settings as {
+          localModels?: Partial<LegacyLocalModelPicks>;
+        } | undefined)?.localModels;
         const mergedSettings: Settings = {
           ...DEFAULT_SETTINGS,
-          ...(state.settings ?? {}),
-          localModels: {
-            ...DEFAULT_SETTINGS.localModels,
-            ...((state.settings as { localModels?: Partial<typeof DEFAULT_SETTINGS.localModels> } | undefined)?.localModels ?? {}),
-          },
+          ...((state.settings as Omit<Partial<Settings>, 'localModels'> | undefined) ?? {}),
+          localModels: migrateLegacyLocalModels(persistedLocalModels),
         };
 
         let conversations: Conversation[] = [];
         let activeId: string | null = null;
 
         if (Array.isArray(state.conversations) && state.conversations.length > 0) {
-          // Already migrated (v3+): keep as-is, but sanitize messages
+          // Already migrated (v3+): keep as-is, but sanitize messages and filter out empty conversations
           const now = Date.now();
-          conversations = state.conversations.map(c => ({
-            id: c.id || crypto.randomUUID(),
-            title: c.title || 'New chat',
-            messages: Array.isArray(c.messages) ? c.messages.slice(-50).map(trimMessage) : [],
-            createdAt: c.createdAt || now,
-            updatedAt: c.updatedAt || now,
-          }));
+          conversations = state.conversations
+            .filter(c => Array.isArray(c.messages) && c.messages.length > 0)
+            .map(c => ({
+              id: c.id || crypto.randomUUID(),
+              title: c.title || 'New chat',
+              messages: c.messages.slice(-50).map(trimMessage),
+              createdAt: c.createdAt || now,
+              updatedAt: c.updatedAt || now,
+            }));
           activeId = state.activeConversationId
             ?? (conversations[0]?.id ?? null);
           if (activeId && !conversations.some(c => c.id === activeId)) {
@@ -326,9 +328,9 @@ export const useAppStore = create<AppState>()(
         }
 
         if (conversations.length === 0) {
-          const conv = makeConversation();
-          conversations = [conv];
-          activeId = conv.id;
+          // Don't create a default conversation - start empty
+          conversations = [];
+          activeId = null;
         }
 
         return {
@@ -348,10 +350,12 @@ export const useAppStore = create<AppState>()(
       },
       partialize: state => ({
         settings: state.settings,
-        conversations: state.conversations.map(c => ({
-          ...c,
-          messages: c.messages.slice(-50).map(trimMessage),
-        })),
+        conversations: state.conversations
+          .filter(c => c.messages.length > 0) // Only persist conversations with messages
+          .map(c => ({
+            ...c,
+            messages: c.messages.slice(-50).map(trimMessage),
+          })),
         activeConversationId: state.activeConversationId,
         sandboxDatasets: state.sandboxDatasets,
         sandboxDocuments: state.sandboxDocuments,

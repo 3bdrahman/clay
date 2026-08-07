@@ -2,6 +2,32 @@
 
 All notable changes to **Clay** are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version follows [SemVer](https://semver.org/).
 
+## [0.3.0] — 2026-08-06
+
+### Accessibility
+
+- **ChatInput**: Added `aria-describedby` linking to helper text, `useId` for unique IDs, `aria-label` on buttons, fixed Escape key handler (now works when not disabled), added `aria-hidden` on decorative SVGs
+- **CitationPanel**: Full ARIA tab pattern implementation with `role="tablist"`, `role="tab"`, `role="tabpanel"`, `aria-selected`, `aria-controls`, `aria-labelledby`, `tabIndex` management for keyboard navigation
+- **ExampleQuestions**: Added `role="list"`/`role="listitem"`, `aria-label` on groups, `aria-disabled` on buttons, focus-visible styles with ring offset for dark mode
+- **WorkflowGraph**: Changed to semantic `<ol>`/`<li>` with `role="list"`/`role="listitem"`, `aria-label` on container, `aria-hidden` on decorative icons and connectors
+- **ChartRenderer**: Added `role="heading" aria-level={3}` on chart titles for screen reader hierarchy
+- **index.css**: Enhanced focus-visible styles for all interactive elements, added high-contrast focus utility, animation utilities, reduced motion support, disabled element cursor handling
+
+### Security
+
+- **CSP**: Tightened Content Security Policy — removed `https://3bdrahman.github.io` from `connect-src` (self-referential), added `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'` directives. Kept `'unsafe-inline'` for `style-src` due to Tailwind/Recharts runtime injection (documented as known exception)
+
+### Build & Type Safety
+
+- **vite.config.ts**: Added `sourcemap: true` for production debugging, added `arquero-vendor` and `markdown-vendor` manual chunks for better cache granularity
+- **tsconfig.app.json** / **tsconfig.node.json**: Enabled strictest TypeScript flags: `exactOptionalPropertyTypes`, `noImplicitOverride`, `noPropertyAccessFromIndexSignature`, `noUncheckedIndexedAccess`
+
+### Code Quality
+
+- Added explicit `interface ChartRendererProps` for default export
+- Fixed WorkflowGraph keyboard focus order and semantic structure
+- Improved component prop typing across all polished files
+
 ## [0.2.0] — 2026-08-01
 
 ### Breaking changes

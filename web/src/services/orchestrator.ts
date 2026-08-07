@@ -13,6 +13,12 @@ import type { PickedModels } from '../lib/models';
 import type { VectorStore } from '../lib/vectorstore';
 import type { WebSearchClient } from '../lib/websearch';
 import type { DataAnalyzer } from './analyzer';
+import {
+  expandHyDE,
+  parallelFanOut,
+  parallelGrade,
+  formatHeadingCitation,
+} from './orchestratorHelpers';
 
 export interface WorkflowOrchestrator {
   run(signal?: AbortSignal): Promise<WorkflowState>;
@@ -106,11 +112,11 @@ export function createWorkflowOrchestrator(
     return parts.join('\n\n');
   }
 
-  function buildCitations(_answer: string): void {
+  function buildCitations(): void {
     const citations: Citation[] = [];
     if (state.documents.length > 0) {
       for (const d of state.documents) {
-        citations.push({ source: d.source, page: d.page, excerpt: d.content.slice(0, 200), type: 'vectorstore' });
+        citations.push(formatHeadingCitation(d));
       }
     }
     if (state.webResults.length > 0) {
@@ -124,9 +130,7 @@ export function createWorkflowOrchestrator(
     state.citations = citations;
   }
 
-  type GradeOutcome = 'relevant' | 'irrelevant' | 'keep-on-error';
-
-  async function gradeDocRelevance(doc: Document): Promise<GradeOutcome> {
+  async function gradeDocRelevance(doc: Document): Promise<'relevant' | 'irrelevant' | 'keep-on-error'> {
     try {
       const resp = await deps.llm.invoke({
         system: DOC_GRADER_INSTRUCTIONS,
@@ -156,19 +160,26 @@ export function createWorkflowOrchestrator(
   async function runVectorstorePath(signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) return;
     beginStep('retrieve', NODE_LABELS.retrieve);
-    const docs = await deps.vectorstore.similaritySearch(question, 4);
+
+    const hypothetical = await expandHyDE(question, { llm: deps.llm, model: deps.pickedModels.eval });
+    const initialK = deps.settings.maxRetries ?? 8;
+    const rerankK = 4;
+
+    const docs = await parallelFanOut(
+      (q, k) => deps.vectorstore.similaritySearch(q, k),
+      question,
+      hypothetical,
+      initialK,
+      rerankK,
+    );
     state.documents = docs;
     endStep('retrieve', { detail: `${docs.length} docs`, meta: { count: docs.length } });
 
     beginStep('grade_docs', NODE_LABELS.grade_docs);
-    const filtered: typeof docs = [];
-    for (const doc of docs) {
-      if (signal?.aborted) return;
-      const outcome = await gradeDocRelevance(doc);
-      if (outcome === 'relevant' || outcome === 'keep-on-error') {
-        filtered.push(doc);
-      }
-    }
+    const filtered = await parallelGrade(docs, gradeDocRelevance, {
+      earlyExitAt: 4,
+      signal,
+    });
     state.documents = filtered;
     endStep('grade_docs', { detail: `${filtered.length}/${docs.length} relevant` });
   }
@@ -264,7 +275,7 @@ export function createWorkflowOrchestrator(
         callbacks.onToken ?? (() => {}),
       );
       state.answer = resp.content;
-      buildCitations(state.answer);
+      buildCitations();
       endStep('generate', { detail: 'complete' });
     } catch (e) {
       state.answer = `Error generating answer: ${e instanceof Error ? e.message : String(e)}`;
@@ -358,7 +369,7 @@ export function createWorkflowOrchestrator(
         if (!useful && state.retryCount < maxRetries) {
           state.retryCount++;
           beginStep('decide', 'Re-routing');
-          const previousSource = state.routing;
+          const previousSource: SourceType = state.routing ?? 'vectorstore';
           const fallback: SourceType = previousSource === 'vectorstore' ? 'websearch' : 'vectorstore';
           state.routing = fallback;
           endStep('decide', { detail: `-> ${fallback}` });

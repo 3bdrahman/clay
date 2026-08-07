@@ -55,11 +55,8 @@ const baseSettings = {
   theme: 'system' as const,
   localServerUrl: 'http://localhost:11434/v1',
   localModels: {
-    routing: '',
-    codeGen: '',
-    answer: '',
-    eval: '',
-    embedding: '',
+    chat: '',
+    embeddings: '',
   },
   localCatalog: [],
   localCatalogFetchedAt: 0,
@@ -323,11 +320,8 @@ describe('useClay', () => {
         provider: 'local',
         localServerUrl: 'http://localhost:11434/v1',
         localModels: {
-          routing: 'llama3:8b',
-          codeGen: '',
-          answer: 'llama3:8b',
-          eval: '',
-          embedding: '',
+          chat: 'llama3:8b',
+          embeddings: '',
         },
       } as never,
     });
@@ -345,18 +339,15 @@ describe('useClay', () => {
     expect(useAppStore.getState().settings.localCatalog.length).toBe(1);
   });
 
-  it('pickedModels in local mode returns localModels picks (empty trimmed to undefined)', async () => {
+  it('pickedModels in local mode fans chat into all 4 chat roles (empty trimmed to undefined)', async () => {
     useAppStore.setState({
       settings: {
         ...baseSettings,
         provider: 'local',
         localServerUrl: 'http://localhost:11434/v1',
         localModels: {
-          routing: 'm1',
-          codeGen: '',
-          answer: 'm2',
-          eval: '   ',
-          embedding: 'm3',
+          chat: 'm1',
+          embeddings: 'm3',
         },
       } as never,
     });
@@ -365,9 +356,9 @@ describe('useClay', () => {
 
     expect(r.current.pickedModels).toEqual({
       routing: 'm1',
-      codeGen: undefined,
-      answer: 'm2',
-      eval: undefined,
+      codeGen: 'm1',
+      answer: 'm1',
+      eval: 'm1',
       embedding: 'm3',
     });
   });

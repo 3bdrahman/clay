@@ -1,15 +1,56 @@
-import type { Document } from './types';
+import type { Document, ChunkMetadata } from './types';
 import type { EmbeddingsClient } from './embeddings';
+import { EmbeddingsConfigError } from './embeddings';
+import { estimateTokens } from './tokens';
+import { openIDB, wrapIDBStore, type IDBStore } from './idb';
+import type { BM25Index } from './bm25';
+
+/**
+ * Module-level write coordinator.
+ *
+ * Why: `addEntries` is synchronous (returns void) but IndexedDB writes are
+ * inherently async. Multiple VectorStore instances may exist in tests (and
+ * could exist in production during HMR / store resets). When instance A
+ * writes an entry and instance B is constructed and loads, B must see A's
+ * write — but B's `load()` has no knowledge of A's in-flight IDB operations.
+ *
+ * Fix: every IDB write is registered on a shared writeQueue promise.
+ * Every `load()` awaits writeQueue before reading. Once any `load()`
+ * resolves, all writes issued before that load() call have landed in IDB.
+ */
+let writeQueue: Promise<void> = Promise.resolve();
+
+function enqueueWrite(op: () => Promise<unknown>): void {
+  writeQueue = writeQueue.then<void>(() => op().then(() => undefined, (e: unknown) => {
+    console.warn('[vectorstore] async op failed:', e);
+  }));
+}
+
+export function _resetWriteQueue(): void {
+  writeQueue = Promise.resolve();
+}
+
+const LEGACY_KEY = 'clay-vector-entries-v1';
+const DB_NAME = 'clay-vector-db';
+const DB_VERSION = 1;
+const STORE_NAME = 'entries';
 
 interface VectorEntry {
   id: string;
   text: string;
-  source: string;
-  page?: number;
   embedding: number[];
+  metadata: ChunkMetadata;
 }
 
-const VECTOR_CACHE_KEY = 'clay-vector-entries-v1';
+export interface VectorStoreConfig {
+  topK?: number;
+  scoreThreshold?: number;
+  useMMR?: boolean;
+  mmrLambda?: number;
+  useHybrid?: boolean;
+  hybridAlpha?: number;
+  bm25Index?: BM25Index;
+}
 
 export interface VectorStore {
   load(): Promise<void>;
@@ -17,141 +58,303 @@ export interface VectorStore {
   addEntries(entries: Array<{ id: string; text: string; source: string; page?: number; embedding: number[] }>): void;
   removeBySource(source: string): number;
   clear(): void;
-  stats: { entries: number };
+  readonly stats: { entries: number };
 }
 
-function loadCache(): VectorEntry[] {
-  try {
-    const raw = localStorage.getItem(VECTOR_CACHE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((rawEntry): VectorEntry[] => {
-      if (!rawEntry || typeof rawEntry !== 'object') return [];
-      const e = rawEntry as Record<string, unknown>;
-      if (typeof e.id !== 'string' || typeof e.text !== 'string' || typeof e.source !== 'string') return [];
-      const embedding = coerceEmbedding(e.embedding);
-      if (embedding === null) return [];
-      const entry: VectorEntry = {
-        id: e.id,
-        text: e.text,
-        source: e.source,
-        embedding,
-      };
-      if (typeof e.page === 'number') entry.page = e.page;
-      return [entry];
-    });
-  } catch {
-    return [];
-  }
-}
-
-function coerceEmbedding(value: unknown): number[] | null {
-  if (Array.isArray(value)) {
-    return value.every(n => typeof n === 'number' && Number.isFinite(n)) ? (value as number[]) : null;
-  }
-  if (value && typeof value === 'object') {
-    const values = Object.values(value as Record<string, unknown>);
-    if (values.every(n => typeof n === 'number' && Number.isFinite(n))) return values as number[];
+function coerceLegacyEmbedding(v: unknown): number[] | null {
+  if (Array.isArray(v) && v.every((n) => typeof n === 'number' && Number.isFinite(n))) return v as number[];
+  if (v && typeof v === 'object') {
+    const vals = Object.values(v as Record<string, unknown>);
+    if (vals.every((n) => typeof n === 'number' && Number.isFinite(n))) return vals as number[];
   }
   return null;
 }
 
-function saveCache(entries: VectorEntry[]): void {
+function readLegacy(): VectorEntry[] | null {
   try {
-    localStorage.setItem(VECTOR_CACHE_KEY, JSON.stringify(entries));
-  } catch (e) {
-    console.warn('[vectorstore] failed to save cache:', e);
+    const raw = localStorage.getItem(LEGACY_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const out: VectorEntry[] = [];
+    parsed.forEach((e: unknown, i: number) => {
+      if (!e || typeof e !== 'object') return;
+      const r = e as Record<string, unknown>;
+      if (typeof r.id !== 'string' || typeof r.text !== 'string' || typeof r.source !== 'string') return;
+      const emb = coerceLegacyEmbedding(r.embedding);
+      if (!emb) return;
+      out.push({
+        id: r.id,
+        text: r.text,
+        embedding: emb,
+        metadata: {
+          source: r.source,
+          sourceHash: '',
+          page: typeof r.page === 'number' ? r.page : undefined,
+          charStart: 0,
+          charEnd: r.text.length,
+          chunkIndex: i,
+          tokenCount: estimateTokens(r.text),
+          modelId: 'unknown',
+          updatedAt: Date.now(),
+        },
+      });
+    });
+    return out;
+  } catch {
+    return null;
   }
 }
 
-function clearCache(): void {
-  try {
-    localStorage.removeItem(VECTOR_CACHE_KEY);
-  } catch (e) {
-    console.warn('[vectorstore] failed to clear cache:', e);
-  }
+function normalize(v: number[]): number[] {
+  let sum = 0;
+  for (const n of v) sum += n * n;
+  const norm = Math.sqrt(sum);
+  if (norm === 0) return v.slice();
+  return v.map((n) => n / norm);
 }
 
-export function createVectorStore(embeddings: EmbeddingsClient): VectorStore {
-  let entries: VectorEntry[] = [];
+function cosineUnit(a: number[], b: number[]): number {
+  if (a.length !== b.length) return 0;
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot; // both unit-norm
+}
+
+function minMaxNormalize(values: number[]): number[] {
+  if (values.length === 0) return values;
+  let min = values[0] as number, max = values[0] as number;
+  for (const v of values) { if (v < min) min = v; if (v > max) max = v; }
+  if (max === min) return values.map(() => 0);
+  return values.map((v) => (v - min) / (max - min));
+}
+
+interface ScoredCandidate { id: string; score: number; }
+
+function mmrSelect(candidates: ScoredCandidate[], embeddings: Map<string, number[]>, k: number, lambda: number): string[] {
+  const selected: string[] = [];
+  const remaining = candidates.slice();
+  while (selected.length < k && remaining.length > 0) {
+    let bestIdx = 0;
+    let bestScore = -Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const c = remaining[i] as ScoredCandidate;
+      const relevance = c.score;
+      let diversity = 0;
+      for (const sid of selected) {
+        const a = embeddings.get(c.id);
+        const b = embeddings.get(sid);
+        if (a && b) diversity = Math.max(diversity, cosineUnit(a, b));
+      }
+      const mmr = lambda * relevance - (1 - lambda) * diversity;
+      if (mmr > bestScore) { bestScore = mmr; bestIdx = i; }
+    }
+    const picked = remaining.splice(bestIdx, 1)[0];
+    if (picked) selected.push(picked.id);
+  }
+  return selected;
+}
+
+export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorStoreConfig): VectorStore {
+  const cfg = {
+    topK: config?.topK ?? 8,
+    scoreThreshold: config?.scoreThreshold ?? 0,
+    useMMR: config?.useMMR ?? false,
+    mmrLambda: config?.mmrLambda ?? 0.5,
+    useHybrid: config?.useHybrid ?? false,
+    hybridAlpha: config?.hybridAlpha ?? 0.5,
+    bm25Index: config?.bm25Index,
+  };
+
+  const memory = new Map<string, VectorEntry>();
+  let db: IDBStore<VectorEntry> | null = null;
   let loaded = false;
-  let loadPromise: Promise<void> | null = null;
+  let loadingPromise: Promise<void> | null = null;
+  let warnOnce = false;
+  let knownDimension: number | null = null;
+  const pendingAdds: VectorEntry[] = [];
+
+  function warnFallbackOnce(): void {
+    if (warnOnce) return;
+    warnOnce = true;
+    console.warn('[vectorstore] IndexedDB unavailable; operating without persistence');
+  }
 
   async function doLoad(): Promise<void> {
-    entries = loadCache();
+    try {
+      const idb = await openIDB(DB_NAME, DB_VERSION, (raw) => {
+        if (!raw.objectStoreNames.contains(STORE_NAME)) {
+          const store = raw.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          store.createIndex('source', 'metadata.source', { unique: false });
+          store.createIndex('modelId', 'metadata.modelId', { unique: false });
+        }
+      });
+      db = wrapIDBStore<VectorEntry>(idb, STORE_NAME);
+      if (pendingAdds.length > 0) {
+        const toFlush = pendingAdds.splice(0, pendingAdds.length);
+        for (const e of toFlush) await db.put(e);
+      }
+      const existing = await db.getAll();
+      if (existing.length === 0) {
+        const legacy = readLegacy();
+        if (legacy && legacy.length > 0) {
+          await db.putMany(legacy);
+          localStorage.removeItem(LEGACY_KEY);
+          for (const e of legacy) memory.set(e.id, e);
+        } else if (legacy !== null) {
+          // Corruption path: parsed OK but zero valid entries. Still clear the legacy key
+          // so we don't re-attempt migration on every load. User's data was unreadable; no
+          // further recovery possible.
+          localStorage.removeItem(LEGACY_KEY);
+        }
+      } else {
+        for (const e of existing) memory.set(e.id, e);
+      }
+    } catch {
+      warnFallbackOnce();
+      db = null;
+    }
     loaded = true;
   }
 
   async function load(): Promise<void> {
     if (loaded) return;
-    if (loadPromise) return loadPromise;
-    loadPromise = doLoad();
-    return loadPromise;
+    if (loadingPromise) return loadingPromise;
+    loadingPromise = (async () => {
+      await writeQueue;
+      await doLoad();
+      await writeQueue;
+    })();
+    return loadingPromise;
   }
 
-  function cosineSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length) return 0;
-    let dot = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let i = 0; i < a.length; i++) {
-      dot += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-    const denom = Math.sqrt(normA) * Math.sqrt(normB);
-    return denom === 0 ? 0 : dot / denom;
+  async function ensureLoaded(): Promise<void> {
+    if (!loaded) await load();
   }
 
-  async function similaritySearch(query: string, k = 4): Promise<Document[]> {
-    await load();
-    if (entries.length === 0) return [];
-    const queryEmbedding = (await embeddings.embed(query, { inputType: 'query' }))[0];
+  async function similaritySearch(query: string, k?: number): Promise<Document[]> {
+    await ensureLoaded();
+    const topK = k ?? cfg.topK;
+    if (memory.size === 0) return [];
+    const queryEmbeddingRaw = await embeddings.embed(query, { inputType: 'query' });
+    const queryEmbedding = queryEmbeddingRaw[0];
     if (!queryEmbedding) return [];
 
-    const scored = entries.map(e => ({
-      entry: e,
-      score: cosineSimilarity(queryEmbedding, e.embedding),
-    }));
+    // Dense cosine scoring (assumes normalized embeddings).
+    const scored: ScoredCandidate[] = [];
+    for (const e of memory.values()) {
+      scored.push({ id: e.id, score: cosineUnit(queryEmbedding, e.embedding) });
+    }
     scored.sort((a, b) => b.score - a.score);
+    const denseTop = scored.slice(0, Math.max(topK * 3, 6));
 
-    return scored.slice(0, k).map(({ entry, score }) => ({
-      id: entry.id,
-      content: entry.text,
-      source: entry.source,
-      page: entry.page,
-      score,
-    }));
+    let merged: ScoredCandidate[];
+    if (cfg.useHybrid && cfg.bm25Index) {
+      const bm25Hits = cfg.bm25Index.search(query, topK * 3);
+      const denseNorm = minMaxNormalize(denseTop.map((s) => s.score));
+      const bm25Scores = bm25Hits.map((h) => h.score);
+      const bm25Norm = minMaxNormalize(bm25Scores);
+      merged = [];
+      const allIds = new Set<string>();
+      for (const s of denseTop) allIds.add(s.id);
+      for (const h of bm25Hits) allIds.add(h.docId);
+      const denseLookup = new Map(denseTop.map((s, i) => [s.id, denseNorm[i]!] as const));
+      const bm25Lookup = new Map(bm25Hits.map((h, i) => [h.docId, bm25Norm[i]!] as const));
+      for (const id of allIds) {
+        const d = denseLookup.get(id) ?? 0;
+        const b = bm25Lookup.get(id) ?? 0;
+        merged.push({ id, score: cfg.hybridAlpha * d + (1 - cfg.hybridAlpha) * b });
+      }
+      merged.sort((a, b) => b.score - a.score);
+    } else {
+      merged = denseTop;
+    }
+
+    const filtered = merged.filter((c) => c.score >= cfg.scoreThreshold);
+
+    let chosen: string[];
+    if (cfg.useMMR) {
+      const embMap = new Map<string, number[]>();
+      for (const id of new Set(filtered.map((f) => f.id))) {
+        const e = memory.get(id);
+        if (e) embMap.set(id, e.embedding);
+      }
+      chosen = mmrSelect(filtered, embMap, topK, cfg.mmrLambda);
+    } else {
+      chosen = filtered.slice(0, topK).map((c) => c.id);
+    }
+
+    const results: Document[] = [];
+    for (const id of chosen) {
+      const e = memory.get(id);
+      if (!e) continue;
+      const score = merged.find((m) => m.id === id)?.score ?? 0;
+      const doc: Document = {
+        id: e.id,
+        content: e.text,
+        source: e.metadata.source,
+        page: e.metadata.page,
+        score,
+        metadata: e.metadata as unknown as Record<string, unknown>,
+      };
+      results.push(doc);
+    }
+    return results;
   }
 
   function addEntries(newEntries: Array<{ id: string; text: string; source: string; page?: number; embedding: number[] }>): void {
-    const existingIds = new Set(entries.map(e => e.id));
+    if (!loaded && !loadingPromise) void load();
+
     for (const e of newEntries) {
-      if (!existingIds.has(e.id)) {
-        entries.push({
-          id: e.id,
-          text: e.text,
+      const emb = normalize(e.embedding);
+      if (knownDimension === null) {
+        knownDimension = emb.length;
+      } else if (emb.length !== knownDimension) {
+        throw new EmbeddingsConfigError(
+          `embedding dimension mismatch: stored ${knownDimension}, got ${emb.length}`,
+        );
+      }
+      const entry: VectorEntry = {
+        id: e.id,
+        text: e.text,
+        embedding: emb,
+        metadata: {
           source: e.source,
+          sourceHash: '',
           page: e.page,
-          embedding: e.embedding,
-        });
-        existingIds.add(e.id);
+          charStart: 0,
+          charEnd: e.text.length,
+          chunkIndex: memory.size,
+          tokenCount: estimateTokens(e.text),
+          modelId: 'unknown',
+          updatedAt: Date.now(),
+        },
+      };
+      memory.set(entry.id, entry);
+      pendingAdds.push(entry);
+      if (db) {
+        const capture = db;
+        enqueueWrite(() => capture.put(entry));
+      } else if (!loaded && !loadingPromise) {
+        void load();
       }
     }
-    saveCache(entries);
   }
 
   function removeBySource(source: string): number {
-    const before = entries.length;
-    entries = entries.filter(e => e.source !== source);
-    saveCache(entries);
-    return before - entries.length;
+    const before = memory.size;
+    for (const [id, e] of memory) {
+      if (e.metadata.source === source) memory.delete(id);
+    }
+    if (db) enqueueWrite(() => db!.deleteByIndex('source', source));
+    return before - memory.size;
   }
 
   function clear(): void {
-    entries = [];
-    clearCache();
+    memory.clear();
+    knownDimension = null;
+    try { localStorage.removeItem(LEGACY_KEY); } catch { /* noop */ }
+    if (db) enqueueWrite(() => db!.clear());
   }
 
   return {
@@ -161,7 +364,7 @@ export function createVectorStore(embeddings: EmbeddingsClient): VectorStore {
     removeBySource,
     clear,
     get stats() {
-      return { entries: entries.length };
+      return { entries: memory.size };
     },
-  } as VectorStore & { stats: { entries: number } };
+  };
 }

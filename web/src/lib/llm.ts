@@ -19,6 +19,13 @@ export interface LLMClientConfig {
   providerLabel?: string;
 }
 
+/**
+ * Create an OpenAI-compatible LLM client.
+ * Supports both invoke (non-streaming) and stream (token-by-token) modes.
+ * @param config - Client configuration: baseUrl, apiKey, optional temperature, providerLabel
+ * @returns LLMClient with invoke() and stream() methods
+ * @throws LLMConfigError if baseUrl is empty
+ */
 export function createLLMClient(config: LLMClientConfig): LLMClient {
   const baseUrl = config.baseUrl.replace(/\/+$/, '');
   const apiKey = config.apiKey;

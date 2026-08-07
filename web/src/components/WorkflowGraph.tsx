@@ -46,7 +46,7 @@ export function WorkflowGraph({ steps, routing }: Props) {
   }
 
   return (
-    <div className="space-y-1">
+    <ol className="space-y-1" aria-label="Workflow steps" role="list">
       {nodeIds.map((nodeId, i) => {
         const node = NODE_DEFS[nodeId] ?? {
           id: nodeId,
@@ -68,12 +68,13 @@ export function WorkflowGraph({ steps, routing }: Props) {
           : 'border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-600 dark:text-ink-300';
 
         return (
-          <div key={`${nodeId}-${i}`} className="relative">
+          <li key={`${nodeId}-${i}`} className="relative" role="listitem">
             {i < nodeIds.length - 1 && (
               <div
                 className={`absolute left-[19px] top-9 w-0.5 h-3 ${
                   isComplete ? 'bg-emerald-400' : isActive ? 'bg-brand-400' : 'bg-ink-200 dark:bg-ink-700'
                 }`}
+                aria-hidden="true"
               />
             )}
             <div className={`relative flex items-start gap-3 rounded-lg border p-2.5 transition-all duration-200 ${stateClass}`}>
@@ -87,19 +88,20 @@ export function WorkflowGraph({ steps, routing }: Props) {
                     ? 'bg-rose-500 text-white'
                     : 'bg-ink-200 dark:bg-ink-700 text-ink-500 dark:text-ink-400'
                 }`}
+                aria-hidden="true"
               >
                 {isActive ? (
                   <Spinner />
                 ) : isComplete ? (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                   </svg>
                 ) : isError ? (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 ) : (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" d={node.icon} />
                   </svg>
                 )}
@@ -122,16 +124,16 @@ export function WorkflowGraph({ steps, routing }: Props) {
                 </div>
               </div>
             </div>
-          </div>
+          </li>
         );
       })}
-    </div>
+    </ol>
   );
 }
 
 function Spinner() {
   return (
-    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path
         className="opacity-75"

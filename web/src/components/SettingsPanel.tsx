@@ -31,6 +31,12 @@ function validateLocalServerUrl(url: string): string | null {
 
 type LocalModelKey = keyof LocalModelPicks;
 
+interface NimTaskDisplay {
+  key: 'routing' | 'codeGen' | 'answer' | 'eval' | 'embedding';
+  label: string;
+  hint: string;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -87,6 +93,11 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
   if (!open) return null;
 
   const tasks: Array<{ key: LocalModelKey; label: string; hint: string }> = [
+    { key: 'chat', label: 'Chat', hint: 'Routing, code gen, answer, evaluation' },
+    { key: 'embeddings', label: 'Embeddings', hint: 'Document + query vectors' },
+  ];
+
+  const nimTaskDisplay: NimTaskDisplay[] = [
     { key: 'routing', label: 'Routing', hint: 'Decides source (docs/data/web)' },
     { key: 'codeGen', label: 'Code generation', hint: 'Writes Arquero code' },
     { key: 'answer', label: 'Answer', hint: 'Final RAG answer' },
@@ -435,7 +446,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                 )}
 
                 <ul className="text-[11px] space-y-1">
-                  {tasks.map(t => (
+                  {nimTaskDisplay.map(t => (
                     <li key={t.key} className="flex items-center justify-between gap-2">
                       <div className="flex flex-col min-w-0">
                         <span className="text-ink-600 dark:text-ink-300 font-medium">{t.label}</span>
@@ -449,7 +460,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                      </span>
                    </li>
                   ))}
-               </ul>
+                </ul>
 
                 {pickedModels.answer && (
                   <div className="pt-2 mt-1 border-t border-ink-200 dark:border-ink-700 text-[10px] text-ink-500 dark:text-ink-400 flex items-center justify-between">

@@ -40,6 +40,7 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 1000,
+    sourcemap: true,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -47,6 +48,8 @@ export default defineConfig({
             if (id.includes('recharts')) return 'charts-vendor';
             if (id.includes('react') || id.includes('scheduler')) return 'react-vendor';
             if (id.includes('pdfjs')) return 'pdf-vendor';
+            if (id.includes('arquero')) return 'arquero-vendor';
+            if (id.includes('marked') || id.includes('dompurify')) return 'markdown-vendor';
             return 'vendor';
           }
           return undefined;

@@ -22,6 +22,12 @@ export class ModelsFetchError extends Error {
   }
 }
 
+/**
+ * Fetch the live model catalog from NVIDIA NIM.
+ * @param apiKey - NVIDIA NIM API key (nvapi-...)
+ * @returns Array of model info objects with id, ownedBy, created
+ * @throws ModelsFetchError if API key missing or request fails
+ */
 export async function listNimModels(apiKey: string): Promise<ModelInfo[]> {
   if (!apiKey) {
     throw new ModelsFetchError('API key required to fetch model catalog.');
@@ -42,6 +48,13 @@ export async function listNimModels(apiKey: string): Promise<ModelInfo[]> {
   }));
 }
 
+/**
+ * Fetch the model catalog from a local OpenAI-compatible server.
+ * @param baseUrl - Base URL of local server (e.g., http://localhost:11434/v1)
+ * @param apiKey - Optional API key for servers that require it
+ * @returns Array of model info objects
+ * @throws ModelsFetchError if URL empty or request fails
+ */
 export async function listLocalCatalog(
   baseUrl: string,
   apiKey: string,
@@ -66,14 +79,23 @@ export async function listLocalCatalog(
   }));
 }
 
+/**
+ * Normalize user-provided local model picks into PickedModels.
+ * The user-facing LocalModelPicks has only 2 slots (chat, embeddings) — the
+ * single chat model fans out into all 4 chat-style roles (routing, codeGen,
+ * answer, eval) that the orchestrator/analyzer/eval consume. Empty strings
+ * become undefined.
+ */
 export function pickLocalModels(picks: LocalModelPicks): PickedModels {
   const def = (s: string) => s.trim() || undefined;
+  const chat = def(picks.chat);
+  const embedding = def(picks.embeddings);
   return {
-    routing: def(picks.routing),
-    codeGen: def(picks.codeGen),
-    answer: def(picks.answer),
-    eval: def(picks.eval),
-    embedding: def(picks.embedding),
+    routing: chat,
+    codeGen: chat,
+    answer: chat,
+    eval: chat,
+    embedding,
   };
 }
 
@@ -83,6 +105,10 @@ export interface ResolvedModels {
   warnings: string[];
 }
 
+/**
+ * Resolve the final model set for the current session.
+ * For NIM: auto-picks best models from catalog. For local: validates user picks against catalog.
+ */
 export function resolveModels(
   settings: Settings,
   nimCatalog: ModelInfo[],
@@ -96,11 +122,14 @@ export function resolveModels(
       );
     } else {
       const catalogIds = new Set(settings.localCatalog.map(m => m.id));
-      for (const role of ['routing', 'codeGen', 'answer', 'eval', 'embedding'] as const) {
-        const model = picked[role];
+      const userSlots = [
+        { key: 'chat', model: picked.routing },
+        { key: 'embeddings', model: picked.embedding },
+      ] as const;
+      for (const { key, model } of userSlots) {
         if (model && !catalogIds.has(model)) {
           warnings.push(
-            `${role} model "${model}" is not in the catalog. Re-pick or refresh the catalog.`,
+            `${key} model "${model}" is not in the catalog. Re-pick or refresh the catalog.`,
           );
         }
       }
@@ -233,6 +262,11 @@ function pickHighest(
   return candidates.find(m => m.id === bestId);
 }
 
+/**
+ * Heuristically pick the best model for each task from the NIM catalog.
+ * @param models - Full model catalog from NIM
+ * @returns PickedModels with routing, codeGen, answer, eval, embedding
+ */
 export function pickBestModels(models: ModelInfo[]): PickedModels {
   const chats = models.filter(m => isGeneralChat(m.id));
   const codes = models.filter(m => isCodeSpecialist(m.id));
@@ -284,6 +318,9 @@ export function pickBestModels(models: ModelInfo[]): PickedModels {
   };
 }
 
+/**
+ * Get human-readable description of a model class.
+ */
 export function describeModelClass(cls: ModelClass): string {
   switch (cls) {
     case 'tiny': return 'tiny';
@@ -294,6 +331,9 @@ export function describeModelClass(cls: ModelClass): string {
   }
 }
 
+/**
+ * Infer the model class (size tier) from a model ID string.
+ */
 export function modelClass(id: string): ModelClass {
   return inferClass(id);
 }

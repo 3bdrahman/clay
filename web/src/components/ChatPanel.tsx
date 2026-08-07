@@ -22,7 +22,7 @@ function useActiveMessages(): ChatMessage[] {
   return messages;
 }
 
-export function ChatPanel({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function ChatPanel({ onOpenSettings, onOpenData }: { onOpenSettings: () => void; onOpenData: () => void }) {
   const messages = useActiveMessages();
   const addMessage = useAppStore(s => s.addMessage);
   const updateMessage = useAppStore(s => s.updateMessage);
@@ -190,6 +190,7 @@ const showExamples = messages.length === 0 && !isRunning;
             <LandingHero
               onGetStarted={onOpenSettings}
               onLoadSample={loadSampleData}
+              onAddData={onOpenData}
               onExampleSelect={handleSubmit}
             />
           ) : showExamples ? (

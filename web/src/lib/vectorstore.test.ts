@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createVectorStore } from './vectorstore';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createVectorStore, _resetWriteQueue } from './vectorstore';
 import type { EmbeddingsClient } from './embeddings';
 
 const mockEmbeddings: EmbeddingsClient = {
@@ -9,13 +9,126 @@ const mockEmbeddings: EmbeddingsClient = {
   }),
 };
 
+// Minimal inline fake IDB so the legacy test file persists across loads via IDB.
+interface FakeStore { _data: Map<string, unknown>; _indexes: Map<string, string>; keyPath: string; }
+function installFakeIDB(): void {
+  const dbs = new Map<string, Map<string, FakeStore>>();
+  (globalThis as Record<string, unknown>).indexedDB = {
+    open(name: string) {
+      const reqObj = {
+        result: undefined as unknown as { objectStoreNames: { contains(n: string): boolean }; createObjectStore(n: string, opts: { keyPath: string }): FakeStore; transaction(s: string, mode: string): { objectStore(n: string): { put(v: unknown): { onsuccess: (() => void) | null }; getAll(): { onsuccess: ((cb: () => void) => void) | null; result: unknown }; delete(k: string): { onsuccess: (() => void) | null }; clear(): { onsuccess: (() => void) | null }; index(n: string): { getAllKeys(q: unknown): { onsuccess: ((cb: () => void) => void) | null; result: unknown } } }; oncomplete: (() => void) | null; onerror: (() => void) | null; onabort: (() => void) | null; error: Error | null }; createObjectStore(n: string, opts: { keyPath: string }): FakeStore; close(): void },
+        onupgradeneeded: null as ((e: Event) => void) | null,
+        onsuccess: null as ((e: Event) => void) | null,
+        onerror: null as ((e: Event) => void) | null,
+        onblocked: null as ((e: Event) => void) | null,
+      };
+      queueMicrotask(() => {
+        let stores = dbs.get(name);
+        if (!stores) {
+          stores = new Map();
+          dbs.set(name, stores);
+        }
+        const db = {
+          _stores: stores,
+          objectStoreNames: { contains: (n: string) => stores!.has(n) },
+          createObjectStore(n: string, opts: { keyPath: string }) {
+            const s: FakeStore = { _data: new Map(), _indexes: new Map(), keyPath: opts.keyPath };
+            stores!.set(n, s);
+            return {
+              ...s,
+              createIndex(name: string, keyPath: string) {
+                s._indexes.set(name, keyPath);
+                return { name, keyPath };
+              },
+            } as unknown as FakeStore & { createIndex(name: string, keyPath: string): unknown };
+          },
+          transaction(stores_: string, _mode: string) {
+            const s = stores!.get(stores_);
+            if (!s) throw new Error(`store ${stores_} missing`);
+            return {
+              _stores: stores!,
+              objectStore(st: string) {
+                const target = stores!.get(st);
+                if (!target) throw new Error(`store ${st} missing`);
+                return {
+                  put(v: unknown) {
+                    const key = String((v as Record<string, unknown>)[target.keyPath]);
+                    target._data.set(key, v);
+                    const r: { onsuccess: ((this: IDBRequest, ev: Event) => void) | null; result: IDBValidKey } = { onsuccess: null, result: key };
+                    queueMicrotask(() => r.onsuccess?.call(r as unknown as IDBRequest, new Event('success')));
+                    return r;
+                  },
+                  getAll() {
+                    const r: { onsuccess: ((this: IDBRequest, ev: Event) => void) | null; result: unknown } = { onsuccess: null, result: Array.from(target._data.values()) };
+                    queueMicrotask(() => r.onsuccess?.call(r as unknown as IDBRequest, new Event('success')));
+                    return r;
+                  },
+                  delete(k: string) {
+                    target._data.delete(k);
+                    const r: { onsuccess: ((this: IDBRequest, ev: Event) => void) | null; result: undefined } = { onsuccess: null, result: undefined };
+                    queueMicrotask(() => r.onsuccess?.call(r as unknown as IDBRequest, new Event('success')));
+                    return r;
+                  },
+                  clear() {
+                    target._data.clear();
+                    const r: { onsuccess: ((this: IDBRequest, ev: Event) => void) | null; result: undefined } = { onsuccess: null, result: undefined };
+                    queueMicrotask(() => r.onsuccess?.call(r as unknown as IDBRequest, new Event('success')));
+                    return r;
+                  },
+                  index(n: string) {
+                    return {
+                      getAllKeys(q: unknown) {
+                        const keys: IDBValidKey[] = [];
+                        const keyPath = (target as FakeStore)._indexes.get(n) ?? n;
+                        const path = keyPath.split('.');
+                        for (const [k, v] of target._data) {
+                          let cur: unknown = v;
+                          for (const p of path) {
+                            if (cur && typeof cur === 'object') cur = (cur as Record<string, unknown>)[p];
+                            else { cur = undefined; break; }
+                          }
+                          if (String(cur) === String(q)) keys.push(k);
+                        }
+                        const r: { onsuccess: ((this: IDBRequest, ev: Event) => void) | null; result: IDBValidKey[] } = { onsuccess: null, result: keys };
+                        queueMicrotask(() => r.onsuccess?.call(r as unknown as IDBRequest, new Event('success')));
+                        return r;
+                      },
+                    };
+                  },
+                };
+              },
+              oncomplete: null as (() => void) | null,
+              onerror: null as (() => void) | null,
+              onabort: null as (() => void) | null,
+              error: null as Error | null,
+            };
+          },
+          close() { /* noop */ },
+        };
+        reqObj.result = db;
+        if (reqObj.onupgradeneeded) {
+          reqObj.onupgradeneeded(new Event('upgradeneeded'));
+        }
+        if (reqObj.onsuccess) reqObj.onsuccess(new Event('success'));
+      });
+      return reqObj;
+    },
+  };
+}
+
 describe('createVectorStore', () => {
   let vectorstore: ReturnType<typeof createVectorStore>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    installFakeIDB();
+    _resetWriteQueue();
     vectorstore = createVectorStore(mockEmbeddings);
+  });
+
+  afterEach(() => {
+    (globalThis as Record<string, unknown>).indexedDB = undefined;
   });
 
   it('starts empty', async () => {
@@ -32,9 +145,8 @@ describe('createVectorStore', () => {
     vectorstore.addEntries(entries);
     expect(vectorstore.stats.entries).toBe(2);
 
-    // Verify localStorage cache
-    const cached = JSON.parse(localStorage.getItem('clay-vector-entries-v1') ?? '[]');
-    expect(cached).toHaveLength(2);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(localStorage.getItem('clay-vector-entries-v1')).toBeNull();
   });
 
   it('persists across load calls', async () => {
@@ -88,9 +200,9 @@ describe('createVectorStore', () => {
     expect(removed).toBe(2);
     expect(vectorstore.stats.entries).toBe(1);
 
-    const cached = JSON.parse(localStorage.getItem('clay-vector-entries-v1') ?? '[]');
-    expect(cached).toHaveLength(1);
-    expect(cached[0].source).toBe('doc2');
+    const vs2 = createVectorStore(mockEmbeddings);
+    await vs2.load();
+    expect(vs2.stats.entries).toBe(1);
   });
 
   it('clear removes all entries and clears cache', async () => {

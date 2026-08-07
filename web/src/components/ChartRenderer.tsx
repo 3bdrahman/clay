@@ -19,7 +19,11 @@ import type { ChartConfig } from '../lib/types';
 
 const COLORS = ['#1184e7', '#0e3a6f', '#3a9ff8', '#7fc1fc', '#bbdcfd', '#0567c4', '#0752a0', '#0a4585'];
 
-export default function ChartRenderer({ config }: { config: ChartConfig }) {
+interface ChartRendererProps {
+  config: ChartConfig;
+}
+
+export default function ChartRenderer({ config }: ChartRendererProps) {
   const type = config.type;
   const title = config.title;
   const xKey = config.xKey;
@@ -29,7 +33,9 @@ export default function ChartRenderer({ config }: { config: ChartConfig }) {
   if (type === 'bar') {
     return (
       <div>
-        <div className="text-[11px] font-semibold text-ink-700 dark:text-ink-300 mb-2">{title}</div>
+        <div className="text-[11px] font-semibold text-ink-700 dark:text-ink-300 mb-2" role="heading" aria-level={3}>
+          {title}
+        </div>
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 24 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.15} />
@@ -62,7 +68,9 @@ export default function ChartRenderer({ config }: { config: ChartConfig }) {
   if (type === 'line') {
     return (
       <div>
-        <div className="text-[11px] font-semibold text-ink-700 dark:text-ink-300 mb-2">{title}</div>
+        <div className="text-[11px] font-semibold text-ink-700 dark:text-ink-300 mb-2" role="heading" aria-level={3}>
+          {title}
+        </div>
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 24 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.15} />
@@ -89,7 +97,9 @@ export default function ChartRenderer({ config }: { config: ChartConfig }) {
   if (type === 'pie') {
     return (
       <div>
-        <div className="text-[11px] font-semibold text-ink-700 dark:text-ink-300 mb-2">{title}</div>
+        <div className="text-[11px] font-semibold text-ink-700 dark:text-ink-300 mb-2" role="heading" aria-level={3}>
+          {title}
+        </div>
         <ResponsiveContainer width="100%" height={240}>
           <PieChart>
             <Pie

@@ -22,6 +22,10 @@ export interface WebSearchClient {
 // Order matters: named entities (other than &) must be decoded first so
 // that a literal '&' produced by decoding one entity is not double-decoded
 // when & runs last.
+/**
+ * Decode common HTML entities to plain text.
+ * Order matters: named entities (other than &) must be decoded first.
+ */
 export function decodeHtmlEntities(s: string): string {
   return s
     .replace(/</g, '<')
@@ -32,6 +36,10 @@ export function decodeHtmlEntities(s: string): string {
     .replace(/&/g, '&');
 }
 
+/**
+ * Extract the real destination URL from a DuckDuckGo redirect link.
+ * If parsing fails, returns the original URL.
+ */
 export function extractRealUrl(ddgUrl: string): string {
   try {
     const u = new URL(ddgUrl);
@@ -42,6 +50,13 @@ export function extractRealUrl(ddgUrl: string): string {
   }
 }
 
+/**
+ * Parse DuckDuckGo HTML search results into WebResult array.
+ * Falls back to demo notice if no results found.
+ * @param html - Raw HTML from DuckDuckGo
+ * @param k - Maximum number of results to return
+ * @returns Array of WebResult objects
+ */
 export function parseDuckDuckGoHtml(html: string, k: number): WebResult[] {
   const results: WebResult[] = [];
   const resultRegex =
@@ -74,6 +89,11 @@ export function parseDuckDuckGoHtml(html: string, k: number): WebResult[] {
   return results;
 }
 
+/**
+ * Create a web search client based on settings (Serper or DuckDuckGo).
+ * @param settings - App settings with provider choice and API keys
+ * @returns WebSearchClient with search(query, k?) method
+ */
 export function createWebSearchClient(settings: Settings): WebSearchClient {
   async function searchSerper(query: string, k: number): Promise<WebResult[]> {
     const resp = await fetch('https://google.serper.dev/search', {

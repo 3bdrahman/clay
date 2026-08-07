@@ -1,11 +1,8 @@
 // Core type definitions for Clay
 
 export interface LocalModelPicks {
-  routing: string;
-  codeGen: string;
-  answer: string;
-  eval: string;
-  embedding: string;
+  chat: string;
+  embeddings: string;
 }
 
 export type ProviderKind = 'nim' | 'local';
@@ -149,3 +146,61 @@ export interface EmbeddingResponse {
   embeddings: number[][];
   model?: string;
 }
+
+/** Structural + provenance metadata for a single chunk, used as the cache key and citation source. */
+export interface ChunkMetadata {
+  source: string;
+  sourceHash: string;
+  page?: number;
+  heading?: string;
+  charStart: number;
+  charEnd: number;
+  chunkIndex: number;
+  tokenCount: number;
+  modelId: string;
+  updatedAt?: number;
+}
+
+/** Tunable parameters for the retrieval phase (top-k, score gate, MMR, hybrid fusion). */
+export interface RetrievalConfig {
+  topK: number;
+  scoreThreshold: number;
+  useMMR: boolean;
+  mmrLambda: number;
+  useHybrid: boolean;
+  hybridAlpha: number;
+}
+
+/** LLM-as-judge relevance verdict for a single retrieved document. */
+export interface GradeResult {
+  docId: string;
+  relevant: boolean;
+  score?: number;
+}
+
+/** Per-question evaluation metrics with per-stage latency breakdown (v2 eval harness). */
+export interface EvalResultV2 {
+  questionId: string;
+  nDCGAtK: number;
+  MRR: number;
+  recallAtK: number;
+  latencyMs: number;
+  stageLatencies: {
+    retrieveMs: number;
+    gradeMs: number;
+    generateMs: number;
+    evaluateMs: number;
+  };
+  routingCorrect: boolean;
+  error?: string;
+}
+
+/** Default retrieval configuration: top-k 8, score gate 0.25, hybrid fusion on (alpha 0.5), MMR off. */
+export const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
+  topK: 8,
+  scoreThreshold: 0.25,
+  useMMR: false,
+  mmrLambda: 0.5,
+  useHybrid: true,
+  hybridAlpha: 0.5,
+};

@@ -2,6 +2,7 @@ export type EmbeddingInputType = 'query' | 'passage';
 
 export interface EmbedOptions {
   inputType?: EmbeddingInputType;
+  cache?: EmbeddingCacheLike;
 }
 
 export interface EmbeddingsClient {
@@ -22,6 +23,16 @@ export interface EmbeddingsClientConfig {
   providerLabel?: string;
 }
 
+/**
+ * Injected cache seam. The concrete `EmbeddingCache` (T5, keyed by
+ * `modelId` + SHA-256 text hash) will satisfy this shape; here we only depend
+ * on the contract so T4 can ship before T5 exists.
+ */
+export interface EmbeddingCacheLike {
+  get(modelId: string, textHash: string): number[] | undefined;
+  set(modelId: string, textHash: string, embedding: number[]): void;
+}
+
 // NVIDIA NIM asymmetric retrieval models (e.g. nv-embedqa-e5-v5,
 // nv-embedqa-mistral-7b-v2) reject requests without `input_type`. Symmetric
 // embedding models (e.g. llama-nemotron-embed-v1, nomic-embed-text) accept either.
@@ -35,15 +46,151 @@ function isAsymmetricModel(modelId: string): boolean {
   return ASYMMETRIC_MODEL_PATTERNS.some(p => p.test(lower));
 }
 
+/** Provider max input. Inputs over this are rejected, never silently truncated. */
+const MAX_INPUT_TOKENS = 8192;
+/** Hard cap on number of inputs per API request. */
+const MAX_BATCH = 64;
+/** Retry policy for transient (429/503) failures. */
+const MAX_ATTEMPTS = 3;
+const BASE_BACKOFF_MS = 1000;
+const MAX_BACKOFF_MS = 8000;
+
+/** Word-count token estimate (heuristic; matches the 1.3x factor in T1's tokens.ts). */
+function estimateTokens(text: string): number {
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return Math.ceil(words * 1.3);
+}
+
+/** Stable text hash for cache keys. Sync FNV-1a — no async Web Crypto here. */
+function hashText(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16);
+}
+
+/** L2-normalize a vector in place-free form. Zero-norm → returned unchanged. */
+function normalizeVector(v: number[]): number[] {
+  let sumSq = 0;
+  for (let i = 0; i < v.length; i += 1) sumSq += v[i] * v[i];
+  const norm = Math.sqrt(sumSq);
+  if (norm === 0) return [...v];
+  return v.map((x) => x / norm);
+}
+
+/** Parse Retry-After (seconds) from a Headers-like object, if present. */
+function parseRetryAfter(raw: unknown, fallback: number): number {
+  if (raw == null) return fallback;
+  const sec = Number(raw);
+  return Number.isFinite(sec) && sec >= 0 ? sec * 1000 : fallback;
+}
+
+interface EmbeddingDatum {
+  embedding: number[];
+}
+
+interface EmbeddingResponse {
+  data?: EmbeddingDatum[];
+}
+
+type GetterLike = { get: (k: string) => string | null | undefined };
+type StringRecord = Record<string, string>;
+type MaybeGetter = { get?: unknown };
+
+function hasGet(obj: object): boolean {
+  const own = (obj as Record<PropertyKey, unknown>).get;
+  if (typeof own === 'function') return true;
+  // Headers and Map store `get` on their prototype (not own enumerable), so
+  // check the inherited method — Object.entries would miss it.
+  const proto = Object.getPrototypeOf(obj) as MaybeGetter | null;
+  return proto !== null && typeof proto.get === 'function';
+}
+
+function isGetterLike(v: unknown): v is GetterLike {
+  if (typeof v !== 'object' || v === null) return false;
+  return hasGet(v);
+}
+
+function isStringRecord(v: unknown): v is StringRecord {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function readRetryAfter(headers: unknown): string | undefined {
+  if (isGetterLike(headers)) return headers.get('retry-after') ?? undefined;
+  if (isStringRecord(headers)) return headers['retry-after'];
+  return undefined;
+}
+
+async function fetchWithRetry(
+  url: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown>,
+): Promise<EmbeddingDatum[]> {
+  let lastStatus = 0;
+  let lastBody = '';
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    if (resp.ok) {
+      const data = (await resp.json()) as EmbeddingResponse;
+      return data.data ?? [];
+    }
+    lastStatus = resp.status;
+    lastBody = typeof resp.text === 'function' ? await resp.text() : '';
+    const retryable = resp.status === 429 || resp.status === 503;
+    if (!retryable || attempt === MAX_ATTEMPTS) break;
+    const delay = Math.min(
+      parseRetryAfter(readRetryAfter(resp.headers), BASE_BACKOFF_MS * attempt),
+      MAX_BACKOFF_MS,
+    );
+    await new Promise<void>((r) => setTimeout(r, delay));
+  }
+  throw new Error(`Embedding API error ${lastStatus}: ${lastBody}`);
+}
+
+/**
+ * Create an embeddings client for OpenAI-compatible embeddings API.
+ * Hardened with batch splitting (MAX_BATCH, aggregate-token budget), retry
+ * with exponential backoff on 429/503 honoring Retry-After, input length cap
+ * (MAX_INPUT_TOKENS), dimension validation, L2 normalization, and optional
+ * injectable cache.
+ * Returns are L2-normalized; zero-norm vectors pass through unchanged.
+ */
 export function createEmbeddingsClient(config: EmbeddingsClientConfig): EmbeddingsClient {
   const baseUrl = config.baseUrl.replace(/\/+$/, '');
   const apiKey = config.apiKey;
   const embeddingModel = config.embeddingModel;
   const providerLabel = config.providerLabel ?? 'provider';
 
+  // Greedy chunking: pack up to MAX_BATCH inputs whose aggregate estimated
+  // tokens fit MAX_INPUT_TOKENS. Since per-input length is validated upstream,
+  // this only shrinks a batch when many medium inputs jointly exceed the limit.
+  function splitIntoBatches(inputs: string[]): string[][] {
+    const batches: string[][] = [];
+    let current: string[] = [];
+    let currentTokens = 0;
+    for (const input of inputs) {
+      const tokens = estimateTokens(input);
+      const wouldExceedBatch = current.length >= MAX_BATCH;
+      const wouldExceedTokens = currentTokens + tokens > MAX_INPUT_TOKENS;
+      if (current.length > 0 && (wouldExceedBatch || wouldExceedTokens)) {
+        batches.push(current);
+        current = [];
+        currentTokens = 0;
+      }
+      current.push(input);
+      currentTokens += tokens;
+    }
+    if (current.length > 0) batches.push(current);
+    return batches;
+  }
+
   async function embed(input: string | string[], opts?: EmbedOptions): Promise<number[][]> {
     if (!baseUrl) {
-      throw new EmbeddingsConfigError(`${providerLabel} base URL is empty. Open Settings and configure it.`);
+      throw new EmbeddingsConfigError(
+        `${providerLabel} base URL is empty. Open Settings and configure it.`,
+      );
     }
     if (!embeddingModel) {
       throw new EmbeddingsConfigError(
@@ -51,26 +198,76 @@ export function createEmbeddingsClient(config: EmbeddingsClientConfig): Embeddin
       );
     }
 
-    const body: Record<string, unknown> = {
-      model: embeddingModel,
-      input: Array.isArray(input) ? input : [input],
-    };
-    if (isAsymmetricModel(embeddingModel)) {
-      body.input_type = opts?.inputType ?? 'passage';
+    const inputs = Array.isArray(input) ? input : [input];
+
+    // Per-input length cap: reject oversized inputs rather than silently truncate.
+    for (const text of inputs) {
+      const tokens = estimateTokens(text);
+      if (tokens > MAX_INPUT_TOKENS) {
+        throw new EmbeddingsConfigError(
+          `Input exceeds ${MAX_INPUT_TOKENS} token limit (estimated ${tokens}). Split before embedding.`,
+        );
+      }
+    }
+
+    // Cache lookup + remaining-uncached partition.
+    const cache = opts?.cache;
+    const results: number[][] = [];
+    const toFetch: string[] = [];
+    const fetchIdx: number[] = [];
+    for (let i = 0; i < inputs.length; i += 1) {
+      const text = inputs[i];
+      // Cache holds already-normalized vectors; return as-is to avoid FP drift.
+      const cached = cache?.get(embeddingModel, hashText(text));
+      if (cached !== undefined) {
+        results[i] = cached;
+      } else {
+        toFetch.push(text);
+        fetchIdx.push(i);
+      }
+    }
+
+    if (toFetch.length === 0) {
+      return results;
     }
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-    const resp = await fetch(`${baseUrl}/embeddings`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) throw new Error(`Embedding API error ${resp.status}: ${await resp.text()}`);
+    const inputType = isAsymmetricModel(embeddingModel) ? opts?.inputType ?? 'passage' : undefined;
 
-    const data = await resp.json();
-    return (data.data || []).map((d: { embedding: number[] }) => d.embedding);
+    // Batch + dispatch each chunk via the retrying fetch helper.
+    const batches = splitIntoBatches(toFetch);
+    const allFetched: number[][] = [];
+    for (const batch of batches) {
+      const body: Record<string, unknown> = { model: embeddingModel, input: batch };
+      if (inputType !== undefined) body.input_type = inputType;
+      const data = await fetchWithRetry(`${baseUrl}/embeddings`, headers, body);
+
+      // Dimension validation: all embeddings in a response must share one length.
+      let dim = -1;
+      const batchVectors = data.map((d) => {
+        const vec = d.embedding;
+        if (dim === -1) dim = vec.length;
+        if (vec.length !== dim) {
+          throw new EmbeddingsConfigError(
+            `Embedding dimension mismatch within batch: expected ${dim}, got ${vec.length}.`,
+          );
+        }
+        return normalizeVector(vec);
+      });
+      allFetched.push(...batchVectors);
+    }
+
+    // Write fetched vectors back to cache and into the result slots.
+    for (let j = 0; j < allFetched.length; j += 1) {
+      const text = toFetch[j];
+      const vec = allFetched[j];
+      cache?.set(embeddingModel, hashText(text), vec);
+      results[fetchIdx[j]] = vec;
+    }
+
+    return results;
   }
 
   return { embed };
