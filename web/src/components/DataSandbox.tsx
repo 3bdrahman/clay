@@ -9,14 +9,14 @@ interface Props {
   addFiles: (files: FileList | File[]) => Promise<void>;
   loadSampleData: () => Promise<void>;
   clearSandboxData: () => void;
+  removeSandboxDocument: (fileName: string) => void;
+  removeSandboxDataset: (name: string) => void;
 }
 
-export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSandboxData }: Props) {
+export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSandboxData, removeSandboxDocument, removeSandboxDataset }: Props) {
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
   const sandboxProcessing = useAppStore(s => s.sandboxProcessing);
-  const removeSandboxDataset = useAppStore(s => s.removeSandboxDataset);
-  const removeSandboxDocument = useAppStore(s => s.removeSandboxDocument);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -73,14 +73,6 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
     },
     [handleFiles],
   );
-
-  const handleRemoveDataset = (name: string) => {
-    removeSandboxDataset(name);
-  };
-
-  const handleRemoveDocument = (fileName: string) => {
-    removeSandboxDocument(fileName);
-  };
 
   const handleLoadSample = async () => {
     setIsWorking(true);
@@ -265,7 +257,7 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
                      </div>
                    </div>
                     <button
-                      onClick={() => handleRemoveDataset(d.name)}
+                      onClick={() => removeSandboxDataset(d.name)}
                       className="text-ink-400 hover:text-rose-500 transition flex-shrink-0"
                       type="button"
                       aria-label={`Remove ${d.name}`}
@@ -308,7 +300,7 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
                      </div>
                    </div>
                     <button
-                      onClick={() => handleRemoveDocument(d.fileName)}
+                      onClick={() => removeSandboxDocument(d.fileName)}
                       className="text-ink-400 hover:text-rose-500 transition flex-shrink-0"
                       type="button"
                       aria-label={`Remove ${d.fileName}`}

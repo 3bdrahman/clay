@@ -4,6 +4,7 @@ import { act } from 'react';
 import type { ReactNode } from 'react';
 import { useClay, type ClayServices } from './useClay';
 import { useAppStore } from '../store';
+import { listSandboxTableNames } from '../services/sandboxTables';
 
 const originalFetch = globalThis.fetch;
 
@@ -94,16 +95,16 @@ describe('useClay', () => {
     return result;
   }
 
-  it('initializes in demo mode when no API key is set', async () => {
+  it('requires configuration when no API key is set', async () => {
     const r = render();
     await flush(6);
-    expect(r.current.services?.ready).toBe(true);
+    expect(r.current.services).toBeNull();
     expect(r.current.needsConfiguration).toBe(true);
     expect(r.current.loading).toBe(false);
     expect(r.current.error).toBeNull();
   });
 
-  it('exposes pickedModels in demo mode (empty picks)', async () => {
+  it('exposes pickedModels when no API key (empty picks)', async () => {
     const r = render();
     await flush(6);
     expect(r.current.pickedModels).toBeDefined();
@@ -206,6 +207,18 @@ describe('useClay', () => {
   });
 
   it('addFiles processes a CSV File into a sandbox dataset', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
+      data: [
+        { id: 'mistral-small-24b-instruct', created: 1, owned_by: 'mistralai' },
+        { id: 'meta/llama-3.1-405b-instruct', created: 2, owned_by: 'meta' },
+        { id: 'intfloat/e5-large-v2', created: 3, owned_by: 'intfloat' },
+      ],
+    }));
+    globalThis.fetch = fetchMock as never;
+
+    useAppStore.setState({
+      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+    });
     const r = render();
     await flush(6);
     expect(r.current.services?.ready).toBe(true);
@@ -226,8 +239,21 @@ describe('useClay', () => {
   });
 
   it('addFiles rejects an unsupported file type with an error status', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
+      data: [
+        { id: 'mistral-small-24b-instruct', created: 1, owned_by: 'mistralai' },
+        { id: 'meta/llama-3.1-405b-instruct', created: 2, owned_by: 'meta' },
+        { id: 'intfloat/e5-large-v2', created: 3, owned_by: 'intfloat' },
+      ],
+    }));
+    globalThis.fetch = fetchMock as never;
+
+    useAppStore.setState({
+      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+    });
     const r = render();
     await flush(6);
+    expect(r.current.services?.ready).toBe(true);
 
     const file = new File(['x'], 'unknown.xyz', { type: 'application/octet-stream' });
 
@@ -242,8 +268,21 @@ describe('useClay', () => {
   });
 
   it('addFiles rejects files larger than 25MB', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
+      data: [
+        { id: 'mistral-small-24b-instruct', created: 1, owned_by: 'mistralai' },
+        { id: 'meta/llama-3.1-405b-instruct', created: 2, owned_by: 'meta' },
+        { id: 'intfloat/e5-large-v2', created: 3, owned_by: 'intfloat' },
+      ],
+    }));
+    globalThis.fetch = fetchMock as never;
+
+    useAppStore.setState({
+      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+    });
     const r = render();
     await flush(6);
+    expect(r.current.services?.ready).toBe(true);
 
     const big = new File([new Uint8Array(0)], 'big.csv', { type: 'text/csv' });
     Object.defineProperty(big, 'size', { value: 26 * 1024 * 1024 });
@@ -259,6 +298,18 @@ describe('useClay', () => {
   });
 
   it('addFiles processes a text File into a vectorstore document', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
+      data: [
+        { id: 'mistral-small-24b-instruct', created: 1, owned_by: 'mistralai' },
+        { id: 'meta/llama-3.1-405b-instruct', created: 2, owned_by: 'meta' },
+        { id: 'intfloat/e5-large-v2', created: 3, owned_by: 'intfloat' },
+      ],
+    }));
+    globalThis.fetch = fetchMock as never;
+
+    useAppStore.setState({
+      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+    });
     const r = render();
     await flush(6);
     const sv = r.current.services as ClayServices | undefined;
@@ -284,6 +335,88 @@ describe('useClay', () => {
     expect(doc).toBeDefined();
     expect(doc?.chunkCount).toBeGreaterThan(0);
     expect(sv!.vectorstore.stats.entries).toBeGreaterThan(0);
+  });
+
+  it('removeSandboxDocument purges the vectorstore and the store row', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
+      data: [
+        { id: 'mistral-small-24b-instruct', created: 1, owned_by: 'mistralai' },
+        { id: 'meta/llama-3.1-405b-instruct', created: 2, owned_by: 'meta' },
+        { id: 'intfloat/e5-large-v2', created: 3, owned_by: 'intfloat' },
+      ],
+    }));
+    globalThis.fetch = fetchMock as never;
+
+    useAppStore.setState({
+      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+    });
+    const r = render();
+    await flush(6);
+    const sv = r.current.services as ClayServices | undefined;
+    expect(sv?.ready).toBe(true);
+
+    (sv!.embeddings.embed as unknown) = vi.fn(async (input: string | string[]) => {
+      const arr = Array.isArray(input) ? input : [input];
+      return arr.map(() => new Array(8).fill(0.1));
+    });
+
+    const text =
+      'This is the first chunk of a text file meant to exceed the chunk size threshold. '.repeat(20) +
+      'Second chunk here with a bit more content, again repeated to ensure multiple chunks form. '.repeat(20);
+    const file = new File([text], 'notes.txt', { type: 'text/plain' });
+
+    await act(async () => {
+      await r.current.addFiles([file]);
+    });
+    await flush(3);
+
+    expect(sv!.vectorstore.stats.entries).toBeGreaterThan(0);
+    expect(useAppStore.getState().sandboxDocuments.length).toBe(1);
+
+    act(() => {
+      r.current.removeSandboxDocument('notes.txt');
+    });
+    await flush(2);
+
+    expect(sv!.vectorstore.stats.entries).toBe(0);
+    expect(useAppStore.getState().sandboxDocuments).toEqual([]);
+  });
+
+  it('removeSandboxDataset unregisters the Arquero table and the store row', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
+      data: [
+        { id: 'mistral-small-24b-instruct', created: 1, owned_by: 'mistralai' },
+        { id: 'meta/llama-3.1-405b-instruct', created: 2, owned_by: 'meta' },
+        { id: 'intfloat/e5-large-v2', created: 3, owned_by: 'intfloat' },
+      ],
+    }));
+    globalThis.fetch = fetchMock as never;
+
+    useAppStore.setState({
+      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+    });
+    const r = render();
+    await flush(6);
+    expect(r.current.services?.ready).toBe(true);
+
+    const csv = 'name,age\nAlice,30\nBob,25';
+    const file = new File([csv], 'people.csv', { type: 'text/csv' });
+
+    await act(async () => {
+      await r.current.addFiles([file]);
+    });
+    await flush(3);
+
+    expect(useAppStore.getState().sandboxDatasets.length).toBe(1);
+    expect(listSandboxTableNames()).toContain('people');
+
+    act(() => {
+      r.current.removeSandboxDataset('people');
+    });
+    await flush(2);
+
+    expect(useAppStore.getState().sandboxDatasets).toEqual([]);
+    expect(listSandboxTableNames()).not.toContain('people');
   });
 
   it('refreshModels with NIM API key triggers a models fetch', async () => {

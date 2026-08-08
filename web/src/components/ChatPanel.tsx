@@ -22,7 +22,7 @@ function useActiveMessages(): ChatMessage[] {
   return messages;
 }
 
-export function ChatPanel({ onOpenSettings, onOpenData }: { onOpenSettings: () => void; onOpenData: () => void }) {
+export function ChatPanel({ onOpenData }: { onOpenData: () => void }) {
   const messages = useActiveMessages();
   const addMessage = useAppStore(s => s.addMessage);
   const updateMessage = useAppStore(s => s.updateMessage);
@@ -174,7 +174,7 @@ export function ChatPanel({ onOpenSettings, onOpenData }: { onOpenSettings: () =
   };
 
 const showExamples = messages.length === 0 && !isRunning;
-  const isDemoMode = needsConfiguration && !loading && !error;
+  const showLanding = messages.length === 0 && needsConfiguration && !loading && !error;
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0">
@@ -186,9 +186,8 @@ const showExamples = messages.length === 0 && !isRunning;
         aria-label="Chat messages"
       >
         <div className="max-w-4xl mx-auto space-y-5">
-          {isDemoMode && messages.length === 0 ? (
+          {showLanding ? (
             <LandingHero
-              onGetStarted={onOpenSettings}
               onLoadSample={loadSampleData}
               onAddData={onOpenData}
               onExampleSelect={handleSubmit}
@@ -217,7 +216,7 @@ const showExamples = messages.length === 0 && !isRunning;
           ) : (
             messages.map(m => <MessageBubble key={m.id} message={m} />)
           )}
-          {isRunning && !showExamples && !isDemoMode && (
+          {isRunning && !showExamples && !showLanding && (
             <div className="flex justify-start">
               <div className="bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-2xl rounded-tl-sm px-4 py-2.5 shadow-sm">
                 <div className="flex items-center gap-1.5">

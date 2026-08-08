@@ -4,6 +4,7 @@
 import type { ChartConfig, DataAnalysisResult, DatasetSummary } from '../lib/types';
 import type { EmbeddingsClient } from '../lib/embeddings';
 import type { LLMClient } from '../lib/llm';
+import { CodeExecutionError } from '../lib/errors';
 
 export interface DatasetMeta {
   [datasetName: string]: {
@@ -99,6 +100,10 @@ Common pitfalls to avoid:
 Return JSON: {"code": "...", "explanation": "..."}`;
   }
 
+  /**
+   * Execute generated code in a sandboxed environment.
+   * @throws CodeExecutionError for syntax errors, runtime errors, timeouts
+   */
   function execute(code: string): unknown {
     const aq = deps.datasets.get('aq') as { op?: Record<string, unknown> };
     const datasetsObj: Record<string, unknown> = {};
@@ -109,6 +114,7 @@ Return JSON: {"code": "...", "explanation": "..."}`;
     const op = aq?.op || {};
     const argNames = Object.keys(datasetsObj);
     const argValues = Object.values(datasetsObj);
+
     // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
     const fn = new Function(
       ...argNames,
@@ -116,12 +122,39 @@ Return JSON: {"code": "...", "explanation": "..."}`;
       'op',
       '"use strict"; let result; ' + code + '; return result;'
     );
-    const result = fn(...argValues, aq, op);
-    // Convert Arquero table to array of objects if needed
-    if (result && typeof result === 'object' && typeof (result as { objects?: () => unknown[] }).objects === 'function') {
-      return (result as { objects: () => unknown[] }).objects();
+
+    try {
+      const result = fn(...argValues, aq, op);
+      // Convert Arquero table to array of objects if needed
+      if (result && typeof result === 'object' && typeof (result as { objects?: () => unknown[] }).objects === 'function') {
+        return (result as { objects: () => unknown[] }).objects();
+      }
+      return result;
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+
+      // Classify error type for retry logic
+      const isSyntaxError = error instanceof SyntaxError ||
+        error.name === 'SyntaxError' ||
+        error.message.includes('SyntaxError') ||
+        error.message.includes('Unexpected token') ||
+        error.message.includes('Unexpected end of input');
+
+      const isTimeout = error.name === 'TimeoutError' ||
+        error.message.includes('timeout') ||
+        error.message.includes('timed out');
+
+      throw new CodeExecutionError(
+        isSyntaxError ? 'Syntax error in generated code' :
+        isTimeout ? 'Code execution timed out' :
+        'Runtime error in generated code',
+        error,
+        {
+          code,
+          retryable: !isSyntaxError && !isTimeout, // Retry runtime errors, not syntax or timeout
+        }
+      );
     }
-    return result;
   }
 
   function tryDetectChart(rows: unknown[]): ChartConfig | undefined {
@@ -154,10 +187,10 @@ Return JSON: {"code": "...", "explanation": "..."}`;
     let displayResult: unknown = result;
 
     // Detect Arquero ColumnTable and convert to array of objects
-    const isColumnTable = result && typeof result === 'object' && 
+    const isColumnTable = result && typeof result === 'object' &&
       typeof (result as { objects?: () => unknown[] }).objects === 'function';
-    const resultArray = isColumnTable 
-      ? (result as { objects: () => unknown[] }).objects() 
+    const resultArray = isColumnTable
+      ? (result as { objects: () => unknown[] }).objects()
       : null;
 
     if (resultArray) {
@@ -174,13 +207,13 @@ Return JSON: {"code": "...", "explanation": "..."}`;
       const obj = result as Record<string, unknown>;
       const keys = Object.keys(obj);
       const values = Object.values(obj);
-      
+
       if (values.every(v => typeof v === 'number') && keys.length > 1) {
         resultType = 'chart';
         const data = keys.map(k => ({ name: k, value: obj[k] as number }));
         chartConfig = { type: 'bar', title: 'Result', xKey: 'name', yKeys: ['value'], data };
         displayResult = obj;
-      } 
+      }
       else if (keys.length > 0 && Array.isArray(obj[keys[0]])) {
         resultType = 'table';
         displayResult = obj;
@@ -214,13 +247,22 @@ Return JSON: {"code": "...", "explanation": "..."}`;
     };
   }
 
-  async function analyze(question: string): Promise<DataAnalysisResult> {
+  async function analyze(question: string, signal?: AbortSignal): Promise<DataAnalysisResult> {
     const start = performance.now();
     const relevant = relevantDatasets(question);
     const maxAttempts = 2;
     let lastError: string | null = null;
 
     for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+      // Check for abort signal
+      if (signal?.aborted) {
+        throw new CodeExecutionError('Analysis aborted', new Error('AbortSignal triggered'), {
+          code: '',
+          retryable: false,
+        });
+      }
+
+      let code = '';
       try {
         const prompt = attempt === 0
           ? buildPrompt(question, relevant)
@@ -238,36 +280,46 @@ Return JSON: {"code": "...", "explanation": "..."}`;
         });
 
         const parsed = JSON.parse(resp.content || '{"code":"","explanation":""}');
-        const code = parsed.code || '';
+        code = parsed.code || '';
         if (!code) throw new Error('Empty code from LLM');
         const result = execute(code);
         return formatResult(result, code, parsed.explanation, attempt + 1, start);
       } catch (e) {
-        lastError = e instanceof Error ? e.message : String(e);
+        const error = e instanceof Error ? e : new Error(String(e));
+        lastError = error.message;
+
+        // If it's already a CodeExecutionError, check if retryable
+        if (error instanceof CodeExecutionError && !error.retryable) {
+          // Non-retryable error (syntax, timeout) - fail immediately
+          if (import.meta.env.DEV) console.warn(`Analysis attempt ${attempt + 1} failed (non-retryable):`, lastError);
+          return formatErrorResult(question, code, error, attempt + 1, start);
+        }
+
         if (import.meta.env.DEV) console.warn(`Analysis attempt ${attempt + 1} failed:`, lastError);
         if (attempt >= maxAttempts) {
-          return {
-            type: 'data_analysis',
-            question,
-            code: '',
-            explanation: 'Failed after retries',
-            resultType: 'error',
-            result: lastError,
-            attempts: attempt + 1,
-            durationMs: performance.now() - start,
-            timestamp: Date.now(),
-          };
+          return formatErrorResult(question, code, error, attempt + 1, start);
         }
       }
     }
+    return formatErrorResult(question, '', new Error('Unknown error'), 0, start);
+  }
+
+  function formatErrorResult(
+    question: string,
+    code: string,
+    error: Error,
+    attempts: number,
+    start: number
+  ): DataAnalysisResult {
     return {
       type: 'data_analysis',
       question,
-      code: '',
-      explanation: 'No result',
+      code,
+      explanation: error instanceof CodeExecutionError ? error.message : 'Code execution failed',
       resultType: 'error',
-      result: 'Unknown error',
-      attempts: 0,
+      result: error.message,
+      chartConfig: undefined,
+      attempts,
       durationMs: performance.now() - start,
       timestamp: Date.now(),
     };

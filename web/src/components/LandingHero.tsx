@@ -1,7 +1,3 @@
-// LandingHero — landing/hero section for demo mode
-// Shows Clay's capabilities when no conversation is active and no API key is set
-
-import { useState } from 'react';
 import { useAppStore } from '../store';
 
 const FEATURES = [
@@ -50,21 +46,16 @@ const EXAMPLE_QUERIES = [
 ];
 
 export function LandingHero({
-  onGetStarted,
   onLoadSample,
   onAddData,
   onExampleSelect,
 }: {
-  onGetStarted: () => void;
   onLoadSample: () => void;
   onAddData: () => void;
   onExampleSelect?: (q: string) => void;
 }) {
-  const [showMore, setShowMore] = useState(false);
-  const settings = useAppStore(s => s.settings);
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
-  const isDemoMode = settings.provider !== 'local' && !settings.apiKey;
   const hasData = sandboxDatasets.length > 0 || sandboxDocuments.length > 0;
 
   return (
@@ -72,13 +63,6 @@ export function LandingHero({
       {/* Hero Section */}
       <section className="px-4 py-10 sm:py-16 max-w-5xl mx-auto w-full">
         <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 text-sm font-medium mb-6">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-brand-500"></span>
-            </span>
-            Demo Mode — No API key required
-          </div>
           <h1 className="text-4xl sm:text-5xl font-bold text-ink-900 dark:text-ink-50 tracking-tight mb-4">
             Ask Questions About{' '}
             <span className="bg-gradient-to-r from-brand-600 to-purple-600 bg-clip-text text-transparent">
@@ -161,52 +145,6 @@ export function LandingHero({
             </div>
           </div>
         )}
-
-        {/* Demo Mode Notice */}
-        {isDemoMode && (
-          <div className="rounded-xl border-2 border-dashed border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-5">
-            <div className="flex items-start gap-3">
-              <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                <svg className="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-amber-800 dark:text-amber-200 mb-1">Running in Demo Mode</h3>
-                <p className="text-sm text-amber-700 dark:text-amber-300 mb-3">
-                  Clay is fully functional with simulated AI responses. Load the sample dataset above to try data analysis queries,
-                  or add your own files and an API key in Settings for full AI capabilities.
-                </p>
-                <button
-                  onClick={onGetStarted}
-                  className="text-sm font-medium text-amber-700 dark:text-amber-300 hover:underline"
-                >
-                  Open Settings to add API key →
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Keyboard Shortcuts */}
-        <details className="group mb-10">
-          <summary className="cursor-pointer flex items-center justify-center gap-2 text-sm text-ink-500 dark:text-ink-400 hover:text-ink-700 dark:hover:text-ink-200 p-3 rounded-lg hover:bg-ink-50 dark:hover:bg-ink-800" onClick={() => setShowMore(!showMore)}>
-            <svg className={`w-4 h-4 transition-transform ${showMore ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-            <span>Keyboard Shortcuts</span>
-          </summary>
-          <div className="mt-3 p-4 bg-ink-50 dark:bg-ink-800 rounded-lg border border-ink-200 dark:border-ink-700 animate-slide-up">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div className="flex items-center gap-2 text-ink-600 dark:text-ink-300"><kbd className="px-2 py-0.5 bg-white dark:bg-ink-700 rounded border border-ink-200 dark:border-ink-600 font-mono">/</kbd> Focus input</div>
-              <div className="flex items-center gap-2 text-ink-600 dark:text-ink-300"><kbd className="px-2 py-0.5 bg-white dark:bg-ink-700 rounded border border-ink-200 dark:border-ink-600 font-mono">Esc</kbd> Stop generation</div>
-              <div className="flex items-center gap-2 text-ink-600 dark:text-ink-300"><kbd className="px-2 py-0.5 bg-white dark:bg-ink-700 rounded border border-ink-200 dark:border-ink-600 font-mono">Enter</kbd> Send message</div>
-              <div className="flex items-center gap-2 text-ink-600 dark:text-ink-300"><kbd className="px-2 py-0.5 bg-white dark:bg-ink-700 rounded border border-ink-200 dark:border-ink-600 font-mono">Shift+Enter</kbd> New line</div>
-              <div className="flex items-center gap-2 text-ink-600 dark:text-ink-300"><kbd className="px-2 py-0.5 bg-white dark:bg-ink-700 rounded border border-ink-200 dark:border-ink-600 font-mono">Cmd/Ctrl+K</kbd> New chat</div>
-              <div className="flex items-center gap-2 text-ink-600 dark:text-ink-300"><kbd className="px-2 py-0.5 bg-white dark:bg-ink-700 rounded border border-ink-200 dark:border-ink-600 font-mono">Cmd/Ctrl+Shift+C</kbd> Clear chat</div>
-            </div>
-          </div>
-        </details>
       </section>
     </div>
   );

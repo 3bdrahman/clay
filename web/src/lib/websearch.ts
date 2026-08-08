@@ -1,6 +1,12 @@
 // Web search client — Serper API (Google) and DuckDuckGo (no key)
 
 import type { Settings, WebResult } from './types';
+import {
+  WebSearchProviderError,
+  InvalidApiKeyError,
+  RateLimitError,
+  isRetryable,
+} from './errors';
 
 // DuckDuckGo HTML returns no CORS headers, so we route through the same
 // dev proxy as NIM. In production, VITE_WEBSEARCH_BASE_URL should point at
@@ -52,7 +58,7 @@ export function extractRealUrl(ddgUrl: string): string {
 
 /**
  * Parse DuckDuckGo HTML search results into WebResult array.
- * Falls back to demo notice if no results found.
+ * Falls back to notice if no results found.
  * @param html - Raw HTML from DuckDuckGo
  * @param k - Maximum number of results to return
  * @returns Array of WebResult objects
@@ -79,9 +85,9 @@ export function parseDuckDuckGoHtml(html: string, k: number): WebResult[] {
     return [
       {
         type: 'web_search',
-        title: 'Web search unavailable in demo mode',
+        title: 'No web search results found',
         content:
-          'Configure a Serper API key in Settings for live Google results, or enable DuckDuckGo (no key required).',
+          'Configure a Serper API key in Settings for live Google results, or try a different query with DuckDuckGo.',
         url: 'https://serper.dev',
       },
     ];
@@ -93,18 +99,37 @@ export function parseDuckDuckGoHtml(html: string, k: number): WebResult[] {
  * Create a web search client based on settings (Serper or DuckDuckGo).
  * @param settings - App settings with provider choice and API keys
  * @returns WebSearchClient with search(query, k?) method
+ * @throws WebSearchProviderError on provider failures
  */
 export function createWebSearchClient(settings: Settings): WebSearchClient {
   async function searchSerper(query: string, k: number): Promise<WebResult[]> {
-    const resp = await fetch('https://google.serper.dev/search', {
-      method: 'POST',
-      headers: {
-        'X-API-KEY': settings.serperApiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ q: query, num: k }),
-    });
-    if (!resp.ok) throw new Error(`Serper ${resp.status}`);
+    let resp: Response;
+    try {
+      resp = await fetch('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: {
+          'X-API-KEY': settings.serperApiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ q: query, num: k }),
+      });
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      throw new WebSearchProviderError('serper', `Network error: ${error.message}`, error, { retryable: true });
+    }
+
+    if (!resp.ok) {
+      if (resp.status === 401 || resp.status === 403) {
+        throw new WebSearchProviderError('serper', `Invalid API key (${resp.status})`, undefined, { retryable: false });
+      }
+if (resp.status === 429) {
+        resp.headers.get('retry-after');
+        throw new WebSearchProviderError('serper', `Rate limited (${resp.status})`, undefined, { retryable: true });
+      }
+      // 500 errors are not retryable for web search
+      throw new WebSearchProviderError('serper', `HTTP ${resp.status}: ${resp.statusText}`, undefined, { retryable: false });
+    }
+
     const data = await resp.json();
     const organic = data.organic || [];
     return organic.slice(0, k).map((r: { title?: string; snippet?: string; link?: string }) => ({
@@ -117,45 +142,70 @@ export function createWebSearchClient(settings: Settings): WebSearchClient {
 
   async function searchDuckDuckGo(query: string, k: number): Promise<WebResult[]> {
     const url = `${DDG_BASE_URL}/html/?q=${encodeURIComponent(query)}`;
+    let resp: Response;
     try {
-      const resp = await fetch(url, {
+      resp = await fetch(url, {
         method: 'GET',
         headers: { Accept: 'text/html' },
       });
-      if (!resp.ok) {
-        return [
-          {
-            type: 'web_search',
-            title: 'Web search unavailable',
-            content: 'Could not reach DuckDuckGo. Try Serper in Settings.',
-          },
-        ];
-      }
-      const html = await resp.text();
-      return parseDuckDuckGoHtml(html, k);
-    } catch {
-      return [
-        {
-          type: 'web_search',
-          title: 'Web search unavailable',
-          content: 'Network error fetching search results.',
-        },
-      ];
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      throw new WebSearchProviderError('duckduckgo', `Network error: ${error.message}`, error, { retryable: true });
     }
+
+    if (!resp.ok) {
+      throw new WebSearchProviderError('duckduckgo', `HTTP ${resp.status}: ${resp.statusText}`, undefined, { retryable: resp.status >= 500 });
+    }
+
+    const html = await resp.text();
+    return parseDuckDuckGoHtml(html, k);
   }
 
   async function search(query: string, k = 5): Promise<WebResult[]> {
     const provider = settings.webSearchProvider;
+    let lastError: Error | null = null;
+
     if (provider === 'serper' && settings.serperApiKey) {
       try {
         return await searchSerper(query, k);
-      } catch {
-        // fall through to duckduckgo
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+        // Re-throw non-retryable auth errors and rate limit errors, but also re-throw retryable WebSearchProviderError
+        if (
+          lastError instanceof InvalidApiKeyError ||
+          lastError instanceof RateLimitError ||
+          (lastError instanceof WebSearchProviderError && isRetryable(lastError))
+        ) {
+          throw lastError;
+        }
+        // Fall through to DuckDuckGo on other Serper failures
+        if (import.meta.env.DEV) console.warn('[websearch] Serper failed, falling back to DuckDuckGo:', lastError.message);
       }
     }
+
     if (provider !== 'none') {
-      return searchDuckDuckGo(query, k);
+      try {
+        return await searchDuckDuckGo(query, k);
+      } catch (e) {
+        const ddgError = e instanceof Error ? e : new Error(String(e));
+        // Re-throw non-retryable errors from DDG
+        if (ddgError instanceof InvalidApiKeyError || ddgError instanceof RateLimitError) {
+          throw ddgError;
+        }
+        // Both providers failed
+        if (lastError) {
+          throw new WebSearchProviderError(
+            'duckduckgo',
+            `Both Serper and DuckDuckGo failed. Serper: ${lastError.message}. DuckDuckGo: ${ddgError.message}`,
+            ddgError,
+            { retryable: false }
+          );
+        }
+        throw ddgError;
+      }
     }
+
+    // Provider is 'none' - return empty results
     return [];
   }
 

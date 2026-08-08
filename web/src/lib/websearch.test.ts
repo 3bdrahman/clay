@@ -6,23 +6,22 @@ import {
   parseDuckDuckGoHtml,
 } from './websearch';
 import type { Settings } from './types';
+import { WebSearchProviderError } from './errors';
 
 const baseSettings = (overrides: Partial<Settings> = {}): Settings =>
   ({
     provider: 'nim',
     apiKey: '',
-    theme: 'system',
+    embeddingApiKey: '',
     webSearchProvider: 'duckduckgo',
     serperApiKey: '',
+    temperature: 0,
+    maxRetries: 3,
+    theme: 'system',
     localServerUrl: '',
-    localServerNeedsApiKey: false,
-    pickedModels: {
-      routing: '',
-      evaluation: '',
-      codeGen: '',
-      answer: '',
-      embedding: '',
-    },
+    localModels: { chat: '', embeddings: '' },
+    localCatalog: [],
+    localCatalogFetchedAt: 0,
     ...overrides,
   }) as Settings;
 
@@ -108,7 +107,7 @@ describe('parseDuckDuckGoHtml', () => {
       5,
     );
     expect(r).toHaveLength(1);
-    expect(r[0].title).toMatch(/unavailable/i);
+    expect(r[0].title).toMatch(/no web search results found/i);
     expect(r[0].url).toBe('https://serper.dev');
   });
 });
@@ -151,10 +150,39 @@ describe('createWebSearchClient.search', () => {
     expect(results[0]).toMatchObject({ title: 'Hi', content: 'There', url: 'https://x' });
   });
 
+  it('throws WebSearchProviderError on serper 401', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => 'Unauthorized',
+    });
+
+    const client = createWebSearchClient(
+      baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }),
+    );
+    await expect(client.search('hello')).rejects.toThrow(WebSearchProviderError);
+  });
+
+  it('throws WebSearchProviderError on serper 429', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: new Map([['retry-after', '60']]),
+      text: async () => 'Rate limited',
+    });
+
+    const client = createWebSearchClient(
+      baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }),
+    );
+    await expect(client.search('hello')).rejects.toThrow(WebSearchProviderError);
+    const error = await client.search('hello').catch(e => e);
+    expect(error.retryable).toBe(true);
+  });
+
   it('falls back to DuckDuckGo when serper throws', async () => {
     globalThis.fetch = vi
       .fn()
-      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) }) // serper
+      .mockResolvedValueOnce({ ok: false, status: 500, headers: new Map(), json: async () => ({}) }) // serper
       .mockResolvedValueOnce({
         ok: true,
         text: async () => `
@@ -170,21 +198,31 @@ describe('createWebSearchClient.search', () => {
     expect(results[0].title).toBe('DDG Title');
   });
 
-  it('returns an error-shaped result when DuckDuckGo fetch throws', async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network'));
-
-    const client = createWebSearchClient(baseSettings());
-    const results = await client.search('hello');
-    expect(results[0].title).toMatch(/unavailable/i);
-    expect(results[0].content).toMatch(/network/i);
-  });
-
-  it('returns an error-shaped result when DuckDuckGo returns non-ok', async () => {
+  it('throws WebSearchProviderError on DuckDuckGo 503', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503, text: async () => '' });
 
     const client = createWebSearchClient(baseSettings());
-    const results = await client.search('hello');
-    expect(results[0].title).toMatch(/unavailable/i);
-    expect(results[0].content).toMatch(/DuckDuckGo/i);
+    await expect(client.search('hello')).rejects.toThrow(WebSearchProviderError);
+  });
+
+  it('throws WebSearchProviderError on DuckDuckGo network error', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network'));
+
+    const client = createWebSearchClient(baseSettings());
+    await expect(client.search('hello')).rejects.toThrow(WebSearchProviderError);
+  });
+
+  it('throws WebSearchProviderError when both providers fail', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, headers: new Map(), json: async () => ({}) }) // serper
+      .mockResolvedValueOnce({ ok: false, status: 503, headers: new Map(), text: async () => '' }); // ddg
+
+    const client = createWebSearchClient(
+      baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }),
+    );
+    await expect(client.search('hello')).rejects.toThrow(WebSearchProviderError);
+    const error = await client.search('hello').catch(e => e);
+    expect(error.message).toContain('Both Serper and DuckDuckGo failed');
   });
 });

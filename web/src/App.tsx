@@ -13,7 +13,7 @@ export default function App() {
   const [dataOpen, setDataOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const settings = useAppStore(s => s.settings);
-  const { pickedModels, refreshModels, addFiles, loadSampleData, clearSandboxData } = useClay();
+  const { pickedModels, refreshModels, addFiles, loadSampleData, clearSandboxData, removeSandboxDocument, removeSandboxDataset } = useClay();
   const settingsProvider = settings.provider;
   const resetAll = useAppStore(s => s.resetAll);
 
@@ -65,7 +65,7 @@ export default function App() {
       <div className="flex-1 flex min-h-0">
         <ConversationSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         <div className="flex-1 flex min-h-0">
-          <ChatPanel onOpenSettings={openSettings} onOpenData={openData} />
+          <ChatPanel onOpenData={openData} />
         </div>
       </div>
       <Suspense fallback={null}>
@@ -85,6 +85,8 @@ export default function App() {
           addFiles={addFiles}
           loadSampleData={loadSampleData}
           clearSandboxData={clearSandboxData}
+          removeSandboxDocument={removeSandboxDocument}
+          removeSandboxDataset={removeSandboxDataset}
         />
       </Suspense>
     </div>

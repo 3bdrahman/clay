@@ -1,5 +1,7 @@
 // Core type definitions for Clay
 
+import type { RagErrorCode } from './errors';
+
 export interface LocalModelPicks {
   chat: string;
   embeddings: string;
@@ -92,7 +94,12 @@ export interface WorkflowState {
   steps: StepTrace[];
   startedAt: number;
   finishedAt?: number;
-  error?: string;
+  error?: {
+    code: RagErrorCode;
+    message: string;
+    step?: string;
+    retryable: boolean;
+  };
 }
 
 export interface Citation {

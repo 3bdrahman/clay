@@ -1,9 +1,13 @@
 import type { Document, ChunkMetadata } from './types';
 import type { EmbeddingsClient } from './embeddings';
-import { EmbeddingsConfigError } from './embeddings';
 import { estimateTokens } from './tokens';
 import { openIDB, wrapIDBStore, type IDBStore } from './idb';
 import type { BM25Index } from './bm25';
+import {
+  VectorStoreCorruptedError,
+  VectorStoreQuotaExceededError,
+  classifyError,
+} from './errors';
 
 /**
  * Module-level write coordinator.
@@ -19,10 +23,14 @@ import type { BM25Index } from './bm25';
  * resolves, all writes issued before that load() call have landed in IDB.
  */
 let writeQueue: Promise<void> = Promise.resolve();
+let writeQueueFailed = false;
+let writeQueueFailure: Error | null = null;
 
 function enqueueWrite(op: () => Promise<unknown>): void {
   writeQueue = writeQueue.then<void>(() => op().then(() => undefined, (e: unknown) => {
-    console.warn('[vectorstore] async op failed:', e);
+    writeQueueFailed = true;
+    writeQueueFailure = e instanceof Error ? e : new Error(String(e));
+    console.error('[vectorstore] async op failed:', e);
   }));
 }
 
@@ -155,6 +163,29 @@ function mmrSelect(candidates: ScoredCandidate[], embeddings: Map<string, number
   return selected;
 }
 
+/**
+ * Classify IndexedDB DOMException into typed vector store errors.
+ */
+function classifyIDBError(error: unknown, operation: string): Error {
+  if (error instanceof DOMException) {
+    switch (error.name) {
+      case 'QuotaExceededError':
+        return new VectorStoreQuotaExceededError(error);
+      case 'InvalidStateError':
+      case 'TransactionInactiveError':
+      case 'DataError':
+        return new VectorStoreCorruptedError(`IDB ${operation} failed: ${error.name} - ${error.message}`, error);
+      case 'ConstraintError':
+        return new VectorStoreCorruptedError(`IDB constraint violation during ${operation}: ${error.message}`, error);
+      case 'AbortError':
+        return classifyError(error, 'vectorstore', operation);
+      default:
+        return new VectorStoreCorruptedError(`IDB ${operation} failed: ${error.name} - ${error.message}`, error);
+    }
+  }
+  return classifyError(error, 'vectorstore', operation);
+}
+
 export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorStoreConfig): VectorStore {
   const cfg = {
     topK: config?.topK ?? 8,
@@ -210,9 +241,10 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
       } else {
         for (const e of existing) memory.set(e.id, e);
       }
-    } catch {
+    } catch (e) {
       warnFallbackOnce();
       db = null;
+      // Don't throw here - allow fallback to in-memory mode
     }
     loaded = true;
   }
@@ -222,8 +254,14 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     if (loadingPromise) return loadingPromise;
     loadingPromise = (async () => {
       await writeQueue;
+      if (writeQueueFailed && writeQueueFailure) {
+        throw writeQueueFailure;
+      }
       await doLoad();
       await writeQueue;
+      if (writeQueueFailed && writeQueueFailure) {
+        throw writeQueueFailure;
+      }
     })();
     return loadingPromise;
   }
@@ -236,7 +274,12 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     await ensureLoaded();
     const topK = k ?? cfg.topK;
     if (memory.size === 0) return [];
-    const queryEmbeddingRaw = await embeddings.embed(query, { inputType: 'query' });
+    let queryEmbeddingRaw: number[][];
+    try {
+      queryEmbeddingRaw = await embeddings.embed(query, { inputType: 'query' });
+    } catch (e) {
+      throw classifyError(e, 'embeddings', 'similaritySearch');
+    }
     const queryEmbedding = queryEmbeddingRaw[0];
     if (!queryEmbedding) return [];
 
@@ -310,8 +353,8 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
       if (knownDimension === null) {
         knownDimension = emb.length;
       } else if (emb.length !== knownDimension) {
-        throw new EmbeddingsConfigError(
-          `embedding dimension mismatch: stored ${knownDimension}, got ${emb.length}`,
+        throw new VectorStoreCorruptedError(
+          `embedding dimension mismatch: stored ${knownDimension}, got ${emb.length}`
         );
       }
       const entry: VectorEntry = {
@@ -334,7 +377,13 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
       pendingAdds.push(entry);
       if (db) {
         const capture = db;
-        enqueueWrite(() => capture.put(entry));
+        enqueueWrite(async () => {
+          try {
+            await capture.put(entry);
+          } catch (e) {
+            throw classifyIDBError(e, 'put');
+          }
+        });
       } else if (!loaded && !loadingPromise) {
         void load();
       }
@@ -346,7 +395,13 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     for (const [id, e] of memory) {
       if (e.metadata.source === source) memory.delete(id);
     }
-    if (db) enqueueWrite(() => db!.deleteByIndex('source', source));
+    if (db) enqueueWrite(async () => {
+      try {
+        await db!.deleteByIndex('source', source);
+      } catch (e) {
+        throw classifyIDBError(e, 'deleteByIndex');
+      }
+    });
     return before - memory.size;
   }
 
@@ -354,7 +409,13 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     memory.clear();
     knownDimension = null;
     try { localStorage.removeItem(LEGACY_KEY); } catch { /* noop */ }
-    if (db) enqueueWrite(() => db!.clear());
+    if (db) enqueueWrite(async () => {
+      try {
+        await db!.clear();
+      } catch (e) {
+        throw classifyIDBError(e, 'clear');
+      }
+    });
   }
 
   return {

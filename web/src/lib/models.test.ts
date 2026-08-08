@@ -6,7 +6,11 @@ import {
   listNimModels,
   listLocalCatalog,
   resolveModels,
-  ModelsFetchError,
+  ModelNotFoundError,
+  InvalidApiKeyError,
+  ProviderUnreachableError,
+  RateLimitError,
+  ModelCatalogEmptyError,
   type ModelInfo,
 } from './models';
 import type { Settings, LocalModelPicks } from './types';
@@ -109,6 +113,7 @@ describe('pickBestModels', () => {
     const picked = pickBestModels(fakeModels);
     expect(picked.routing).not.toContain('guard');
     expect(picked.answer).not.toContain('guard');
+    expect(picked.eval).not.toContain('guard');
   });
 
   it('handles empty model list gracefully', () => {
@@ -134,17 +139,56 @@ describe('pickBestModels', () => {
 });
 
 describe('listNimModels', () => {
-  it('throws ModelsFetchError when API key is missing', async () => {
-    await expect(listNimModels('')).rejects.toThrow(ModelsFetchError);
-    await expect(listNimModels('')).rejects.toThrow('API key required');
+  it('throws InvalidApiKeyError when API key is missing', async () => {
+    await expect(listNimModels('')).rejects.toThrow(InvalidApiKeyError);
+    await expect(listNimModels('')).rejects.toThrow('Invalid API key');
   });
 
-  it('throws ModelsFetchError on non-OK response', async () => {
+  it('throws InvalidApiKeyError on 401 response', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (() =>
       Promise.resolve(new Response('Unauthorized', { status: 401 }))) as typeof fetch;
     try {
-      await expect(listNimModels('test-key')).rejects.toThrow(ModelsFetchError);
+      await expect(listNimModels('test-key')).rejects.toThrow(InvalidApiKeyError);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('throws ProviderUnreachableError on 500 response', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(new Response('Server Error', { status: 500 }))) as typeof fetch;
+    try {
+      await expect(listNimModels('test-key')).rejects.toThrow(ProviderUnreachableError);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('throws RateLimitError on 429 response', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(new Response('Rate Limited', { status: 429 }))) as typeof fetch;
+    try {
+      await expect(listNimModels('test-key')).rejects.toThrow(RateLimitError);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('returns empty array on empty catalog', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ data: [] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )) as typeof fetch;
+    try {
+      const models = await listNimModels('test-key');
+      expect(models).toEqual([]);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -205,14 +249,21 @@ describe('listLocalCatalog', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('throws when baseUrl is empty', async () => {
-    await expect(listLocalCatalog('', '')).rejects.toThrow(ModelsFetchError);
+  it('throws ProviderUnreachableError when baseUrl is empty', async () => {
+    await expect(listLocalCatalog('', '')).rejects.toThrow(ProviderUnreachableError);
   });
 
-  it('throws ModelsFetchError on non-OK response', async () => {
+  it('throws InvalidApiKeyError on 401 response', async () => {
+    mockFetch.mockResolvedValue(new Response('Unauthorized', { status: 401 }));
+    await expect(listLocalCatalog('http://localhost:11434/v1', '')).rejects.toThrow(
+      InvalidApiKeyError,
+    );
+  });
+
+  it('throws ProviderUnreachableError on 502 response', async () => {
     mockFetch.mockResolvedValue(new Response('boom', { status: 502 }));
     await expect(listLocalCatalog('http://localhost:11434/v1', '')).rejects.toThrow(
-      ModelsFetchError,
+      ProviderUnreachableError,
     );
   });
 
@@ -240,7 +291,7 @@ describe('listLocalCatalog', () => {
 
   it('strips trailing slashes before appending /models', async () => {
     mockFetch.mockResolvedValue(
-      new Response(JSON.stringify({ data: [] }), {
+      new Response(JSON.stringify({ data: [{ id: 'test-model', object: 'model' }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -251,7 +302,7 @@ describe('listLocalCatalog', () => {
 
   it('sends Authorization when apiKey is provided', async () => {
     mockFetch.mockResolvedValue(
-      new Response(JSON.stringify({ data: [] }), {
+      new Response(JSON.stringify({ data: [{ id: 'test-model', object: 'model' }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -259,6 +310,18 @@ describe('listLocalCatalog', () => {
     await listLocalCatalog('http://localhost:8000/v1', 'lm-studio-key');
     const headers = (mockFetch.mock.calls[0][1] as { headers: Record<string, string> }).headers;
     expect(headers.Authorization).toBe('Bearer lm-studio-key');
+  });
+
+  it('throws ModelCatalogEmptyError on empty catalog', async () => {
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(listLocalCatalog('http://localhost:11434/v1', '')).rejects.toThrow(
+      ModelCatalogEmptyError,
+    );
   });
 });
 
@@ -347,45 +410,40 @@ describe('resolveModels', () => {
     expect(out.warnings.some(w => w.includes('Local catalog is empty'))).toBe(true);
   });
 
-  it('warns when chat model is not in the catalog', () => {
-    const out = resolveModels(
-      {
-        ...baseSettings,
-        provider: 'local',
-        localModels: {
-          chat: 'nonexistent-chat-model',
-          embeddings: 'nomic-embed-text',
+  it('throws ModelNotFoundError when chat model is not in the catalog', () => {
+    expect(() =>
+      resolveModels(
+        {
+          ...baseSettings,
+          provider: 'local',
+          localModels: {
+            chat: 'nonexistent-chat-model',
+            embeddings: 'nomic-embed-text',
+          },
+          localCatalog: [
+            { id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 },
+            { id: 'nomic-embed-text', ownedBy: 'ollama', created: 0 },
+          ],
         },
-        localCatalog: [
-          { id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 },
-          { id: 'nomic-embed-text', ownedBy: 'ollama', created: 0 },
-        ],
-      },
-      fakeModels,
-    );
-    expect(
-      out.warnings.some(w => w.includes('chat') && w.includes('nonexistent-chat-model')),
-    ).toBe(true);
+        fakeModels,
+      ),
+    ).toThrow(ModelNotFoundError);
   });
 
-  it('warns when embeddings model is not in the catalog, separately from chat', () => {
-    const out = resolveModels(
-      {
-        ...baseSettings,
-        provider: 'local',
-        localModels: {
-          chat: 'llama3.1:8b',
-          embeddings: 'nonexistent-embed-model',
+  it('throws ModelNotFoundError when embeddings model is not in the catalog, separately from chat', () => {
+    expect(() =>
+      resolveModels(
+        {
+          ...baseSettings,
+          provider: 'local',
+          localModels: {
+            chat: 'llama3.1:8b',
+            embeddings: 'nonexistent-embed-model',
+          },
+          localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
         },
-        localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
-      },
-      fakeModels,
-    );
-    expect(out.warnings.some(w => w.includes('chat'))).toBe(false);
-    expect(
-      out.warnings.some(
-        w => w.includes('embeddings') && w.includes('nonexistent-embed-model'),
+        fakeModels,
       ),
-    ).toBe(true);
+    ).toThrow(ModelNotFoundError);
   });
 });

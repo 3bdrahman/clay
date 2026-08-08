@@ -26,7 +26,7 @@ All processing runs in the browser. Two outbound paths are supported for LLM inf
 
 **Try it now:** [https://3bdrahman.github.io/clay](https://3bdrahman.github.io/clay)
 
-The demo runs in **demo mode** — no API key required! Click "Load Sample Data" to try data analysis queries, or add your own files and an API key for full AI capabilities.
+Add your NVIDIA NIM API key in Settings (free tier: [build.nvidia.com/settings/api-keys](https://build.nvidia.com/settings/api-keys)) or configure a local OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp) to use the full AI capabilities.
 
 ---
 
@@ -57,10 +57,6 @@ The app starts **empty**. Click **Data** in the header and either:
 2. Click **Load sample data** for a tiny 3-table demo dataset
 
 Then paste your NVIDIA NIM API key in **Settings** (free tier: [build.nvidia.com/settings/api-keys](https://build.nvidia.com/settings/api-keys)) and ask away.
-
-### Demo Mode (No API Key Required)
-
-Open the app without any configuration — it automatically runs in demo mode with simulated AI responses. Perfect for trying out the UI and data analysis features with the sample dataset.
 
 ### Production build
 

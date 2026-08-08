@@ -1,3 +1,11 @@
+import {
+  InvalidApiKeyError,
+  RateLimitError,
+  ProviderUnreachableError,
+  EmbeddingModelMissingError,
+  classifyError,
+} from './errors';
+
 export type EmbeddingInputType = 'query' | 'passage';
 
 export interface EmbedOptions {
@@ -7,13 +15,6 @@ export interface EmbedOptions {
 
 export interface EmbeddingsClient {
   embed(input: string | string[], opts?: EmbedOptions): Promise<number[][]>;
-}
-
-export class EmbeddingsConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'EmbeddingsConfigError';
-  }
 }
 
 export interface EmbeddingsClientConfig {
@@ -127,26 +128,71 @@ async function fetchWithRetry(
   url: string,
   headers: Record<string, string>,
   body: Record<string, unknown>,
+  providerLabel: string,
 ): Promise<EmbeddingDatum[]> {
-  let lastStatus = 0;
-  let lastBody = '';
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    let resp: Response;
+    try {
+      resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    } catch (e) {
+      throw classifyError(e, providerLabel, 'embeddings-fetch');
+    }
+
     if (resp.ok) {
       const data = (await resp.json()) as EmbeddingResponse;
       return data.data ?? [];
     }
-    lastStatus = resp.status;
-    lastBody = typeof resp.text === 'function' ? await resp.text() : '';
-    const retryable = resp.status === 429 || resp.status === 503;
-    if (!retryable || attempt === MAX_ATTEMPTS) break;
-    const delay = Math.min(
-      parseRetryAfter(readRetryAfter(resp.headers), BASE_BACKOFF_MS * attempt),
-      MAX_BACKOFF_MS,
-    );
-    await new Promise<void>((r) => setTimeout(r, delay));
+
+    const lastBody = typeof resp.text === 'function' ? await resp.text() : '';
+
+    // Classify specific HTTP errors
+    if (resp.status === 401 || resp.status === 403) {
+      throw new InvalidApiKeyError(providerLabel, resp.status as 401 | 403);
+    }
+
+    if (resp.status === 429) {
+      const retryAfter = resp.headers.get('retry-after');
+      const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined;
+      // Retry on 429
+      if (attempt < MAX_ATTEMPTS) {
+        const delay = Math.min(
+          parseRetryAfter(readRetryAfter(resp.headers), BASE_BACKOFF_MS * attempt),
+          MAX_BACKOFF_MS,
+        );
+        await new Promise<void>((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw new RateLimitError(providerLabel, retryAfterMs);
+    }
+
+    if (resp.status === 503) {
+      // Retry on 503
+      if (attempt < MAX_ATTEMPTS) {
+        const delay = Math.min(
+          parseRetryAfter(readRetryAfter(resp.headers), BASE_BACKOFF_MS * attempt),
+          MAX_BACKOFF_MS,
+        );
+        await new Promise<void>((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw new ProviderUnreachableError(providerLabel, new Error(`${resp.status} ${resp.statusText}: ${lastBody}`), {
+        retryable: true,
+      });
+    }
+
+    if (resp.status >= 500) {
+      throw new ProviderUnreachableError(providerLabel, new Error(`${resp.status} ${resp.statusText}: ${lastBody}`), {
+        retryable: true,
+      });
+    }
+
+    // Non-retryable errors (400, 404, etc.)
+    throw new ProviderUnreachableError(providerLabel, new Error(`${resp.status} ${resp.statusText}: ${lastBody}`), {
+      retryable: false,
+    });
   }
-  throw new Error(`Embedding API error ${lastStatus}: ${lastBody}`);
+  // Should never reach here
+  throw new ProviderUnreachableError(providerLabel, new Error('Exhausted retry attempts'));
 }
 
 /**
@@ -188,14 +234,10 @@ export function createEmbeddingsClient(config: EmbeddingsClientConfig): Embeddin
 
   async function embed(input: string | string[], opts?: EmbedOptions): Promise<number[][]> {
     if (!baseUrl) {
-      throw new EmbeddingsConfigError(
-        `${providerLabel} base URL is empty. Open Settings and configure it.`,
-      );
+      throw new ProviderUnreachableError(providerLabel, undefined, { isTimeout: false });
     }
     if (!embeddingModel) {
-      throw new EmbeddingsConfigError(
-        `${providerLabel} requires an embedding model. Pick one in Settings.`,
-      );
+      throw new EmbeddingModelMissingError();
     }
 
     const inputs = Array.isArray(input) ? input : [input];
@@ -204,9 +246,10 @@ export function createEmbeddingsClient(config: EmbeddingsClientConfig): Embeddin
     for (const text of inputs) {
       const tokens = estimateTokens(text);
       if (tokens > MAX_INPUT_TOKENS) {
-        throw new EmbeddingsConfigError(
-          `Input exceeds ${MAX_INPUT_TOKENS} token limit (estimated ${tokens}). Split before embedding.`,
-        );
+        throw new ProviderUnreachableError(providerLabel, new Error(`Input exceeds ${MAX_INPUT_TOKENS} token limit`), {
+          message: `Input exceeds ${MAX_INPUT_TOKENS} token limit (estimated ${tokens}). Split before embedding.`,
+          retryable: false,
+        });
       }
     }
 
@@ -242,7 +285,7 @@ export function createEmbeddingsClient(config: EmbeddingsClientConfig): Embeddin
     for (const batch of batches) {
       const body: Record<string, unknown> = { model: embeddingModel, input: batch };
       if (inputType !== undefined) body.input_type = inputType;
-      const data = await fetchWithRetry(`${baseUrl}/embeddings`, headers, body);
+      const data = await fetchWithRetry(`${baseUrl}/embeddings`, headers, body, providerLabel);
 
       // Dimension validation: all embeddings in a response must share one length.
       let dim = -1;
@@ -250,8 +293,10 @@ export function createEmbeddingsClient(config: EmbeddingsClientConfig): Embeddin
         const vec = d.embedding;
         if (dim === -1) dim = vec.length;
         if (vec.length !== dim) {
-          throw new EmbeddingsConfigError(
-            `Embedding dimension mismatch within batch: expected ${dim}, got ${vec.length}.`,
+          throw new ProviderUnreachableError(
+            providerLabel,
+            new Error(`Embedding dimension mismatch: expected ${dim}, got ${vec.length}`),
+            { retryable: false }
           );
         }
         return normalizeVector(vec);

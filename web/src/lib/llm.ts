@@ -1,22 +1,23 @@
 import type { LLMRequest, LLMResponse } from './types';
+import {
+  ProviderUnreachableError,
+  InvalidApiKeyError,
+  RateLimitError,
+  StreamInterruptedError,
+  TokenBudgetExceededError,
+  GenerationFailedError,
+  ModelNotFoundError,
+  classifyError,
+} from './errors';
 
-export interface LLMClient {
-  invoke(req: LLMRequest): Promise<LLMResponse>;
-  stream(req: LLMRequest, onToken: (token: string) => void, signal?: AbortSignal): Promise<LLMResponse>;
-}
-
-export class LLMConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'LLMConfigError';
-  }
-}
+export { ProviderUnreachableError } from './errors';
 
 export interface LLMClientConfig {
   baseUrl: string;
   apiKey: string;
   temperature?: number;
   providerLabel?: string;
+  timeoutMs?: number;
 }
 
 /**
@@ -24,16 +25,57 @@ export interface LLMClientConfig {
  * Supports both invoke (non-streaming) and stream (token-by-token) modes.
  * @param config - Client configuration: baseUrl, apiKey, optional temperature, providerLabel
  * @returns LLMClient with invoke() and stream() methods
- * @throws LLMConfigError if baseUrl is empty
+ * @throws Error if baseUrl is empty
  */
 export function createLLMClient(config: LLMClientConfig): LLMClient {
   const baseUrl = config.baseUrl.replace(/\/+$/, '');
   const apiKey = config.apiKey;
   const providerLabel = config.providerLabel ?? 'provider';
   const defaultTemperature = config.temperature ?? 0;
+  const timeoutMs = config.timeoutMs ?? 120000; // Default 2 minutes
 
   if (!baseUrl) {
-    throw new LLMConfigError(`${providerLabel} base URL is empty. Open Settings and configure it.`);
+    throw new ProviderUnreachableError(providerLabel, undefined, {
+      isTimeout: false,
+    });
+  }
+
+  function createAbortControllerWithTimeout(): { controller: AbortController; cleanup: () => void } {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const cleanup = () => clearTimeout(timeoutId);
+    return { controller, cleanup };
+  }
+
+  /**
+   * Classifies HTTP response errors into typed RagErrors.
+   */
+  async function handleResponseError(resp: Response, _step: string): Promise<never> {
+    const status = resp.status;
+    const text = await resp.text().catch(() => '');
+
+    if (status === 401 || status === 403) {
+      throw new InvalidApiKeyError(providerLabel, status as 401 | 403);
+    }
+
+    if (status === 429) {
+      const retryAfter = resp.headers.get('retry-after');
+      const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined;
+      throw new RateLimitError(providerLabel, retryAfterMs);
+    }
+
+    if (status === 404) {
+      throw new ModelNotFoundError('unknown', [], new Error(`${status} ${resp.statusText}`));
+    }
+
+    if (status >= 500) {
+      throw new ProviderUnreachableError(providerLabel, new Error(`${status} ${resp.statusText}: ${text}`), {
+        retryable: true,
+      });
+    }
+
+    // 400, 408, etc.
+    throw new GenerationFailedError(providerLabel, new Error(`${status} ${resp.statusText}: ${text}`));
   }
 
   async function callOpenAICompatible(req: LLMRequest): Promise<LLMResponse> {
@@ -54,27 +96,58 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     };
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-    const resp = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}: ${await resp.text()}`);
+    const { controller, cleanup } = createAbortControllerWithTimeout();
+    let resp: Response;
+    try {
+      resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      cleanup();
+      // Network error (DNS, connection refused, CORS, etc.)
+      throw classifyError(e, providerLabel, 'invoke');
+    }
+    cleanup();
 
-    const data = await resp.json();
-    const choice = data.choices?.[0];
-    if (!choice) throw new Error('No choices in response');
+    if (!resp.ok) {
+      await handleResponseError(resp, 'invoke');
+    }
+
+    let data: unknown;
+    try {
+      data = await resp.json();
+    } catch {
+      throw new GenerationFailedError(providerLabel, new Error('Invalid JSON response'));
+    }
+
+    const d = data as Record<string, unknown>;
+    const choices = d.choices as Array<Record<string, unknown>> | undefined;
+    if (!choices || choices.length === 0) {
+      throw new GenerationFailedError(providerLabel, new Error('No choices in response'));
+    }
+
+    const choice = choices[0];
+    const message = choice.message as Record<string, unknown> | undefined;
+    const content = (message?.content as string) ?? '';
+
+    // Check for token budget exceeded in response
+    if (content.includes('token') && content.includes('budget') && content.includes('exceed')) {
+      throw new TokenBudgetExceededError(0, 0, new Error(content));
+    }
 
     return {
-      content: choice.message?.content ?? '',
-      usage: data.usage
+      content,
+      usage: d.usage
         ? {
-            promptTokens: data.usage.prompt_tokens,
-            completionTokens: data.usage.completion_tokens,
-            totalTokens: data.usage.total_tokens,
+            promptTokens: (d.usage as Record<string, unknown>).prompt_tokens as number,
+            completionTokens: (d.usage as Record<string, unknown>).completion_tokens as number,
+            totalTokens: (d.usage as Record<string, unknown>).total_tokens as number,
           }
         : undefined,
-      model: data.model,
+      model: d.model as string | undefined,
     };
   }
 
@@ -102,16 +175,42 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     };
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-    const resp = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal,
-    });
-    if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}: ${await resp.text()}`);
+    // Combine external signal with timeout signal
+    const { controller, cleanup } = createAbortControllerWithTimeout();
+    const combinedSignal = signal
+      ? (() => {
+          const combined = new AbortController();
+          signal.addEventListener('abort', () => combined.abort());
+          controller.signal.addEventListener('abort', () => combined.abort());
+          return combined.signal;
+        })()
+      : controller.signal;
+
+    let resp: Response;
+    try {
+      resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: combinedSignal,
+      });
+    } catch (e) {
+      cleanup();
+      // Network error or abort
+      if (signal?.aborted || e instanceof DOMException) {
+        throw new StreamInterruptedError(providerLabel, '', e instanceof Error ? e : new Error(String(e)));
+      }
+      throw classifyError(e, providerLabel, 'stream');
+    } finally {
+      cleanup();
+    }
+
+    if (!resp.ok) {
+      await handleResponseError(resp, 'stream');
+    }
 
     const reader = resp.body?.getReader();
-    if (!reader) throw new Error('No response body');
+    if (!reader) throw new GenerationFailedError(providerLabel, new Error('No response body'));
 
     const decoder = new TextDecoder();
     let fullContent = '';
@@ -120,7 +219,17 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
 
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        let readResult;
+        try {
+          readResult = await reader.read();
+        } catch (e) {
+          if (signal?.aborted) {
+            throw new StreamInterruptedError(providerLabel, fullContent, e instanceof Error ? e : new Error(String(e)));
+          }
+          throw classifyError(e, providerLabel, 'stream-read');
+        }
+
+        const { done, value } = readResult;
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
@@ -161,6 +270,10 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
       reader.releaseLock();
     }
 
+    if (signal?.aborted) {
+      throw new StreamInterruptedError(providerLabel, fullContent, new Error('Aborted'));
+    }
+
     return { content: fullContent, usage, model };
   }
 
@@ -172,4 +285,9 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
       return streamOpenAICompatible(req, onToken, signal);
     },
   };
+}
+
+export interface LLMClient {
+  invoke(req: LLMRequest): Promise<LLMResponse>;
+  stream(req: LLMRequest, onToken: (token: string) => void, signal?: AbortSignal): Promise<LLMResponse>;
 }

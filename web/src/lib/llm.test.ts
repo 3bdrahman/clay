@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-import { createLLMClient, LLMConfigError } from './llm';
+import { createLLMClient } from './llm';
 import { NIM_BASE_URL } from './providers';
+import {
+  InvalidApiKeyError,
+  RateLimitError,
+  ProviderUnreachableError,
+  StreamInterruptedError,
+  GenerationFailedError,
+  ModelNotFoundError,
+} from './errors';
 
 describe('createLLMClient', () => {
   const mockFetch = vi.fn();
@@ -15,8 +23,8 @@ describe('createLLMClient', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('throws LLMConfigError when baseUrl is empty', () => {
-    expect(() => createLLMClient({ baseUrl: '', apiKey: 'k', providerLabel: 'test' })).toThrow(LLMConfigError);
+  it('throws ProviderUnreachableError when baseUrl is empty', () => {
+    expect(() => createLLMClient({ baseUrl: '', apiKey: 'k', providerLabel: 'test' })).toThrow(ProviderUnreachableError);
   });
 
   it('does NOT throw when apiKey is empty (local servers do not require auth)', () => {
@@ -151,16 +159,120 @@ describe('createLLMClient', () => {
     expect(body.max_tokens).toBe(100);
   });
 
-  it('throws on API error', async () => {
+  // --- Error classification tests ---
+
+  it('throws InvalidApiKeyError on 401 response', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      text: async () => 'Invalid API key',
+    });
+
+    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    await expect(client.invoke({ messages: [] })).rejects.toThrow(InvalidApiKeyError);
+    await expect(client.invoke({ messages: [] })).rejects.toThrow('Invalid API key for NVIDIA NIM');
+  });
+
+  it('throws InvalidApiKeyError on 403 response', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      text: async () => 'Forbidden',
+    });
+
+    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    await expect(client.invoke({ messages: [] })).rejects.toThrow(InvalidApiKeyError);
+    await expect(client.invoke({ messages: [] })).rejects.toThrow('API key rejected');
+  });
+
+  it('throws RateLimitError on 429 response', async () => {
     mockFetch.mockResolvedValue({
       ok: false,
       status: 429,
       statusText: 'Too Many Requests',
+      headers: new Map([['retry-after', '60']]),
       text: async () => 'Rate limited',
     });
 
+    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    await expect(client.invoke({ messages: [] })).rejects.toThrow(RateLimitError);
+    await expect(client.invoke({ messages: [] })).rejects.toThrow('rate limit exceeded');
+  });
+
+  it('throws ProviderUnreachableError on 500 response', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      text: async () => 'Server error',
+    });
+
+    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    await expect(client.invoke({ messages: [] })).rejects.toThrow(ProviderUnreachableError);
+    await expect(client.invoke({ messages: [] })).rejects.toThrow('Cannot reach');
+  });
+
+  it('throws ProviderUnreachableError on 503 response (retryable)', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+      text: async () => 'Unavailable',
+    });
+
+    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    await expect(client.invoke({ messages: [] })).rejects.toThrow(ProviderUnreachableError);
+    const error = await client.invoke({ messages: [] }).catch(e => e);
+    expect(error.retryable).toBe(true);
+  });
+
+  it('throws ModelNotFoundError on 404 response', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      text: async () => 'Model not found',
+    });
+
+    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    await expect(client.invoke({ messages: [] })).rejects.toThrow(ModelNotFoundError);
+  });
+
+  it('throws GenerationFailedError on 400 response', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: async () => 'Bad request',
+    });
+
+    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    await expect(client.invoke({ messages: [] })).rejects.toThrow(GenerationFailedError);
+  });
+
+  it('throws ProviderUnreachableError on network error', async () => {
+    mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
     const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key' });
-    await expect(client.invoke({ messages: [] })).rejects.toThrow('429 Too Many Requests');
+    await expect(client.invoke({ messages: [] })).rejects.toThrow(ProviderUnreachableError);
+  });
+
+  it('throws StreamInterruptedError on AbortError during streaming', async () => {
+    const abortError = new DOMException('Aborted', 'AbortError');
+    mockFetch.mockRejectedValue(abortError);
+
+    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key' });
+    await expect(client.stream({ messages: [] }, () => {})).rejects.toThrow(StreamInterruptedError);
+  });
+
+  it('throws StreamInterruptedError when signal is aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key' });
+    await expect(client.stream({ messages: [] }, () => {}, controller.signal)).rejects.toThrow(StreamInterruptedError);
   });
 
   it('throws when no choices in response', async () => {
@@ -170,6 +282,6 @@ describe('createLLMClient', () => {
     });
 
     const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key' });
-    await expect(client.invoke({ messages: [] })).rejects.toThrow('No choices in response');
+    await expect(client.invoke({ messages: [] })).rejects.toThrow(GenerationFailedError);
   });
 });

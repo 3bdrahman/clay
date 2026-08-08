@@ -1,5 +1,13 @@
 import { NIM_BASE_URL } from './providers';
 import type { ModelInfo, Settings, LocalModelPicks } from './types';
+import {
+  ProviderUnreachableError,
+  InvalidApiKeyError,
+  RateLimitError,
+  ModelCatalogEmptyError,
+  ModelNotFoundError,
+  classifyError,
+} from './errors';
 
 export type { ModelInfo };
 
@@ -15,32 +23,46 @@ export interface PickedModels {
   embedding: string | undefined;
 }
 
-export class ModelsFetchError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ModelsFetchError';
-  }
-}
-
 /**
  * Fetch the live model catalog from NVIDIA NIM.
  * @param apiKey - NVIDIA NIM API key (nvapi-...)
  * @returns Array of model info objects with id, ownedBy, created
- * @throws ModelsFetchError if API key missing or request fails
+ * @throws ModelCatalogEmptyError if catalog is empty
+ * @throws InvalidApiKeyError if API key is invalid (401/403)
+ * @throws ProviderUnreachableError if network error or server unavailable
+ * @throws RateLimitError if rate limited (429)
  */
 export async function listNimModels(apiKey: string): Promise<ModelInfo[]> {
   if (!apiKey) {
-    throw new ModelsFetchError('API key required to fetch model catalog.');
+    throw new InvalidApiKeyError('NVIDIA NIM', 401);
   }
-  const resp = await fetch(`${NIM_BASE_URL}/models`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(`${NIM_BASE_URL}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+  } catch (e) {
+    throw classifyError(e, 'NVIDIA NIM', 'listNimModels');
+  }
+
   if (!resp.ok) {
-    throw new ModelsFetchError(`Model catalog fetch failed: ${resp.status} ${resp.statusText}`);
+    if (resp.status === 401 || resp.status === 403) {
+      throw new InvalidApiKeyError('NVIDIA NIM', resp.status as 401 | 403);
+    }
+    if (resp.status === 429) {
+      const retryAfter = resp.headers.get('retry-after');
+      const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined;
+      throw new RateLimitError('NVIDIA NIM', retryAfterMs);
+    }
+    throw new ProviderUnreachableError('NVIDIA NIM', new Error(`${resp.status} ${resp.statusText}`), {
+      retryable: resp.status >= 500,
+    });
   }
+
   const json = await resp.json();
   const data: Array<{ id: string; object?: string; created?: number; owned_by?: string }> =
     json.data || [];
+
   return data.map(m => ({
     id: m.id,
     ownedBy: m.owned_by ?? '',
@@ -53,7 +75,9 @@ export async function listNimModels(apiKey: string): Promise<ModelInfo[]> {
  * @param baseUrl - Base URL of local server (e.g., http://localhost:11434/v1)
  * @param apiKey - Optional API key for servers that require it
  * @returns Array of model info objects
- * @throws ModelsFetchError if URL empty or request fails
+ * @throws ModelCatalogEmptyError if catalog is empty
+ * @throws ProviderUnreachableError if network error or server unavailable
+ * @throws InvalidApiKeyError if API key is invalid (401/403)
  */
 export async function listLocalCatalog(
   baseUrl: string,
@@ -61,17 +85,39 @@ export async function listLocalCatalog(
 ): Promise<ModelInfo[]> {
   const url = baseUrl.replace(/\/+$/, '');
   if (!url) {
-    throw new ModelsFetchError('Local server URL is empty.');
+    throw new ProviderUnreachableError('local', undefined, { isTimeout: false });
   }
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-  const resp = await fetch(`${url}/models`, { headers });
-  if (!resp.ok) {
-    throw new ModelsFetchError(`Local catalog fetch failed: ${resp.status} ${resp.statusText}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${url}/models`, { headers });
+  } catch (e) {
+    throw classifyError(e, 'local', 'listLocalCatalog');
   }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new InvalidApiKeyError('local', resp.status as 401 | 403);
+    }
+    if (resp.status === 429) {
+      const retryAfter = resp.headers.get('retry-after');
+      const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined;
+      throw new RateLimitError('local', retryAfterMs);
+    }
+    throw new ProviderUnreachableError('local', new Error(`${resp.status} ${resp.statusText}`), {
+      retryable: resp.status >= 500,
+    });
+  }
+
   const json = await resp.json();
   const data: Array<{ id: string; object?: string; created?: number; owned_by?: string }> =
     json.data || [];
+
+  if (data.length === 0) {
+    throw new ModelCatalogEmptyError('local');
+  }
+
   return data.map(m => ({
     id: m.id,
     ownedBy: m.owned_by ?? '',
@@ -108,6 +154,7 @@ export interface ResolvedModels {
 /**
  * Resolve the final model set for the current session.
  * For NIM: auto-picks best models from catalog. For local: validates user picks against catalog.
+ * @throws ModelNotFoundError if picked model not in catalog
  */
 export function resolveModels(
   settings: Settings,
@@ -126,11 +173,9 @@ export function resolveModels(
         { key: 'chat', model: picked.routing },
         { key: 'embeddings', model: picked.embedding },
       ] as const;
-      for (const { key, model } of userSlots) {
+      for (const { model } of userSlots) {
         if (model && !catalogIds.has(model)) {
-          warnings.push(
-            `${key} model "${model}" is not in the catalog. Re-pick or refresh the catalog.`,
-          );
+          throw new ModelNotFoundError(model, Array.from(catalogIds));
         }
       }
     }
@@ -266,8 +311,20 @@ function pickHighest(
  * Heuristically pick the best model for each task from the NIM catalog.
  * @param models - Full model catalog from NIM
  * @returns PickedModels with routing, codeGen, answer, eval, embedding
+ * Returns undefined for all roles if catalog is empty.
  */
 export function pickBestModels(models: ModelInfo[]): PickedModels {
+  // Handle empty catalog gracefully
+  if (models.length === 0) {
+    return {
+      routing: undefined,
+      codeGen: undefined,
+      answer: undefined,
+      eval: undefined,
+      embedding: undefined,
+    };
+  }
+
   const chats = models.filter(m => isGeneralChat(m.id));
   const codes = models.filter(m => isCodeSpecialist(m.id));
   const embeddings = models.filter(m => isEmbedding(m.id));
@@ -307,6 +364,17 @@ export function pickBestModels(models: ModelInfo[]): PickedModels {
       bestEmbScore = s;
       embedding = m;
     }
+  }
+
+  // Validate all required models were found - warn but don't throw for incomplete catalogs
+  const warnings: string[] = [];
+  if (!routing) warnings.push('routing model not found');
+  if (!evalModel) warnings.push('eval model not found');
+  if (!codeGen) warnings.push('codeGen model not found');
+  if (!answer) warnings.push('answer model not found');
+  if (!embedding) warnings.push('embedding model not found');
+  if (warnings.length > 0) {
+    console.warn('[models] Incomplete model catalog:', warnings.join(', '));
   }
 
   return {

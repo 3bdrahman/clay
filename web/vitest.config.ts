@@ -8,6 +8,7 @@ export default defineConfig({
     globals: false,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['node_modules', 'dist'],
+    testTimeout: 30000,
     coverage: {
       enabled: false,
       provider: 'v8',

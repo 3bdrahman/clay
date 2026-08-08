@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as aq from 'arquero';
-import { createLLMClient, LLMConfigError, type LLMClient } from '../lib/llm';
-import { createDemoLLMClient } from '../lib/demo-llm';
+import { createLLMClient, type LLMClient, ProviderUnreachableError } from '../lib/llm';
 import { createEmbeddingsClient, type EmbeddingsClient } from '../lib/embeddings';
 import { createWebSearchClient, type WebSearchClient } from '../lib/websearch';
 import { createVectorStore, type VectorStore } from '../lib/vectorstore';
@@ -46,11 +45,14 @@ export function useClay(): {
   addFiles: (files: FileList | File[]) => Promise<void>;
   loadSampleData: () => Promise<void>;
   clearSandboxData: () => void;
+  removeSandboxDocument: (fileName: string) => void;
+  removeSandboxDataset: (name: string) => void;
 } {
   const settings = useAppStore(s => s.settings);
   const availableModels = useAppStore(s => s.availableModels);
   const modelsFetchedAt = useAppStore(s => s.modelsFetchedAt);
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
+  const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const sandboxProcessing = useAppStore(s => s.sandboxProcessing);
   const setModels = useAppStore(s => s.setModels);
@@ -62,6 +64,8 @@ export function useClay(): {
   const setSandboxProcessing = useAppStore(s => s.setSandboxProcessing);
   const updateSandboxProcessingItem = useAppStore(s => s.updateSandboxProcessingItem);
   const clearSandbox = useAppStore(s => s.clearSandbox);
+  const removeSandboxDatasetFromStore = useAppStore(s => s.removeSandboxDataset);
+  const removeSandboxDocumentFromStore = useAppStore(s => s.removeSandboxDocument);
 
   const [services, setServices] = useState<ClayServices | null>(null);
   const [loading, setLoading] = useState(true);
@@ -141,19 +145,26 @@ export function useClay(): {
         setError(null);
         setNeedsConfiguration(false);
 
+        const isLocal = settings.provider === 'local';
+        const hasValidConfig = isLocal
+          ? settings.localServerUrl.trim().length > 0
+          : settings.apiKey.trim().length > 0;
+
+        if (!hasValidConfig) {
+          setNeedsConfiguration(true);
+          setServices(null);
+          setLoading(false);
+          return;
+        }
+
         const endpoint = resolveProviderEndpoint(settings);
-        
-        // Determine if we should use demo mode (no API key and not local)
-        const isDemoMode = settings.provider !== 'local' && !settings.apiKey;
-        
-        const llm = isDemoMode
-          ? createDemoLLMClient()
-          : createLLMClient({
-              baseUrl: endpoint.baseUrl,
-              apiKey: endpoint.apiKey,
-              temperature: settings.temperature,
-              providerLabel: endpoint.providerLabel,
-            });
+
+        const llm = createLLMClient({
+          baseUrl: endpoint.baseUrl,
+          apiKey: endpoint.apiKey,
+          temperature: settings.temperature,
+          providerLabel: endpoint.providerLabel,
+        });
 
         let catalog = availableModels;
         if (settings.provider === 'local') {
@@ -166,6 +177,7 @@ export function useClay(): {
           const fresh = await fetchNimModels(settings.apiKey);
           if (fresh.length > 0) catalog = fresh;
         }
+        
         const { picked } = resolveModels(
           { ...settings, localCatalog: catalog },
           catalog,
@@ -175,12 +187,14 @@ export function useClay(): {
           settings.provider === 'local'
             ? ''
             : (settings.embeddingApiKey || settings.apiKey);
+        
         const embeddings = createEmbeddingsClient({
           baseUrl: endpoint.baseUrl,
           apiKey: embeddingKey,
           embeddingModel: picked.embedding ?? '',
           providerLabel: endpoint.providerLabel,
         });
+        
         const vectorstore = createVectorStore(embeddings);
         const webSearch = createWebSearchClient(settings);
 
@@ -222,15 +236,11 @@ export function useClay(): {
         };
         servicesRef.current = newServices;
         setServices(newServices);
-        
-        if (isDemoMode) {
-          setNeedsConfiguration(true);
-        }
       } catch (e) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : String(e);
           setError(msg);
-          if (e instanceof LLMConfigError) setNeedsConfiguration(true);
+          if (e instanceof ProviderUnreachableError) setNeedsConfiguration(true);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -379,6 +389,32 @@ export function useClay(): {
     clearSandbox();
   }, [clearSandbox, sandboxDatasets]);
 
+  const removeSandboxDocument = useCallback(
+    (fileName: string) => {
+      const sv = servicesRef.current;
+      const doc = sandboxDocuments.find(d => d.fileName === fileName);
+      if (doc) {
+        if (sv) {
+          sv.vectorstore.removeBySource(doc.source);
+        }
+        removeSandboxDocumentFromStore(fileName);
+      }
+    },
+    [sandboxDocuments, removeSandboxDocumentFromStore],
+  );
+
+  // BM25 hybrid path is dead today (createVectorStore is called with no
+  // bm25Index). When hybrid is enabled, bm25.remove(chunkId) per
+  // sandboxDocument.chunks[].id belongs inside vectorstore's addEntries
+  // / removeBySource, not here.
+  const removeSandboxDataset = useCallback(
+    (name: string) => {
+      unregisterSandboxTable(name);
+      removeSandboxDatasetFromStore(name);
+    },
+    [removeSandboxDatasetFromStore],
+  );
+
   const pickedModels: PickedModels = useMemo(() => {
     if (settings.provider === 'local') {
       return pickLocalModels(settings.localModels);
@@ -396,5 +432,7 @@ export function useClay(): {
     addFiles,
     loadSampleData,
     clearSandboxData,
+    removeSandboxDocument,
+    removeSandboxDataset,
   };
 }

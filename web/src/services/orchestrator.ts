@@ -19,6 +19,7 @@ import {
   parallelGrade,
   formatHeadingCitation,
 } from './orchestratorHelpers';
+import { RagError, RagErrorCode, isRetryable, getUserMessage } from '../lib/errors';
 
 export interface WorkflowOrchestrator {
   run(signal?: AbortSignal): Promise<WorkflowState>;
@@ -53,6 +54,9 @@ const NODE_LABELS: Record<string, string> = {
   end: 'Done',
 };
 
+const MAX_STEP_RETRIES = 2;
+const BASE_RETRY_DELAY_MS = 1000;
+
 export function createWorkflowOrchestrator(
   question: string,
   deps: OrchestratorDeps,
@@ -68,6 +72,10 @@ export function createWorkflowOrchestrator(
     startedAt: Date.now(),
   };
   let steps: StepTrace[] = [];
+  let stepErrorCount = 0;
+  // Circuit breaker: track consecutive provider failures
+  let consecutiveProviderFailures = 0;
+  const MAX_CONSECUTIVE_FAILURES = 3;
 
   function beginStep(node: string, label: string): void {
     const step: StepTrace = {
@@ -96,10 +104,81 @@ export function createWorkflowOrchestrator(
     }
   }
 
+  function setError(err: Error, step: string): void {
+    const message = getUserMessage(err);
+    const code = err instanceof RagError ? err.code : RagErrorCode.UNKNOWN_ERROR;
+    const retryable = isRetryable(err);
+
+    // Circuit breaker: track consecutive provider failures
+    if (code === RagErrorCode.PROVIDER_UNREACHABLE || code === RagErrorCode.INVALID_API_KEY) {
+      consecutiveProviderFailures++;
+      if (consecutiveProviderFailures >= MAX_CONSECUTIVE_FAILURES) {
+        // Circuit breaker triggered - don't retry
+        throw new Error(`Circuit breaker triggered after ${consecutiveProviderFailures} consecutive provider failures. Check your configuration.`);
+      }
+    } else {
+      // Reset counter on non-provider errors
+      consecutiveProviderFailures = 0;
+    }
+
+    state.error = {
+      code,
+      message,
+      step,
+      retryable,
+    };
+
+    stepErrorCount++;
+    callbacks.onError?.(err);
+    emitSteps();
+  }
+
   function emitSteps(): void {
     state.steps = [...steps];
     callbacks.onStepUpdate?.(state.steps);
     callbacks.onPartialUpdate?.({ ...state });
+  }
+
+  async function withRetry<T>(
+    stepName: string,
+    fn: () => Promise<T>,
+    signal?: AbortSignal
+  ): Promise<T> {
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= MAX_STEP_RETRIES; attempt++) {
+      if (signal?.aborted) {
+        throw new Error('Aborted');
+      }
+      try {
+        return await fn();
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+
+        // Don't retry on abort or non-retryable errors
+        if (signal?.aborted || !isRetryable(lastError)) {
+          // Preserve step context by wrapping the error
+          const errorWithStep = new Error(lastError.message, { cause: lastError });
+          errorWithStep.name = lastError.name;
+          // Attach step context to the error
+          (errorWithStep as any)._stepContext = stepName;
+          throw errorWithStep;
+        }
+
+        // Retry with exponential backoff
+        if (attempt < MAX_STEP_RETRIES) {
+          const delay = BASE_RETRY_DELAY_MS * Math.pow(2, attempt);
+          await new Promise(r => setTimeout(r, delay));
+          if (import.meta.env.DEV) {
+            console.warn(`[orchestrator] Retrying ${stepName} (attempt ${attempt + 1}/${MAX_STEP_RETRIES}):`, lastError.message);
+          }
+        }
+      }
+    }
+    // Exhausted retries - preserve step context
+    const errorWithStep = new Error(lastError!.message, { cause: lastError });
+    errorWithStep.name = lastError!.name;
+    (errorWithStep as any)._stepContext = stepName;
+    throw errorWithStep;
   }
 
   function buildContextForEval(): string {
@@ -161,41 +240,50 @@ export function createWorkflowOrchestrator(
     if (signal?.aborted) return;
     beginStep('retrieve', NODE_LABELS.retrieve);
 
-    const hypothetical = await expandHyDE(question, { llm: deps.llm, model: deps.pickedModels.eval });
-    const initialK = deps.settings.maxRetries ?? 8;
-    const rerankK = 4;
+    try {
+      const hypothetical = await expandHyDE(question, { llm: deps.llm, model: deps.pickedModels.eval });
+      const initialK = deps.settings.maxRetries ?? 8;
+      const rerankK = 4;
 
-    const docs = await parallelFanOut(
-      (q, k) => deps.vectorstore.similaritySearch(q, k),
-      question,
-      hypothetical,
-      initialK,
-      rerankK,
-    );
-    state.documents = docs;
-    endStep('retrieve', { detail: `${docs.length} docs`, meta: { count: docs.length } });
+      const docs = await withRetry('vectorstore-similaritySearch', () =>
+        parallelFanOut(
+          (q, k) => deps.vectorstore.similaritySearch(q, k),
+          question,
+          hypothetical,
+          initialK,
+          rerankK,
+        ),
+        signal
+      );
+      state.documents = docs;
+      endStep('retrieve', { detail: `${docs.length} docs`, meta: { count: docs.length } });
 
-    beginStep('grade_docs', NODE_LABELS.grade_docs);
-    const filtered = await parallelGrade(docs, gradeDocRelevance, {
-      earlyExitAt: 4,
-      signal,
-    });
-    state.documents = filtered;
-    endStep('grade_docs', { detail: `${filtered.length}/${docs.length} relevant` });
+      beginStep('grade_docs', NODE_LABELS.grade_docs);
+      const filtered = await parallelGrade(docs, gradeDocRelevance, {
+        earlyExitAt: 4,
+        signal,
+      });
+      state.documents = filtered;
+      endStep('grade_docs', { detail: `${filtered.length}/${docs.length} relevant` });
+    } catch (e) {
+      endStep('retrieve', { detail: 'error' });
+      endStep('grade_docs', { detail: 'error' });
+      throw e;
+    }
   }
 
   async function runPythonPath(signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) return;
     beginStep('analyze', NODE_LABELS.analyze);
     try {
-      const result = await deps.analyzer.analyze(question, signal);
+      const result = await withRetry('analyzer-analyze', () => deps.analyzer.analyze(question, signal), signal);
       state.dataAnalysis = result;
       endStep('analyze', {
         detail: result.resultType === 'error' ? 'error' : 'complete',
         meta: { attempts: result.attempts, durationMs: Math.round(result.durationMs) },
       });
     } catch (e) {
-      endStep('analyze', { detail: 'failed' });
+      endStep('analyze', { detail: 'error' });
       throw e;
     }
   }
@@ -203,9 +291,14 @@ export function createWorkflowOrchestrator(
   async function runWebSearchStep(signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) return;
     beginStep('web_search', NODE_LABELS.web_search);
-    const results = await deps.webSearch.search(question, 4);
-    state.webResults = results;
-    endStep('web_search', { detail: `${results.length} results` });
+    try {
+      const results = await withRetry('webSearch-search', () => deps.webSearch.search(question, 4), signal);
+      state.webResults = results;
+      endStep('web_search', { detail: `${results.length} results` });
+    } catch (e) {
+      endStep('web_search', { detail: 'error' });
+      throw e;
+    }
   }
 
   function clearSourceData(source: SourceType): void {
@@ -265,21 +358,25 @@ export function createWorkflowOrchestrator(
     const prompt = RAG_PROMPT.replace('{context}', context).replace('{question}', question);
 
     try {
-      const resp = await deps.llm.stream(
-        {
-          system: 'You are a helpful assistant that answers questions based solely on the provided context. Cite sources inline using [1], [2], etc., and include a References: section at the end.',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: deps.settings.temperature ?? 0,
-          model: deps.pickedModels.answer,
-        },
-        callbacks.onToken ?? (() => {}),
+      const resp = await withRetry('llm-stream', () =>
+        deps.llm.stream(
+          {
+            system: 'You are a helpful assistant that answers questions based solely on the provided context. Cite sources inline using [1], [2], etc., and include a References: section at the end.',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: deps.settings.temperature ?? 0,
+            model: deps.pickedModels.answer,
+          },
+          callbacks.onToken ?? (() => {}),
+        ),
       );
       state.answer = resp.content;
       buildCitations();
       endStep('generate', { detail: 'complete' });
     } catch (e) {
-      state.answer = `Error generating answer: ${e instanceof Error ? e.message : String(e)}`;
+      const err = e instanceof Error ? e : new Error(String(e));
+      state.answer = `Error generating answer: ${getUserMessage(err)}`;
       endStep('generate', { detail: 'error' });
+      throw err;
     }
   }
 
@@ -292,42 +389,47 @@ export function createWorkflowOrchestrator(
     }
 
     try {
-      const halluc = await deps.llm.invoke({
-        system: HALLUCINATION_INSTRUCTIONS,
-        messages: [
-          {
-            role: 'user',
-            content: HALLUCINATION_PROMPT.replace('{documents}', context).replace('{generation}', state.answer || ''),
-          },
-        ],
-        jsonMode: true,
-        temperature: 0,
-        model: deps.pickedModels.eval,
-      });
+      const halluc = await withRetry('llm-invoke-hallucination', () =>
+        deps.llm.invoke({
+          system: HALLUCINATION_INSTRUCTIONS,
+          messages: [
+            {
+              role: 'user',
+              content: HALLUCINATION_PROMPT.replace('{documents}', context).replace('{generation}', state.answer || ''),
+            },
+          ],
+          jsonMode: true,
+          temperature: 0,
+          model: deps.pickedModels.eval,
+        }),
+      );
       const hallucParsed = JSON.parse(halluc.content || '{}');
       if ((hallucParsed.binary_score || '').toLowerCase() !== 'yes') {
         endStep('evaluate', { detail: 'hallucination' });
         return false;
       }
 
-      const ansResp = await deps.llm.invoke({
-        system: ANSWER_INSTRUCTIONS,
-        messages: [
-          {
-            role: 'user',
-            content: ANSWER_PROMPT.replace('{question}', question).replace('{generation}', state.answer || ''),
-          },
-        ],
-        jsonMode: true,
-        temperature: 0,
-        model: deps.pickedModels.eval,
-      });
+      const ansResp = await withRetry('llm-invoke-answer', () =>
+        deps.llm.invoke({
+          system: ANSWER_INSTRUCTIONS,
+          messages: [
+            {
+              role: 'user',
+              content: ANSWER_PROMPT.replace('{question}', question).replace('{generation}', state.answer || ''),
+            },
+          ],
+          jsonMode: true,
+          temperature: 0,
+          model: deps.pickedModels.eval,
+        }),
+      );
       const ansParsed = JSON.parse(ansResp.content || '{}');
       const useful = (ansParsed.binary_score || '').toLowerCase() === 'yes';
       endStep('evaluate', { detail: useful ? 'useful' : 'not useful' });
       return useful;
-    } catch {
+    } catch (e) {
       endStep('evaluate', { detail: 'eval-error' });
+      // On eval error, treat as useful to avoid infinite retries
       return true;
     }
   }
@@ -338,13 +440,16 @@ export function createWorkflowOrchestrator(
 
     try {
       beginStep('route', NODE_LABELS.route);
-      const routeResp = await deps.llm.invoke({
-        system: ROUTER_INSTRUCTIONS,
-        messages: [{ role: 'user', content: question }],
-        jsonMode: true,
-        temperature: 0,
-        model: deps.pickedModels.routing,
-      });
+      const routeResp = await withRetry('llm-invoke-route', () =>
+        deps.llm.invoke({
+          system: ROUTER_INSTRUCTIONS,
+          messages: [{ role: 'user', content: question }],
+          jsonMode: true,
+          temperature: 0,
+          model: deps.pickedModels.routing,
+        }),
+        signal
+      );
       let source: SourceType;
       try {
         const parsed = JSON.parse(routeResp.content || '{}');
@@ -361,7 +466,7 @@ export function createWorkflowOrchestrator(
       const maxRetries = deps.settings.maxRetries ?? 3;
       while (!useful && state.retryCount < maxRetries) {
         if (signal?.aborted) {
-          state.error = 'Aborted';
+          setError(new Error('Aborted'), 'generate');
           break;
         }
         await generate();
@@ -395,8 +500,9 @@ export function createWorkflowOrchestrator(
       return state;
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      state.error = err.message;
-      callbacks.onError?.(err);
+      // Extract step context from error if available
+      const stepContext = (err as any)._stepContext ?? 'run';
+      setError(err, stepContext);
       state.finishedAt = Date.now();
       emitSteps();
       return state;
