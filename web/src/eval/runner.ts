@@ -23,8 +23,7 @@ export interface EvalQuestion {
   question: string;
   category: 'data_analysis' | 'documents' | 'web_search';
   expectedSource: 'python' | 'vectorstore' | 'websearch';
-  expectedDatasets?: string[];
-  expectedColumns?: string[];
+  expectedColumnIntent?: string[];
   goldenAnswer: string;
   minRelevantChunks: number;
 }
@@ -198,6 +197,57 @@ export async function runEval(
   return {
     total,
     passed: _passed,
+    failed,
+    routingAccuracy,
+    avgRecallAtK,
+    avgLatencyMs,
+    byCategory,
+    results,
+  };
+}
+
+export function gradeQuestionSet(
+  questions: EvalQuestion[],
+  results: EvalResult[],
+): EvalSummary {
+  const total = results.length;
+  const passed = results.filter(
+    (r) => !r.error && r.routingCorrect && r.recallAtK >= 0.5,
+  ).length;
+  const failed = total - passed;
+  const routingAccuracy =
+    results.filter((r) => r.routingCorrect).length / (total || 1);
+  const avgRecallAtK =
+    results.reduce((sum, r) => sum + r.recallAtK, 0) / (total || 1);
+  const avgLatencyMs =
+    results.reduce((sum, r) => sum + r.latencyMs, 0) / (total || 1);
+
+  const byCategory: Record<
+    string,
+    { total: number; passed: number; routingAccuracy: number }
+  > = {};
+  for (const r of results) {
+    if (!byCategory[r.category]) {
+      byCategory[r.category] = { total: 0, passed: 0, routingAccuracy: 0 };
+    }
+    byCategory[r.category].total++;
+    if (!r.error && r.routingCorrect && r.recallAtK >= 0.5) {
+      byCategory[r.category].passed++;
+    }
+  }
+  for (const cat of Object.keys(byCategory)) {
+    const entry = byCategory[cat]!;
+    const matching = results.filter((r) => r.category === cat);
+    entry.routingAccuracy =
+      matching.filter((r) => r.routingCorrect).length /
+      (entry.total || 1);
+  }
+
+  void questions;
+
+  return {
+    total,
+    passed,
     failed,
     routingAccuracy,
     avgRecallAtK,

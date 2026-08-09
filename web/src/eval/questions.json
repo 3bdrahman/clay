@@ -1,289 +1,204 @@
 [
   {
-    "id": "q001",
-    "question": "How many employees do we have by department?",
+    "id": "data-001",
+    "question": "How many rows are in each table?",
     "category": "data_analysis",
     "expectedSource": "python",
-    "expectedDatasets": ["employees"],
-    "expectedColumns": ["department"],
-    "goldenAnswer": "The query should group employees by department and count them.",
+    "expectedColumnIntent": ["count(*)", "group-by-table"],
+    "goldenAnswer": "The query should count rows in every loaded dataset.",
     "minRelevantChunks": 0
   },
   {
-    "id": "q002",
-    "question": "What was our highest revenue month?",
+    "id": "data-002",
+    "question": "What is the total of the numeric money column in projects?",
     "category": "data_analysis",
     "expectedSource": "python",
-    "expectedDatasets": ["feedback"],
-    "expectedColumns": [],
-    "goldenAnswer": "The query should find the maximum revenue from the feedback dataset.",
+    "expectedColumnIntent": ["sum:numeric", "dataset:projects"],
+    "goldenAnswer": "The query should sum the budget/money column from the projects dataset.",
     "minRelevantChunks": 0
   },
   {
-    "id": "q003",
-    "question": "Show me the distribution of project statuses",
+    "id": "data-003",
+    "question": "Show the distribution of the categorical status column",
     "category": "data_analysis",
     "expectedSource": "python",
-    "expectedDatasets": ["projects"],
-    "expectedColumns": ["status"],
-    "goldenAnswer": "The query should group projects by status and count them.",
+    "expectedColumnIntent": ["group-by:categorical", "count"],
+    "goldenAnswer": "The query should group by a categorical column and count.",
     "minRelevantChunks": 0
   },
   {
-    "id": "q004",
-    "question": "What is the total contract value across all clients?",
+    "id": "data-004",
+    "question": "What is the average rating from client feedback?",
     "category": "data_analysis",
     "expectedSource": "python",
-    "expectedDatasets": ["projects"],
-    "expectedColumns": ["budget_usd"],
-    "goldenAnswer": "The query should sum the budget_usd column from projects.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q005",
-    "question": "What does the employee handbook say about remote work?",
-    "category": "documents",
-    "expectedSource": "vectorstore",
-    "expectedDatasets": [],
-    "goldenAnswer": "Answer should cite the handbook document about remote work policy.",
-    "minRelevantChunks": 1
-  },
-  {
-    "id": "q006",
-    "question": "Summarize the company overview and services",
-    "category": "documents",
-    "expectedSource": "vectorstore",
-    "expectedDatasets": [],
-    "goldenAnswer": "Answer should provide a summary based on uploaded documents.",
-    "minRelevantChunks": 1
-  },
-  {
-    "id": "q007",
-    "question": "What feedback have we received from clients?",
-    "category": "documents",
-    "expectedSource": "vectorstore",
-    "expectedDatasets": [],
-    "goldenAnswer": "Answer should cite client feedback documents.",
-    "minRelevantChunks": 1
-  },
-  {
-    "id": "q008",
-    "question": "Tell me about the training programs offered",
-    "category": "documents",
-    "expectedSource": "vectorstore",
-    "expectedDatasets": [],
-    "goldenAnswer": "Answer should cite training-related documents.",
-    "minRelevantChunks": 1
-  },
-  {
-    "id": "q009",
-    "question": "What are the latest trends in AI for business?",
-    "category": "web_search",
-    "expectedSource": "websearch",
-    "expectedDatasets": [],
-    "goldenAnswer": "Answer should cite web search results about AI trends.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q010",
-    "question": "Compare AWS vs Azure for ML workloads",
-    "category": "web_search",
-    "expectedSource": "websearch",
-    "expectedDatasets": [],
-    "goldenAnswer": "Answer should cite web search results comparing cloud providers.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q011",
-    "question": "What is the current state of the consulting industry?",
-    "category": "web_search",
-    "expectedSource": "websearch",
-    "expectedDatasets": [],
-    "goldenAnswer": "Answer should cite web search results about consulting industry.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q012",
-    "question": "How many employees are in Engineering?",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["employees"],
-    "expectedColumns": ["department"],
-    "goldenAnswer": "The query should filter employees by department = 'Engineering' and count.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q013",
-    "question": "What projects are currently active?",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["projects"],
-    "expectedColumns": ["status"],
-    "goldenAnswer": "The query should filter projects by status = 'Active'.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q014",
-    "question": "Average rating from client feedback",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["feedback"],
-    "expectedColumns": ["rating"],
+    "expectedColumnIntent": ["avg:numeric", "dataset:feedback"],
     "goldenAnswer": "The query should compute the average of the rating column.",
     "minRelevantChunks": 0
   },
   {
-    "id": "q015",
-    "question": "List all employees with their departments",
+    "id": "data-005",
+    "question": "Group employees by department and count them",
     "category": "data_analysis",
     "expectedSource": "python",
-    "expectedDatasets": ["employees"],
-    "expectedColumns": ["name", "department"],
-    "goldenAnswer": "The query should select name and department from employees.",
+    "expectedColumnIntent": ["group-by:categorical", "count", "dataset:employees"],
+    "goldenAnswer": "The query should group employees by department and count them.",
     "minRelevantChunks": 0
   },
   {
-    "id": "q016",
-    "question": "Total budget for all active projects",
+    "id": "data-006",
+    "question": "What is the average numeric value grouped by categorical value?",
     "category": "data_analysis",
     "expectedSource": "python",
-    "expectedDatasets": ["projects"],
-    "expectedColumns": ["budget_usd", "status"],
-    "goldenAnswer": "The query should sum budget_usd for projects where status = 'Active'.",
+    "expectedColumnIntent": ["avg:numeric", "group-by:categorical"],
+    "goldenAnswer": "The query should compute mean of a numeric column per group.",
     "minRelevantChunks": 0
   },
   {
-    "id": "q017",
-    "question": "What is our refund policy?",
+    "id": "data-007",
+    "question": "Filter rows by the categorical column and count",
+    "category": "data_analysis",
+    "expectedSource": "python",
+    "expectedColumnIntent": ["filter:categorical", "count"],
+    "goldenAnswer": "The query should filter by a categorical value and count.",
+    "minRelevantChunks": 0
+  },
+  {
+    "id": "data-008",
+    "question": "List all rows ordered by a numeric column descending",
+    "category": "data_analysis",
+    "expectedSource": "python",
+    "expectedColumnIntent": ["sort:numeric", "limit"],
+    "goldenAnswer": "The query should order by numeric descending with a limit.",
+    "minRelevantChunks": 0
+  },
+  {
+    "id": "data-009",
+    "question": "Compute the difference between two date columns and average it",
+    "category": "data_analysis",
+    "expectedSource": "python",
+    "expectedColumnIntent": ["diff:temporal", "avg:numeric"],
+    "goldenAnswer": "The query should compute a date diff then average.",
+    "minRelevantChunks": 0
+  },
+  {
+    "id": "data-010",
+    "question": "Aggregate over a time period using a temporal column",
+    "category": "data_analysis",
+    "expectedSource": "python",
+    "expectedColumnIntent": ["group-by:temporal", "sum:numeric"],
+    "goldenAnswer": "The query should group by time period and sum a numeric column.",
+    "minRelevantChunks": 0
+  },
+  {
+    "id": "docs-001",
+    "question": "What is the company's refund policy?",
     "category": "documents",
     "expectedSource": "vectorstore",
-    "expectedDatasets": [],
-    "goldenAnswer": "Answer should cite the policy document about refunds.",
+    "goldenAnswer": "Answer should cite the document about refunds.",
     "minRelevantChunks": 1
   },
   {
-    "id": "q018",
-    "question": "Which client gave the highest feedback rating?",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["feedback"],
-    "expectedColumns": ["source", "rating"],
-    "goldenAnswer": "The query should find the max rating and its source.",
-    "minRelevantChunks": 0
+    "id": "docs-002",
+    "question": "Summarize the company overview and services",
+    "category": "documents",
+    "expectedSource": "vectorstore",
+    "goldenAnswer": "Answer should provide a summary based on uploaded documents.",
+    "minRelevantChunks": 1
   },
   {
-    "id": "q019",
+    "id": "docs-003",
+    "question": "What does the employee handbook say about remote work?",
+    "category": "documents",
+    "expectedSource": "vectorstore",
+    "goldenAnswer": "Answer should cite the handbook document about remote work policy.",
+    "minRelevantChunks": 1
+  },
+  {
+    "id": "docs-004",
+    "question": "What feedback have we received from clients?",
+    "category": "documents",
+    "expectedSource": "vectorstore",
+    "goldenAnswer": "Answer should cite client feedback documents.",
+    "minRelevantChunks": 1
+  },
+  {
+    "id": "docs-005",
+    "question": "Tell me about the training programs offered",
+    "category": "documents",
+    "expectedSource": "vectorstore",
+    "goldenAnswer": "Answer should cite training-related documents.",
+    "minRelevantChunks": 1
+  },
+  {
+    "id": "docs-006",
     "question": "What are the company's core values?",
     "category": "documents",
     "expectedSource": "vectorstore",
-    "expectedDatasets": [],
     "goldenAnswer": "Answer should cite the document containing core values.",
     "minRelevantChunks": 1
   },
   {
-    "id": "q020",
-    "question": "How many projects were completed in 2024?",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["projects"],
-    "expectedColumns": ["status", "end_date"],
-    "goldenAnswer": "The query should count projects with status = 'Completed' and end_date in 2024.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q021",
-    "question": "What is the average salary by department?",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["employees"],
-    "expectedColumns": ["department", "salary_usd"],
-    "goldenAnswer": "The query should group by department and compute average salary_usd.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q022",
-    "question": "What are the most common project statuses?",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["projects"],
-    "expectedColumns": ["status"],
-    "goldenAnswer": "The query should group by status and count, ordered descending.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q023",
+    "id": "docs-007",
     "question": "Tell me about the employee benefits package",
     "category": "documents",
     "expectedSource": "vectorstore",
-    "expectedDatasets": [],
     "goldenAnswer": "Answer should cite the benefits document.",
     "minRelevantChunks": 1
   },
   {
-    "id": "q024",
-    "question": "What is the trend of project budgets over time?",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["projects"],
-    "expectedColumns": ["start_date", "budget_usd"],
-    "goldenAnswer": "The query should group by time period and sum budget_usd.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q025",
-    "question": "Which department has the most employees?",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["employees"],
-    "expectedColumns": ["department"],
-    "goldenAnswer": "The query should group by department, count, and order descending, limit 1.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q026",
+    "id": "docs-008",
     "question": "What are the key performance indicators we track?",
     "category": "documents",
     "expectedSource": "vectorstore",
-    "expectedDatasets": [],
     "goldenAnswer": "Answer should cite the KPI document.",
     "minRelevantChunks": 1
   },
   {
-    "id": "q027",
-    "question": "Average project duration in days",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["projects"],
-    "expectedColumns": ["start_date", "end_date"],
-    "goldenAnswer": "The query should compute the difference between end_date and start_date, then average.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q028",
-    "question": "What are the latest developments in generative AI?",
-    "category": "web_search",
-    "expectedSource": "websearch",
-    "expectedDatasets": [],
-    "goldenAnswer": "Answer should cite recent web search results about generative AI.",
-    "minRelevantChunks": 0
-  },
-  {
-    "id": "q029",
+    "id": "docs-009",
     "question": "How do we handle data privacy and security?",
     "category": "documents",
     "expectedSource": "vectorstore",
-    "expectedDatasets": [],
     "goldenAnswer": "Answer should cite the security/privacy policy document.",
     "minRelevantChunks": 1
   },
   {
-    "id": "q030",
-    "question": "What is the employee turnover rate by department?",
-    "category": "data_analysis",
-    "expectedSource": "python",
-    "expectedDatasets": ["employees"],
-    "expectedColumns": ["department", "status"],
-    "goldenAnswer": "The query should count employees by department and status, compute turnover rate.",
+    "id": "web-001",
+    "question": "What are the latest trends in AI for business?",
+    "category": "web_search",
+    "expectedSource": "websearch",
+    "goldenAnswer": "Answer should cite web search results about AI trends.",
+    "minRelevantChunks": 0
+  },
+  {
+    "id": "web-002",
+    "question": "Compare cloud providers for machine learning workloads",
+    "category": "web_search",
+    "expectedSource": "websearch",
+    "goldenAnswer": "Answer should cite web search results comparing cloud providers.",
+    "minRelevantChunks": 0
+  },
+  {
+    "id": "web-003",
+    "question": "What are the best practices for vector search?",
+    "category": "web_search",
+    "expectedSource": "websearch",
+    "goldenAnswer": "Answer should cite web search results about vector search best practices.",
+    "minRelevantChunks": 0
+  },
+  {
+    "id": "web-004",
+    "question": "What are the latest developments in generative AI?",
+    "category": "web_search",
+    "expectedSource": "websearch",
+    "goldenAnswer": "Answer should cite recent web search results about generative AI.",
+    "minRelevantChunks": 0
+  },
+  {
+    "id": "web-005",
+    "question": "What is the current state of the consulting industry?",
+    "category": "web_search",
+    "expectedSource": "websearch",
+    "goldenAnswer": "Answer should cite web search results about consulting industry.",
     "minRelevantChunks": 0
   }
 ]
