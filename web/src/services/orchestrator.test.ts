@@ -533,30 +533,128 @@ describe('createWorkflowOrchestrator', () => {
       expect(vecCitation?.excerpt).not.toContain('[');
     });
 
-    it('truncates long excerpts to 200 chars', async () => {
-      (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        content: JSON.stringify({ datasource: 'vectorstore' }),
-      });
-      // HyDE expansion call
-      (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        content: 'Hypothetical passage for testing.',
-      });
-      const longContent = 'x'.repeat(500);
-      (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
-        { id: '1', content: longContent, source: 'a.pdf', score: 0.9 },
-      ]);
-      (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
-        content: 'Answer',
-        usage: undefined,
-        model: 'answer-model',
-      });
-      (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
-        content: JSON.stringify({ binary_score: 'yes' }),
-      });
-
-      const state = await orchestrator.run();
-      const vecCitation = state.citations.find(c => c.type === 'vectorstore');
-      expect(vecCitation?.excerpt.length).toBeLessThanOrEqual(200);
+  it('truncates long excerpts to 200 chars', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore' }),
     });
+    // HyDE expansion call
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Hypothetical passage for testing.',
+    });
+    const longContent = 'x'.repeat(500);
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', content: longContent, source: 'a.pdf', score: 0.9 },
+    ]);
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+
+    const state = await orchestrator.run();
+    const vecCitation = state.citations.find(c => c.type === 'vectorstore');
+    expect(vecCitation?.excerpt.length).toBeLessThanOrEqual(200);
   });
+});
+
+describe('createWorkflowOrchestrator — retrieval K is independent of maxRetries (issue #1)', () => {
+  function makeOrchestrator(settings: Settings) {
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.similaritySearch.mockReset();
+    mockVectorstore.similaritySearch.mockResolvedValue([]);
+    return createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings,
+        pickedModels: testPickedModels,
+      },
+      {},
+    );
+  }
+
+  function stubLLMForVectorstorePath() {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockReset();
+    // Route decision → vectorstore
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore' }),
+    });
+    // HyDE expansion
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Hypothetical passage for testing.',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockReset();
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+  }
+
+  it('retrieves with the configured vectorstoreInitialK (not maxRetries) when maxRetries=1', async () => {
+    const settings: Settings = {
+      ...testSettings,
+      maxRetries: 1,
+      vectorstoreInitialK: 8,
+    };
+    stubLLMForVectorstorePath();
+    const orch = makeOrchestrator(settings);
+
+    await orch.run();
+
+    const calls = (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      const k = call[1] as number | undefined;
+      expect(k).toBe(8);
+    }
+  });
+
+  it('retrieves with a sane default K when vectorstoreInitialK is unset, regardless of maxRetries', async () => {
+    const settings: Settings = {
+      ...testSettings,
+      maxRetries: 1,
+    };
+    stubLLMForVectorstorePath();
+    const orch = makeOrchestrator(settings);
+
+    await orch.run();
+
+    const calls = (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      const k = call[1] as number | undefined;
+      expect(k).toBeGreaterThanOrEqual(4);
+    }
+  });
+
+  it('respects an explicit vectorstoreInitialK=12 override independent of maxRetries=5', async () => {
+    const settings: Settings = {
+      ...testSettings,
+      maxRetries: 5,
+      vectorstoreInitialK: 12,
+    };
+    stubLLMForVectorstorePath();
+    const orch = makeOrchestrator(settings);
+
+    await orch.run();
+
+    const calls = (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      const k = call[1] as number | undefined;
+      expect(k).toBe(12);
+    }
+  });
+});
 });

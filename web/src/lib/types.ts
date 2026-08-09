@@ -17,6 +17,7 @@ export interface Settings {
   serperApiKey: string;
   temperature: number;
   maxRetries: number;
+  vectorstoreInitialK?: number;
   theme: 'light' | 'dark' | 'system';
   localServerUrl: string;
   localModels: LocalModelPicks;

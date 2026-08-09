@@ -80,6 +80,7 @@ const DEFAULT_SETTINGS: Settings = {
   serperApiKey: '',
   temperature: 0,
   maxRetries: 3,
+  vectorstoreInitialK: 8,
   theme: 'system',
   localServerUrl: LOCAL_DEFAULT_BASE_URL,
   localModels: {
