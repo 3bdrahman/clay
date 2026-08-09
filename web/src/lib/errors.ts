@@ -437,7 +437,8 @@ export function classifyError(
 export function classifyHttpError(
   response: Response,
   provider: string,
-  step: string
+  step: string,
+  modelHint?: string
 ): RagError {
   const status = response.status;
 
@@ -458,7 +459,7 @@ export function classifyHttpError(
   }
 
   if (status === 404) {
-    return new ModelNotFoundError('unknown', [], new Error(`${status} ${response.statusText}`));
+    return new ModelNotFoundError(modelHint ?? '(unspecified)', [], new Error(`${status} ${response.statusText}`));
   }
 
   return new RagError({

@@ -291,4 +291,27 @@ describe('createVectorStore', () => {
     await vs2.load();
     expect(vs2.stats.entries).toBe(1);
   });
+
+  describe('modelId propagation (issue #7)', () => {
+    it('stamps entries with the configured embeddingModel, not "unknown"', async () => {
+      const vs = createVectorStore(mockEmbeddings, { embeddingModel: 'nv-embedqa-e5-v5' });
+      await vs.load();
+      vs.addEntries([
+        { id: '1', text: 'a', source: 's', embedding: new Array(4).fill(0.1) },
+      ]);
+      const results = await vs.similaritySearch('a', 1);
+      expect(results[0].metadata?.['modelId']).toBe('nv-embedqa-e5-v5');
+    });
+
+    it('uses "(unspecified)" when no embeddingModel is configured', async () => {
+      const vs = createVectorStore(mockEmbeddings);
+      await vs.load();
+      vs.addEntries([
+        { id: '1', text: 'a', source: 's', embedding: new Array(4).fill(0.1) },
+      ]);
+      const results = await vs.similaritySearch('a', 1);
+      expect(results[0].metadata?.['modelId']).not.toBe('unknown');
+      expect(results[0].metadata?.['modelId']).toBe('(unspecified)');
+    });
+  });
 });

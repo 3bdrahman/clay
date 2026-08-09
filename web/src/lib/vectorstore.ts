@@ -58,6 +58,7 @@ export interface VectorStoreConfig {
   useHybrid?: boolean;
   hybridAlpha?: number;
   bm25Index?: BM25Index;
+  embeddingModel?: string;
 }
 
 export interface VectorStore {
@@ -80,12 +81,13 @@ function coerceLegacyEmbedding(v: unknown): number[] | null {
   return null;
 }
 
-function readLegacy(): VectorEntry[] | null {
+function readLegacy(embeddingModel: string): VectorEntry[] | null {
   try {
     const raw = localStorage.getItem(LEGACY_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
+    const modelId = embeddingModel || '(unspecified)';
     const out: VectorEntry[] = [];
     parsed.forEach((e: unknown, i: number) => {
       if (!e || typeof e !== 'object') return;
@@ -105,7 +107,7 @@ function readLegacy(): VectorEntry[] | null {
           charEnd: r.text.length,
           chunkIndex: i,
           tokenCount: estimateTokens(r.text),
-          modelId: 'unknown',
+          modelId,
           updatedAt: Date.now(),
         },
       });
@@ -197,7 +199,9 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     useHybrid: config?.useHybrid ?? false,
     hybridAlpha: config?.hybridAlpha ?? 0.5,
     bm25Index: config?.bm25Index,
+    embeddingModel: config?.embeddingModel ?? '',
   };
+  const entryModelId = cfg.embeddingModel || '(unspecified)';
 
   const memory = new Map<string, VectorEntry>();
   let db: IDBStore<VectorEntry> | null = null;
@@ -230,7 +234,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
       }
       const existing = await db.getAll();
       if (existing.length === 0) {
-        const legacy = readLegacy();
+        const legacy = readLegacy(cfg.embeddingModel);
         if (legacy && legacy.length > 0) {
           await db.putMany(legacy);
           localStorage.removeItem(LEGACY_KEY);
@@ -374,7 +378,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
           charEnd: e.text.length,
           chunkIndex: memory.size,
           tokenCount: estimateTokens(e.text),
-          modelId: 'unknown',
+          modelId: entryModelId,
           updatedAt: Date.now(),
         },
       };

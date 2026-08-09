@@ -50,7 +50,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
   /**
    * Classifies HTTP response errors into typed RagErrors.
    */
-  async function handleResponseError(resp: Response, _step: string): Promise<never> {
+  async function handleResponseError(resp: Response, _step: string, modelId?: string): Promise<never> {
     const status = resp.status;
     const text = await resp.text().catch(() => '');
 
@@ -65,7 +65,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     }
 
     if (status === 404) {
-      throw new ModelNotFoundError('unknown', [], new Error(`${status} ${resp.statusText}`));
+      throw new ModelNotFoundError(modelId ?? '(unspecified)', [], new Error(`${status} ${resp.statusText}`));
     }
 
     if (status >= 500) {
@@ -113,7 +113,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     cleanup();
 
     if (!resp.ok) {
-      await handleResponseError(resp, 'invoke');
+      await handleResponseError(resp, 'invoke', req.model);
     }
 
     let data: unknown;
@@ -206,7 +206,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     }
 
     if (!resp.ok) {
-      await handleResponseError(resp, 'stream');
+      await handleResponseError(resp, 'stream', req.model);
     }
 
     const reader = resp.body?.getReader();

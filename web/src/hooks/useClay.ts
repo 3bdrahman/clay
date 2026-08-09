@@ -197,7 +197,9 @@ export function useClay(): {
           providerLabel: endpoint.providerLabel,
         });
         
-        const vectorstore = createVectorStore(embeddings);
+        const vectorstore = createVectorStore(embeddings, {
+          embeddingModel: picked.embedding,
+        });
         const webSearch = createWebSearchClient(settings);
 
         const tables = new Map<string, unknown>([['aq', aq]]);
