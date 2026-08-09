@@ -8,6 +8,18 @@ import {
   ModelNotFoundError,
   classifyError,
 } from './errors';
+import {
+  CHAT_PATTERNS,
+  CODE_PATTERNS,
+  EMBEDDING_PATTERNS,
+  EMBEDDING_DETECT,
+  CODE_DETECT,
+  SAFETY_DETECT,
+  VISION_DETECT,
+  CHAT_DETECT,
+  SIZE_PATTERNS,
+  scoreByRules,
+} from './modelPatterns';
 
 export type { ModelInfo };
 
@@ -185,24 +197,23 @@ export function resolveModels(
 }
 
 function isEmbedding(id: string): boolean {
-  return /embed|embedqa/i.test(id);
+  const lower = id.toLowerCase();
+  return EMBEDDING_DETECT.some((re) => re.test(lower));
 }
 
 function isCodeSpecialist(id: string): boolean {
   const lower = id.toLowerCase();
-  return /codestral|codellama|codegemma|granite.*code|deepseek-coder|nemotron.*code|starcoder|embedcode/.test(
-    lower,
-  );
+  return CODE_DETECT.some((re) => re.test(lower));
 }
 
 function isSafetyOrGuard(id: string): boolean {
-  return /guard|safety|content-safety|topic-control|reward|parse|translate|detector|calibration|neva|vila|ai-synthetic|cosmo/.test(
-    id.toLowerCase(),
-  );
+  const lower = id.toLowerCase();
+  return SAFETY_DETECT.some((re) => re.test(lower));
 }
 
 function isVision(id: string): boolean {
-  return /vision|vl$|clip|video|diffusion|deplot|recurrent|cosmos/.test(id.toLowerCase());
+  const lower = id.toLowerCase();
+  return VISION_DETECT.some((re) => re.test(lower));
 }
 
 function isGeneralChat(id: string): boolean {
@@ -210,82 +221,28 @@ function isGeneralChat(id: string): boolean {
   if (isCodeSpecialist(id)) return false;
   if (isSafetyOrGuard(id)) return false;
   if (isVision(id)) return false;
-  return /instruct|chat|^.*\/gpt-|it$|nemotron|moe|reasoning|creative|magistral|laguna|kimi|step-|glm|inkling|palmyra|sea-lion|yi-|zamba|granite|gemma/.test(
-    id.toLowerCase(),
-  );
+  const lower = id.toLowerCase();
+  return CHAT_DETECT.some((re) => re.test(lower));
 }
 
 function inferClass(id: string): ModelClass {
   const lower = id.toLowerCase();
-  if (/ultra|550b|340b|253b|122b/.test(lower)) return 'huge';
-  if (/120b|90b|72b|70b|^.*large/.test(lower)) return 'large';
-  if (/49b|51b|34b|30b|22b|15b|14b|13b|12b|11b/.test(lower)) return 'medium';
-  if (/8b|7b|nano/.test(lower)) return 'small';
-  if (/mini|4b|3b|2b|1b/.test(lower)) return 'tiny';
+  for (const entry of SIZE_PATTERNS) {
+    if (entry.patterns.some((re) => re.test(lower))) return entry.class;
+  }
   return 'medium';
 }
 
 function scoreGeneralChat(model: ModelInfo): number {
-  const lower = model.id.toLowerCase();
-  let score = 0;
-  if (/^meta\/llama-3\.3-/.test(lower)) score += 30;
-  if (/^meta\/llama-3\.1-(70b|8b)/.test(lower)) score += 25;
-  if (/^mistralai\/mistral-large-2/.test(lower)) score += 28;
-  if (/^mistralai\/mistral-7b/.test(lower)) score += 22;
-  if (/^nvidia\/nemotron-3-(super|ultra)/.test(lower)) score += 40;
-  if (/^nvidia\/nemotron-4-/.test(lower)) score += 35;
-  if (/^nvidia\/llama-3\.1-nemotron-(70b|ultra|super)/.test(lower)) score += 30;
-  if (/^nvidia\/llama-3\.1-nemotron-nano/.test(lower)) score += 22;
-  if (/^openai\/gpt-oss-/.test(lower)) score += 30;
-  if (/^writer\/palmyra/.test(lower)) score += 20;
-  if (/^stepfun-ai\/step-/.test(lower)) score += 18;
-  if (/^moonshotai\/kimi-/.test(lower)) score += 25;
-  if (/^z-ai\/glm-/.test(lower)) score += 22;
-  if (/^deepseek-ai\/deepseek-v/.test(lower)) score += 28;
-  if (/^google\/gemma-3-(12b|4b)/.test(lower)) score += 18;
-  if (/^google\/gemma-4-/.test(lower)) score += 22;
-  if (/^ibm\/granite-3\.0-/.test(lower)) score += 15;
-  if (/^poolside\/laguna/.test(lower)) score += 18;
-  if (/^zyphra\/zamba/.test(lower)) score += 12;
-  return score;
+  return scoreByRules(model.id.toLowerCase(), CHAT_PATTERNS);
 }
 
 function scoreCodeSpecialist(model: ModelInfo): number {
-  const lower = model.id.toLowerCase();
-  let score = 0;
-  if (/codestral-22b/.test(lower)) score += 50;
-  if (/codestral/.test(lower)) score += 45;
-  if (/codellama-70b/.test(lower)) score += 35;
-  if (/codellama/.test(lower)) score += 30;
-  if (/codegemma/.test(lower)) score += 25;
-  if (/deepseek-coder/.test(lower)) score += 28;
-  if (/granite.*code/.test(lower)) score += 25;
-  if (/starcoder2/.test(lower)) score += 20;
-  if (/nemotron.*code/.test(lower)) score += 22;
-  if (/embedcode/.test(lower)) score += 0;
-  if (/8b/.test(lower)) score += 3;
-  if (/15b/.test(lower)) score += 5;
-  if (/22b/.test(lower)) score += 8;
-  if (/70b/.test(lower)) score += 12;
-  if (/34b/.test(lower)) score += 10;
-  return score;
+  return scoreByRules(model.id.toLowerCase(), CODE_PATTERNS);
 }
 
 function scoreEmbedding(model: ModelInfo): number {
-  const lower = model.id.toLowerCase();
-  let score = 0;
-  if (/nv-embedqa-e5/.test(lower)) score += 50;
-  if (/nv-embedqa-mistral/.test(lower)) score += 35;
-  if (/embedqa/.test(lower)) score += 30;
-  if (/nv-embedcode/.test(lower)) score += 25;
-  if (/nv-embed-v1/.test(lower)) score += 20;
-  if (/llama-nemotron-embed/.test(lower)) score += 25;
-  if (/nemotron-3-embed/.test(lower)) score += 22;
-  if (/nemoretriever/.test(lower)) score += 18;
-  if (/arctic-embed/.test(lower)) score += 15;
-  if (/bge-m3/.test(lower)) score += 12;
-  if (/embed-qa-4/.test(lower)) score += 5;
-  return score;
+  return scoreByRules(model.id.toLowerCase(), EMBEDDING_PATTERNS);
 }
 
 function pickHighest(
