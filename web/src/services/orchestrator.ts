@@ -81,7 +81,7 @@ export function createWorkflowOrchestrator(
 
   function beginStep(node: string, label: string): void {
     const step: StepTrace = {
-      id: `${node}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: `${node}-${crypto.randomUUID()}`,
       node,
       label,
       status: 'running',
