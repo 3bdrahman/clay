@@ -495,4 +495,45 @@ describe('useClay', () => {
       embedding: 'm3',
     });
   });
+
+  describe('IDB persistence unavailable (issue #2)', () => {
+    it('exposes persistenceAvailable=false when IndexedDB is unavailable', async () => {
+      const originalIDB = (globalThis as { indexedDB?: unknown }).indexedDB;
+      Object.defineProperty(globalThis, 'indexedDB', { value: undefined, configurable: true });
+
+      try {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
+          data: [{ id: 'mistral-small', created: 1, owned_by: 'mistralai' }],
+        }));
+        globalThis.fetch = fetchMock as never;
+
+        useAppStore.setState({
+          settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+        });
+        const r = render();
+        await flush(8);
+
+        expect(r.current.services?.ready).toBe(true);
+        expect(r.current.persistenceAvailable).toBe(false);
+      } finally {
+        Object.defineProperty(globalThis, 'indexedDB', { value: originalIDB, configurable: true });
+      }
+    });
+
+    it('exposes persistenceAvailable=true on the happy path', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
+        data: [{ id: 'mistral-small', created: 1, owned_by: 'mistralai' }],
+      }));
+      globalThis.fetch = fetchMock as never;
+
+      useAppStore.setState({
+        settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+      });
+      const r = render();
+      await flush(8);
+
+      expect(r.current.services?.ready).toBe(true);
+      expect(typeof r.current.persistenceAvailable).toBe('boolean');
+    });
+  });
 });

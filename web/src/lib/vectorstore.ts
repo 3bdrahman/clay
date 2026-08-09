@@ -63,10 +63,12 @@ export interface VectorStoreConfig {
 export interface VectorStore {
   load(): Promise<void>;
   similaritySearch(query: string, k?: number): Promise<Document[]>;
-  addEntries(entries: Array<{ id: string; text: string; source: string; page?: number; embedding: number[] }>): void;
+  addEntries(entries: Array<{ id: string; text: string; source: string; sourceHash?: string; page?: number; embedding: number[] }>): void;
   removeBySource(source: string): number;
   clear(): void;
+  getSourceHashes(source: string): Set<string>;
   readonly stats: { entries: number };
+  readonly persistenceAvailable: boolean;
 }
 
 function coerceLegacyEmbedding(v: unknown): number[] | null {
@@ -203,6 +205,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
   let loadingPromise: Promise<void> | null = null;
   let warnOnce = false;
   let knownDimension: number | null = null;
+  let persistenceAvailable = false;
   const pendingAdds: VectorEntry[] = [];
 
   function warnFallbackOnce(): void {
@@ -244,9 +247,11 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     } catch (e) {
       warnFallbackOnce();
       db = null;
+      persistenceAvailable = false;
       // Don't throw here - allow fallback to in-memory mode
     }
     loaded = true;
+    if (db !== null) persistenceAvailable = true;
   }
 
   async function load(): Promise<void> {
@@ -418,14 +423,28 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     });
   }
 
+  function getSourceHashes(source: string): Set<string> {
+    const hashes = new Set<string>();
+    for (const entry of memory.values()) {
+      if (entry.metadata.source === source && entry.metadata.sourceHash) {
+        hashes.add(entry.metadata.sourceHash);
+      }
+    }
+    return hashes;
+  }
+
   return {
     load,
     similaritySearch,
     addEntries,
     removeBySource,
     clear,
+    getSourceHashes,
     get stats() {
       return { entries: memory.size };
+    },
+    get persistenceAvailable() {
+      return persistenceAvailable;
     },
   };
 }

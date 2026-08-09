@@ -40,6 +40,7 @@ export function useClay(): {
   loading: boolean;
   error: string | null;
   needsConfiguration: boolean;
+  persistenceAvailable: boolean;
   pickedModels: PickedModels;
   refreshModels: () => Promise<void>;
   addFiles: (files: FileList | File[]) => Promise<void>;
@@ -71,6 +72,7 @@ export function useClay(): {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [needsConfiguration, setNeedsConfiguration] = useState(false);
+  const [persistenceAvailable, setPersistenceAvailable] = useState(true);
   const servicesRef = useRef<ClayServices | null>(null);
 
   const fetchedKeyRef = useRef<string | null>(null);
@@ -222,7 +224,20 @@ export function useClay(): {
           codeGenModel: picked.codeGen,
         });
 
-        vectorstore.load().catch(() => {});
+        vectorstore
+          .load()
+          .then(() => {
+            if (cancelled) return;
+            if (!vectorstore.persistenceAvailable) setPersistenceAvailable(false);
+          })
+          .catch((e: unknown) => {
+            if (cancelled) return;
+            setPersistenceAvailable(false);
+            const msg = e instanceof Error ? e.message : String(e);
+            if (import.meta.env.DEV) {
+              console.warn('[useClay] vectorstore persistence unavailable:', msg);
+            }
+          });
 
         if (cancelled) return;
 
@@ -374,8 +389,11 @@ export function useClay(): {
         isSample: true,
       });
     });
-    useAppStore.setState(() => ({
-      sandboxDatasets: newDatasets,
+    useAppStore.setState(state => ({
+      sandboxDatasets: [
+        ...state.sandboxDatasets.filter(d => !newDatasets.some(n => n.name === d.name)),
+        ...newDatasets,
+      ],
     }));
   }, []);
 
@@ -384,10 +402,11 @@ export function useClay(): {
     if (sv) {
       sv.vectorstore.clear();
     }
-    sandboxDatasets.forEach(d => unregisterSandboxTable(d.name));
+    const currentDatasets = useAppStore.getState().sandboxDatasets;
+    currentDatasets.forEach(d => unregisterSandboxTable(d.name));
     clearSandboxTables();
     clearSandbox();
-  }, [clearSandbox, sandboxDatasets]);
+  }, [clearSandbox]);
 
   const removeSandboxDocument = useCallback(
     (fileName: string) => {
@@ -427,6 +446,7 @@ export function useClay(): {
     loading,
     error,
     needsConfiguration,
+    persistenceAvailable,
     pickedModels,
     refreshModels,
     addFiles,
