@@ -363,6 +363,7 @@ describe('resolveModels', () => {
     serperApiKey: '',
     temperature: 0,
     maxRetries: 3,
+    vectorstoreInitialK: 8,
     theme: 'system',
     localServerUrl: LOCAL_DEFAULT_BASE_URL,
     localModels: { chat: '', embeddings: '' },

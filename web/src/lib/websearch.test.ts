@@ -17,6 +17,7 @@ const baseSettings = (overrides: Partial<Settings> = {}): Settings =>
     serperApiKey: '',
     temperature: 0,
     maxRetries: 3,
+    vectorstoreInitialK: 8,
     theme: 'system',
     localServerUrl: '',
     localModels: { chat: '', embeddings: '' },

@@ -44,6 +44,7 @@ const testSettings: Settings = {
   serperApiKey: '',
   temperature: 0,
   maxRetries: 3,
+  vectorstoreInitialK: 8,
   theme: 'system',
 };
 
@@ -557,6 +558,55 @@ describe('createWorkflowOrchestrator', () => {
       const state = await orchestrator.run();
       const vecCitation = state.citations.find(c => c.type === 'vectorstore');
       expect(vecCitation?.excerpt.length).toBeLessThanOrEqual(200);
+    });
+
+    it('passes initialK from settings to vectorstore, independent of maxRetries', async () => {
+      (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        content: JSON.stringify({ datasource: 'vectorstore' }),
+      });
+      // HyDE expansion call
+      (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        content: 'Hypothetical passage for testing.',
+      });
+      (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: '1', content: 'doc', source: 'test.pdf', score: 0.9 },
+      ]);
+      (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+        content: 'Answer',
+        usage: undefined,
+        model: 'answer-model',
+      });
+      (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+        content: JSON.stringify({ binary_score: 'yes' }),
+      });
+
+      // Build a fresh orchestrator with maxRetries=1 but vectorstoreInitialK=8.
+      // Before the fix this would call similaritySearch with k=1 (maxRetries bug);
+      // after the fix it should be called with k=8.
+      const kAwareOrchestrator = createWorkflowOrchestrator(
+        'test question',
+        {
+          llm: mockLLM,
+          vectorstore: mockVectorstore,
+          webSearch: mockWebSearch,
+          analyzer: mockAnalyzer,
+          settings: { ...testSettings, maxRetries: 1, vectorstoreInitialK: 8 },
+          pickedModels: testPickedModels,
+        },
+        {},
+      );
+      mockVectorstore.load.mockResolvedValue(undefined);
+      mockVectorstore.stats = { entries: 0 };
+      mockVectorstore.similaritySearch.mockResolvedValue([]);
+
+      await kAwareOrchestrator.run();
+
+      // parallelFanOut calls similaritySearch twice (question + hypothetical).
+      // Both should be called with k=8 (initialK), not k=1 (maxRetries).
+      const callArgs = (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>)
+        .mock.calls.map(call => call[1]); // second arg is k
+      expect(callArgs).toContain(8);
+      expect(callArgs).not.toContain(1);
     });
   });
 });

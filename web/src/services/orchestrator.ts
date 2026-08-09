@@ -56,6 +56,7 @@ const NODE_LABELS: Record<string, string> = {
 
 const MAX_STEP_RETRIES = 2;
 const BASE_RETRY_DELAY_MS = 1000;
+const RERANK_K = 4;
 
 export function createWorkflowOrchestrator(
   question: string,
@@ -242,8 +243,7 @@ export function createWorkflowOrchestrator(
 
     try {
       const hypothetical = await expandHyDE(question, { llm: deps.llm, model: deps.pickedModels.eval });
-      const initialK = deps.settings.maxRetries ?? 8;
-      const rerankK = 4;
+      const initialK = deps.settings.vectorstoreInitialK ?? 8;
 
       const docs = await withRetry('vectorstore-similaritySearch', () =>
         parallelFanOut(
@@ -251,7 +251,7 @@ export function createWorkflowOrchestrator(
           question,
           hypothetical,
           initialK,
-          rerankK,
+          RERANK_K,
         ),
         signal
       );
