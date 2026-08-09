@@ -1,9 +1,11 @@
 // CitationPanel — shows retrieved documents, web results, and analysis results
 
-import { lazy, Suspense, useState, useId } from 'react';
+import { Suspense, useState, useId } from 'react';
 import type { Citation, DataAnalysisResult, Document, WebResult } from '../lib/types';
 
-const ChartRenderer = lazy(() => import('./ChartRenderer'));
+import { ChartRendererLazy, PanelFallback } from './LazyPanels';
+
+const ChartRenderer = ChartRendererLazy;
 
 interface Props {
   documents: Document[];
@@ -335,7 +337,7 @@ function Empty({ msg }: { msg: string }) {
 function ResultRenderer({ result, chartConfig }: { result: unknown; chartConfig?: DataAnalysisResult['chartConfig'] }) {
   if (chartConfig) {
     return (
-      <Suspense fallback={<div className="text-xs text-ink-400" role="status">Loading chart…</div>}>
+      <Suspense fallback={<PanelFallback />}>
         <ChartRenderer config={chartConfig} />
       </Suspense>
     );

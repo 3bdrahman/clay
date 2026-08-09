@@ -1,12 +1,10 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Header } from './components/Header';
 import { ChatPanel } from './components/ChatPanel';
 import { ConversationSidebar } from './components/ConversationSidebar';
 import { useAppStore } from './store';
 import { useClay } from './hooks/useClay';
-
-const SettingsPanel = lazy(() => import('./components/SettingsPanel').then(m => ({ default: m.SettingsPanel })));
-const DataSandbox = lazy(() => import('./components/DataSandbox').then(m => ({ default: m.DataSandbox })));
+import { SettingsPanelSuspense, DataSandboxSuspense } from './components/LazyPanels';
 
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -68,27 +66,23 @@ export default function App() {
           <ChatPanel onOpenData={openData} />
         </div>
       </div>
-      <Suspense fallback={null}>
-        <SettingsPanel
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          refreshModels={refreshModels}
-          pickedModels={pickedModels}
-          resetAll={resetAll}
-          clearSandboxData={clearSandboxData}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <DataSandbox
-          open={dataOpen}
-          onClose={() => setDataOpen(false)}
-          addFiles={addFiles}
-          loadSampleData={loadSampleData}
-          clearSandboxData={clearSandboxData}
-          removeSandboxDocument={removeSandboxDocument}
-          removeSandboxDataset={removeSandboxDataset}
-        />
-      </Suspense>
+      <SettingsPanelSuspense
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        refreshModels={refreshModels}
+        pickedModels={pickedModels}
+        resetAll={resetAll}
+        clearSandboxData={clearSandboxData}
+      />
+      <DataSandboxSuspense
+        open={dataOpen}
+        onClose={() => setDataOpen(false)}
+        addFiles={addFiles}
+        loadSampleData={loadSampleData}
+        clearSandboxData={clearSandboxData}
+        removeSandboxDocument={removeSandboxDocument}
+        removeSandboxDataset={removeSandboxDataset}
+      />
     </div>
   );
 }
