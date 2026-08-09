@@ -19,7 +19,7 @@ import {
   parallelGrade,
   formatHeadingCitation,
 } from './orchestratorHelpers';
-import { RagError, RagErrorCode, isRetryable, getUserMessage } from '../lib/errors';
+import { RagError, RagErrorCode, isRetryable, getUserMessage, GenerationFailedError } from '../lib/errors';
 
 export interface WorkflowOrchestrator {
   run(signal?: AbortSignal): Promise<WorkflowState>;
@@ -149,7 +149,7 @@ export function createWorkflowOrchestrator(
     let lastError: Error | null = null;
     for (let attempt = 0; attempt <= MAX_STEP_RETRIES; attempt++) {
       if (signal?.aborted) {
-        throw new Error('Aborted');
+        throw new GenerationFailedError('orchestrator', new Error('Aborted'), { retryable: false });
       }
       try {
         return await fn();
@@ -158,12 +158,9 @@ export function createWorkflowOrchestrator(
 
         // Don't retry on abort or non-retryable errors
         if (signal?.aborted || !isRetryable(lastError)) {
-          // Preserve step context by wrapping the error
-          const errorWithStep = new Error(lastError.message, { cause: lastError });
-          errorWithStep.name = lastError.name;
-          // Attach step context to the error
-          (errorWithStep as any)._stepContext = stepName;
-          throw errorWithStep;
+          throw new GenerationFailedError('orchestrator', lastError, {
+            retryable: false,
+          }).withStep(stepName);
         }
 
         // Retry with exponential backoff
@@ -176,11 +173,7 @@ export function createWorkflowOrchestrator(
         }
       }
     }
-    // Exhausted retries - preserve step context
-    const errorWithStep = new Error(lastError!.message, { cause: lastError });
-    errorWithStep.name = lastError!.name;
-    (errorWithStep as any)._stepContext = stepName;
-    throw errorWithStep;
+    throw new GenerationFailedError('orchestrator', lastError!, { retryable: false }).withStep(stepName);
   }
 
   function buildContextForEval(): string {
@@ -502,8 +495,7 @@ export function createWorkflowOrchestrator(
       return state;
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      // Extract step context from error if available
-      const stepContext = (err as any)._stepContext ?? 'run';
+      const stepContext = err instanceof RagError ? (err.step ?? 'run') : 'run';
       setError(err, stepContext);
       state.finishedAt = Date.now();
       emitSteps();

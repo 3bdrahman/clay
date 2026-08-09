@@ -86,6 +86,24 @@ export class RagError extends Error {
   }
 
   /**
+   * Returns a new RagError with the given step context, preserving the original
+   * error's message, code, and cause. Use this when re-throwing an error
+   * through orchestration layers that need to record which step produced it.
+   */
+  withStep(step: string): RagError {
+    const next = new RagError({
+      code: this.code,
+      message: this.message,
+      cause: this.cause instanceof Error ? this.cause : undefined,
+      retryable: this.retryable,
+      provider: this.provider,
+      step,
+      context: this.context,
+    });
+    return next;
+  }
+
+  /**
    * Returns a debug representation with full context.
    */
   toDebugObject(): Record<string, unknown> {
@@ -299,12 +317,12 @@ export class TokenBudgetExceededError extends RagError {
 }
 
 export class GenerationFailedError extends RagError {
-  constructor(provider: string, cause?: Error) {
+  constructor(provider: string, cause?: Error, options: { retryable?: boolean } = {}) {
     super({
       code: RagErrorCode.GENERATION_FAILED,
       message: `Failed to generate response from ${provider}. The model may be overloaded or the input invalid.`,
       cause,
-      retryable: true,
+      retryable: options.retryable ?? true,
       provider,
       context: {},
     });

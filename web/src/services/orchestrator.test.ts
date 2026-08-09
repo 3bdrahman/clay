@@ -657,4 +657,39 @@ describe('createWorkflowOrchestrator — retrieval K is independent of maxRetrie
     }
   });
 });
+
+describe('createWorkflowOrchestrator — error step context via RagError (issue #9)', () => {
+  it('attaches the failing step name to RagError.step on retry exhaustion', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockReset();
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore' }),
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Hypothetical passage.',
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockReset();
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    mockVectorstore.similaritySearch.mockReset();
+    mockVectorstore.similaritySearch.mockRejectedValue(new Error('vectorstore down'));
+
+    const orch = createWorkflowOrchestrator(
+      'test',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {},
+    );
+
+    const state = await orch.run();
+    expect(state.error).toBeDefined();
+    expect(state.error?.step).toBe('vectorstore-similaritySearch');
+  });
+});
 });
