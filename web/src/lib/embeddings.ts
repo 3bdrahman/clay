@@ -5,6 +5,7 @@ import {
   EmbeddingModelMissingError,
   classifyError,
 } from './errors';
+import { hashText } from './hash';
 
 export type EmbeddingInputType = 'query' | 'passage';
 
@@ -25,9 +26,8 @@ export interface EmbeddingsClientConfig {
 }
 
 /**
- * Injected cache seam. The concrete `EmbeddingCache` (T5, keyed by
- * `modelId` + SHA-256 text hash) will satisfy this shape; here we only depend
- * on the contract so T4 can ship before T5 exists.
+ * Injected cache seam. The concrete `EmbeddingCache` is keyed by
+ * `modelId` + a stable text hash (see lib/hash.ts — 32-bit FNV-1a).
  */
 export interface EmbeddingCacheLike {
   get(modelId: string, textHash: string): number[] | undefined;
@@ -60,16 +60,6 @@ const MAX_BACKOFF_MS = 8000;
 function estimateTokens(text: string): number {
   const words = text.split(/\s+/).filter(Boolean).length;
   return Math.ceil(words * 1.3);
-}
-
-/** Stable text hash for cache keys. Sync FNV-1a — no async Web Crypto here. */
-function hashText(text: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16);
 }
 
 /** L2-normalize a vector in place-free form. Zero-norm → returned unchanged. */

@@ -3,6 +3,7 @@ import type { ColumnTable } from 'arquero';
 import { extractPdfText, type ExtractedPage } from './pdf';
 import { chunkText, type Chunk, type ChunkContext } from './chunker';
 import type { EmbeddingsClient } from '../lib/embeddings';
+import { hashText } from '../lib/hash';
 
 export type SupportedKind = 'csv' | 'pdf' | 'text' | 'unsupported';
 
@@ -51,15 +52,6 @@ function deriveName(fileName: string): string {
     .replace(/\.[^.]+$/, '')
     .replace(/[^a-zA-Z0-9_]+/g, '_')
     .replace(/^_+|_+$/g, '') || 'dataset';
-}
-
-/** djb2 hash (zero deps) for stable sourceHash. */
-export function hashText(text: string): string {
-  let h = 5381;
-  for (let i = 0; i < text.length; i++) {
-    h = ((h << 5) + h + text.charCodeAt(i)) >>> 0;
-  }
-  return h.toString(36);
 }
 
 function toChunks(

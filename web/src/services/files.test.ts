@@ -3,9 +3,9 @@ import {
   detectKind,
   processFile,
   embedDocumentChunks,
-  hashText,
   existingSourceHashes,
 } from './files';
+import { hashText } from '../lib/hash';
 
 class FakeFile {
   name: string;
