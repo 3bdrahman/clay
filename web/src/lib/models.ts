@@ -374,7 +374,7 @@ export function pickBestModels(models: ModelInfo[]): PickedModels {
   if (!answer) warnings.push('answer model not found');
   if (!embedding) warnings.push('embedding model not found');
   if (warnings.length > 0) {
-    console.warn('[models] Incomplete model catalog:', warnings.join(', '));
+    if (import.meta.env.DEV) console.warn('[models] Incomplete model catalog:', warnings.join(', '));
   }
 
   return {

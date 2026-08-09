@@ -30,7 +30,7 @@ function enqueueWrite(op: () => Promise<unknown>): void {
   writeQueue = writeQueue.then<void>(() => op().then(() => undefined, (e: unknown) => {
     writeQueueFailed = true;
     writeQueueFailure = e instanceof Error ? e : new Error(String(e));
-    console.error('[vectorstore] async op failed:', e);
+    if (import.meta.env.DEV) console.error('[vectorstore] async op failed:', e);
   }));
 }
 
@@ -215,7 +215,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
   function warnFallbackOnce(): void {
     if (warnOnce) return;
     warnOnce = true;
-    console.warn('[vectorstore] IndexedDB unavailable; operating without persistence');
+    if (import.meta.env.DEV) console.warn('[vectorstore] IndexedDB unavailable; operating without persistence');
   }
 
   async function doLoad(): Promise<void> {
