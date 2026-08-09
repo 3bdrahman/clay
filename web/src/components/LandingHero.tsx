@@ -1,4 +1,5 @@
 import { useAppStore } from '../store';
+import { deriveDataQueries, deriveDocumentQueries } from '../lib/exampleQueries';
 
 const FEATURES = [
   {
@@ -39,11 +40,7 @@ const FEATURES = [
   },
 ];
 
-const EXAMPLE_QUERIES = [
-  { category: 'Data', queries: ['Average salary by department', 'Project count by status', 'Total budget across projects'] },
-  { category: 'Documents', queries: ['Summarize my documents', 'Find action items', 'Key themes across files'] },
-  { category: 'Web', queries: ['Latest AI trends for business', 'Best practices for RAG', 'Compare cloud ML platforms'] },
-];
+const WEB_QUERIES = ['Latest AI trends for business', 'Best practices for RAG', 'Compare cloud ML platforms'];
 
 export function LandingHero({
   onLoadSample,
@@ -57,6 +54,13 @@ export function LandingHero({
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
   const hasData = sandboxDatasets.length > 0 || sandboxDocuments.length > 0;
+  const dataQueries = deriveDataQueries(sandboxDatasets);
+  const docQueries = deriveDocumentQueries(sandboxDocuments);
+
+  const exampleGroups: Array<{ category: string; queries: string[] }> = [];
+  if (dataQueries.length > 0) exampleGroups.push({ category: 'Data', queries: dataQueries });
+  if (docQueries.length > 0) exampleGroups.push({ category: 'Documents', queries: docQueries });
+  exampleGroups.push({ category: 'Web', queries: WEB_QUERIES });
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -74,15 +78,17 @@ export function LandingHero({
             Drop your files, ask naturally, and watch the reasoning pipeline unfold in real time.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <button
-              onClick={onLoadSample}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg transition-colors text-base"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              Load Sample Data & Try It
-            </button>
+            {sandboxDatasets.length === 0 && (
+              <button
+                onClick={onLoadSample}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg transition-colors text-base"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Load Sample Data & Try It
+              </button>
+            )}
             <button
               onClick={onAddData}
               className="inline-flex items-center gap-2 px-6 py-3 border-2 border-ink-200 dark:border-ink-700 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-700 dark:text-ink-200 font-medium rounded-lg transition-colors text-base"
@@ -126,7 +132,7 @@ export function LandingHero({
               Try These Questions
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl mx-auto">
-              {EXAMPLE_QUERIES.map((group) => (
+              {exampleGroups.map((group) => (
                 <div key={group.category} className="p-4 rounded-xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800">
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-3">{group.category}</h3>
                   <div className="space-y-2">

@@ -1,9 +1,11 @@
 // ExampleQuestions — quick-start prompts showcasing each path
 
 import { useAppStore } from '../store';
+import { deriveDataQueries } from '../lib/exampleQueries';
 
 interface Props {
   onSelect: (q: string) => void;
+  onLoadSample?: () => void;
 }
 
 const DOC_QUESTIONS = [
@@ -12,24 +14,18 @@ const DOC_QUESTIONS = [
   'Find any action items mentioned',
 ];
 
-const DATA_QUESTIONS = [
-  'How many employees do we have by department?',
-  'Show me the distribution of project statuses',
-  'What is the total budget across all projects?',
-  'Average rating from client feedback',
-];
-
 const WEB_QUESTIONS = [
   'What are the latest trends in AI for business?',
   'Compare AWS vs Azure for ML workloads',
   'What are the best practices for vector search?',
 ];
 
-export function ExampleQuestions({ onSelect }: Props) {
+export function ExampleQuestions({ onSelect, onLoadSample }: Props) {
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
   const hasData = sandboxDatasets.length > 0;
   const hasDocs = sandboxDocuments.length > 0;
+  const dataQuestions = deriveDataQueries(sandboxDatasets);
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -40,13 +36,23 @@ export function ExampleQuestions({ onSelect }: Props) {
         </p>
       </div>
 
-      {hasData && (
+      {hasData ? (
         <Group
           category="Data Analysis (Arquero)"
           color="text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400"
           icon="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-          questions={DATA_QUESTIONS}
+          questions={dataQuestions}
           onSelect={onSelect}
+        />
+      ) : (
+        <Group
+          category="Data Analysis (load a CSV to enable)"
+          color="text-ink-500 bg-ink-100 dark:bg-ink-800 dark:text-ink-400"
+          icon="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+          questions={['Drop a CSV in the data sandbox to see data-specific suggestions here.']}
+          onSelect={onSelect}
+          onLoadSample={onLoadSample}
+          disabled
         />
       )}
 
@@ -86,6 +92,7 @@ function Group({
   color,
   questions,
   onSelect,
+  onLoadSample,
   disabled,
 }: {
   category: string;
@@ -93,17 +100,28 @@ function Group({
   color: string;
   questions: string[];
   onSelect: (q: string) => void;
+  onLoadSample?: () => void;
   disabled?: boolean;
 }) {
   return (
     <div>
-      <div className="flex items-center gap-2 mb-2.5">
-        <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${color}`} aria-hidden="true">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d={icon} />
-          </svg>
-        </span>
-        <h3 className="text-sm font-semibold text-ink-700 dark:text-ink-200">{category}</h3>
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <div className="flex items-center gap-2">
+          <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${color}`} aria-hidden="true">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d={icon} />
+            </svg>
+          </span>
+          <h3 className="text-sm font-semibold text-ink-700 dark:text-ink-200">{category}</h3>
+        </div>
+        {disabled && onLoadSample && (
+          <button
+            onClick={onLoadSample}
+            className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-medium"
+          >
+            + Load sample data
+          </button>
+        )}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="list" aria-label={category}>
         {questions.map((q, i) => (
