@@ -41,20 +41,16 @@ describe('loadSampleDatasets', () => {
     expect(rawCsv.projects).toContain('Active');
   });
 
-  it('falls back to known filenames when index.json fails', async () => {
-    mockFetch
-      .mockResolvedValueOnce({ ok: false })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => 'name,value\ntest,123',
-      })
-      .mockResolvedValueOnce({ ok: false })
-      .mockResolvedValueOnce({ ok: false });
+  it('throws when index.json fails to load (issue #6: no silent fallback)', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 404, statusText: 'Not Found' });
 
-    const { tables, metadata } = await loadSampleDatasets();
+    await expect(loadSampleDatasets()).rejects.toThrow(/index/i);
+  });
 
-    expect(tables.has('employees')).toBe(true);
-    expect(metadata.employees.rowCount).toBe(1);
+  it('throws with the HTTP status when index.json returns 5xx', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' });
+
+    await expect(loadSampleDatasets()).rejects.toThrow(/503/);
   });
 
   it('skips missing files gracefully', async () => {

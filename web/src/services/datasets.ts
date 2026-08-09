@@ -20,12 +20,16 @@ export async function loadSampleDatasets(): Promise<SampleLoadResult> {
 
   const basePath = getBasePath();
   const indexResp = await fetch(`${basePath}data/datasets/index.json`, { cache: 'no-store' });
-  let names: string[] = [];
-  if (indexResp.ok) {
-    const idx = (await indexResp.json()) as { files?: string[] };
-    names = (idx.files || []).filter(n => n.endsWith('.csv'));
-  } else {
-    names = ['employees.csv', 'projects.csv', 'feedback.csv'];
+  if (!indexResp.ok) {
+    throw new Error(
+      `Sample dataset index unavailable (HTTP ${indexResp.status} ${indexResp.statusText}). ` +
+        `Try uploading your own CSV instead.`,
+    );
+  }
+  const idx = (await indexResp.json()) as { files?: string[] };
+  const names = (idx.files || []).filter(n => n.endsWith('.csv'));
+  if (names.length === 0) {
+    throw new Error('Sample dataset index is empty (no CSV files listed).');
   }
 
   await Promise.all(
