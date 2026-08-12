@@ -1,4 +1,40 @@
+/* eslint-disable react-refresh/only-export-components */
 import { lazy, Suspense } from 'react';
+
+/**
+ * Wraps a dynamic import with a retry mechanism. If the chunk fails to load
+ * (e.g. because a new version was deployed and the old chunk is 404), this will
+ * automatically trigger a hard reload of the page to fetch the new index.html.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  componentImport: () => Promise<{ default: T }>
+) {
+  return lazy(async () => {
+    try {
+      const component = await componentImport();
+      window.sessionStorage.removeItem('chunk-failed-reload');
+      return component;
+    } catch (error: any) {
+      const msg = error?.message || '';
+      const isChunkLoadError = 
+        error?.name === 'TypeError' || 
+        msg.includes('dynamically imported module') || 
+        msg.includes('fetch') ||
+        msg.includes('load');
+        
+      if (isChunkLoadError) {
+        if (!window.sessionStorage.getItem('chunk-failed-reload')) {
+          window.sessionStorage.setItem('chunk-failed-reload', 'true');
+          window.location.reload();
+          // Return a never-resolving promise so React Suspense doesn't crash before reload
+          return new Promise<{ default: T }>(() => {});
+        }
+      }
+      throw error;
+    }
+  });
+}
 
 /**
  * Panel loading placeholder. Matches the backdrop-blurred, centered-modal
@@ -31,14 +67,14 @@ export function PanelFallback() {
  * matches every other import in the codebase — Vite resolves `./SettingsPanel`
  * to `./SettingsPanel.tsx` automatically.
  */
-export const SettingsPanelLazy = lazy(() =>
+export const SettingsPanelLazy = lazyWithRetry(() =>
   import('./SettingsPanel').then((m) => ({ default: m.SettingsPanel })),
 );
 
 /**
  * Lazy-loaded DataSandbox. Same convention as SettingsPanelLazy.
  */
-export const DataSandboxLazy = lazy(() =>
+export const DataSandboxLazy = lazyWithRetry(() =>
   import('./DataSandbox').then((m) => ({ default: m.DataSandbox })),
 );
 
@@ -47,7 +83,7 @@ export const DataSandboxLazy = lazy(() =>
  * `.then` shim is needed — but the path style matches the others (no
  * extension, kebab-consistent root).
  */
-export const ChartRendererLazy = lazy(() => import('./ChartRenderer'));
+export const ChartRendererLazy = lazyWithRetry(() => import('./ChartRenderer'));
 
 /**
  * Re-export with Suspense wrappers already applied. Callers can drop these
