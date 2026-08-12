@@ -43,6 +43,26 @@ const DB_NAME = 'clay-vector-db';
 const DB_VERSION = 1;
 const STORE_NAME = 'entries';
 
+/**
+ * Sentinel model ID stamped on entries migrated from the legacy localStorage
+ * store AND on entries added via a VectorStore whose config omitted
+ * `embeddingModel`. Real callers (useClay.ts, eval/runner.ts) always pass
+ * the picked embedding model; this sentinel exists so model-mismatch
+ * detection (`entry.metadata.modelId !== currentEmbeddingModel`) treats
+ * legacy/unknown entries as "needs re-embedding" instead of incorrectly
+ * matching whatever string we picked. The literal `'legacy'` is intentionally
+ * distinct from any real NIM/local model id (which always contain a vendor
+ * prefix or namespace separator).
+ */
+const LEGACY_EMBEDDING_MODEL_ID = 'legacy';
+
+const DEFAULT_TOP_K = 8;
+const DEFAULT_SCORE_THRESHOLD = 0;
+const DEFAULT_MMR_LAMBDA = 0.5;
+const DEFAULT_HYBRID_ALPHA = 0.5;
+const DENSE_TOP_K_MULTIPLIER = 3;
+const BM25_TOP_K_MULTIPLIER = 3;
+
 interface VectorEntry {
   id: string;
   text: string;
@@ -87,7 +107,7 @@ function readLegacy(embeddingModel: string): VectorEntry[] | null {
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
-    const modelId = embeddingModel || '(unspecified)';
+    const modelId = embeddingModel || LEGACY_EMBEDDING_MODEL_ID;
     const out: VectorEntry[] = [];
     parsed.forEach((e: unknown, i: number) => {
       if (!e || typeof e !== 'object') return;
@@ -113,7 +133,10 @@ function readLegacy(embeddingModel: string): VectorEntry[] | null {
       });
     });
     return out;
-  } catch {
+  } catch (e) {
+    if (import.meta.env.DEV) {
+      console.warn('[vectorstore] readLegacy: localStorage parse failed (treating as no migration):', e);
+    }
     return null;
   }
 }
@@ -192,16 +215,16 @@ function classifyIDBError(error: unknown, operation: string): Error {
 
 export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorStoreConfig): VectorStore {
   const cfg = {
-    topK: config?.topK ?? 8,
-    scoreThreshold: config?.scoreThreshold ?? 0,
+    topK: config?.topK ?? DEFAULT_TOP_K,
+    scoreThreshold: config?.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD,
     useMMR: config?.useMMR ?? false,
-    mmrLambda: config?.mmrLambda ?? 0.5,
+    mmrLambda: config?.mmrLambda ?? DEFAULT_MMR_LAMBDA,
     useHybrid: config?.useHybrid ?? false,
-    hybridAlpha: config?.hybridAlpha ?? 0.5,
+    hybridAlpha: config?.hybridAlpha ?? DEFAULT_HYBRID_ALPHA,
     bm25Index: config?.bm25Index,
     embeddingModel: config?.embeddingModel ?? '',
   };
-  const entryModelId = cfg.embeddingModel || '(unspecified)';
+  const entryModelId = cfg.embeddingModel || LEGACY_EMBEDDING_MODEL_ID;
 
   const memory = new Map<string, VectorEntry>();
   let db: IDBStore<VectorEntry> | null = null;
@@ -212,10 +235,12 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
   let persistenceAvailable = false;
   const pendingAdds: VectorEntry[] = [];
 
-  function warnFallbackOnce(): void {
+  function warnFallbackOnce(cause?: unknown): void {
     if (warnOnce) return;
     warnOnce = true;
-    if (import.meta.env.DEV) console.warn('[vectorstore] IndexedDB unavailable; operating without persistence');
+    if (import.meta.env.DEV) {
+      console.warn('[vectorstore] IndexedDB unavailable; operating without persistence', cause ?? '');
+    }
   }
 
   async function doLoad(): Promise<void> {
@@ -249,7 +274,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
         for (const e of existing) memory.set(e.id, e);
       }
     } catch (e) {
-      warnFallbackOnce();
+      warnFallbackOnce(e);
       db = null;
       persistenceAvailable = false;
       // Don't throw here - allow fallback to in-memory mode
@@ -298,11 +323,11 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
       scored.push({ id: e.id, score: cosineUnit(queryEmbedding, e.embedding) });
     }
     scored.sort((a, b) => b.score - a.score);
-    const denseTop = scored.slice(0, Math.max(topK * 3, 6));
+    const denseTop = scored.slice(0, Math.max(topK * DENSE_TOP_K_MULTIPLIER, 6));
 
     let merged: ScoredCandidate[];
     if (cfg.useHybrid && cfg.bm25Index) {
-      const bm25Hits = cfg.bm25Index.search(query, topK * 3);
+      const bm25Hits = cfg.bm25Index.search(query, topK * BM25_TOP_K_MULTIPLIER);
       const denseNorm = minMaxNormalize(denseTop.map((s) => s.score));
       const bm25Scores = bm25Hits.map((h) => h.score);
       const bm25Norm = minMaxNormalize(bm25Scores);
@@ -417,7 +442,15 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
   function clear(): void {
     memory.clear();
     knownDimension = null;
-    try { localStorage.removeItem(LEGACY_KEY); } catch { /* noop */ }
+    try {
+      localStorage.removeItem(LEGACY_KEY);
+    } catch (e) {
+      // localStorage may be disabled (private mode) or the key may be denied
+      // by storage isolation. We're clearing anyway; suppressing is correct.
+      if (import.meta.env.DEV) {
+        console.warn('[vectorstore] clear(): localStorage.removeItem failed:', e);
+      }
+    }
     if (db) enqueueWrite(async () => {
       try {
         await db!.clear();

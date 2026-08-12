@@ -292,7 +292,7 @@ describe('createVectorStore', () => {
     expect(vs2.stats.entries).toBe(1);
   });
 
-  describe('modelId propagation (issue #7)', () => {
+  describe('modelId propagation (issue #7, #18)', () => {
     it('stamps entries with the configured embeddingModel, not "unknown"', async () => {
       const vs = createVectorStore(mockEmbeddings, { embeddingModel: 'nv-embedqa-e5-v5' });
       await vs.load();
@@ -303,15 +303,31 @@ describe('createVectorStore', () => {
       expect(results[0].metadata?.['modelId']).toBe('nv-embedqa-e5-v5');
     });
 
-    it('uses "(unspecified)" when no embeddingModel is configured', async () => {
+    it('stamps legacy sentinel "legacy" when no embeddingModel is configured (issue #18)', async () => {
       const vs = createVectorStore(mockEmbeddings);
       await vs.load();
       vs.addEntries([
         { id: '1', text: 'a', source: 's', embedding: new Array(4).fill(0.1) },
       ]);
       const results = await vs.similaritySearch('a', 1);
-      expect(results[0].metadata?.['modelId']).not.toBe('unknown');
-      expect(results[0].metadata?.['modelId']).toBe('(unspecified)');
+      const modelId = results[0].metadata?.['modelId'];
+      expect(modelId).not.toBe('unknown');
+      expect(modelId).not.toBe('(unspecified)');
+      expect(modelId).toBe('legacy');
+    });
+
+    it('legacy-stamped entries are detectable as a model mismatch (issue #18 rationale)', async () => {
+      const legacyVs = createVectorStore(mockEmbeddings);
+      await legacyVs.load();
+      legacyVs.addEntries([
+        { id: '1', text: 'a', source: 's', embedding: new Array(4).fill(0.1) },
+      ]);
+      const legacyResults = await legacyVs.similaritySearch('a', 1);
+      const legacyModelId = legacyResults[0].metadata?.['modelId'];
+
+      const newModel = 'nv-embedqa-e5-v5';
+      expect(legacyModelId).not.toBe(newModel);
+      expect(legacyModelId).toBe('legacy');
     });
   });
 });
