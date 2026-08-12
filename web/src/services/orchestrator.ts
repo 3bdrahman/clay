@@ -58,6 +58,9 @@ const MAX_STEP_RETRIES = 2;
 const BASE_RETRY_DELAY_MS = 1000;
 const DEFAULT_VECTORSTORE_INITIAL_K = 8;
 const RERANK_K = 4;
+const GRADE_EARLY_EXIT_AT = 4;
+const WEB_SEARCH_RESULT_COUNT = 4;
+const EVAL_TEMPERATURE = 0;
 
 export function createWorkflowOrchestrator(
   question: string,
@@ -74,8 +77,6 @@ export function createWorkflowOrchestrator(
     startedAt: Date.now(),
   };
   let steps: StepTrace[] = [];
-  let stepErrorCount = 0;
-  // Circuit breaker: track consecutive provider failures
   let consecutiveProviderFailures = 0;
   const MAX_CONSECUTIVE_FAILURES = 3;
 
@@ -130,7 +131,6 @@ export function createWorkflowOrchestrator(
       retryable,
     };
 
-    stepErrorCount++;
     callbacks.onError?.(err);
     emitSteps();
   }
@@ -217,16 +217,22 @@ export function createWorkflowOrchestrator(
           },
         ],
         jsonMode: true,
-        temperature: 0,
+        temperature: EVAL_TEMPERATURE,
         model: deps.pickedModels.eval,
       });
       try {
         const parsed = JSON.parse(resp.content || '{}');
         return (parsed.binary_score || '').toLowerCase() === 'yes' ? 'relevant' : 'irrelevant';
-      } catch {
+      } catch (e) {
+        if (import.meta.env.DEV) {
+          console.warn('[orchestrator] gradeDocRelevance JSON parse failed (marking "irrelevant"):', e);
+        }
         return 'irrelevant';
       }
-    } catch {
+    } catch (e) {
+      if (import.meta.env.DEV) {
+        console.warn('[orchestrator] gradeDocRelevance LLM invoke failed (marking "keep-on-error"):', e);
+      }
       return 'keep-on-error';
     }
   }
@@ -255,7 +261,7 @@ export function createWorkflowOrchestrator(
 
       beginStep('grade_docs', NODE_LABELS.grade_docs);
       const filtered = await parallelGrade(docs, gradeDocRelevance, {
-        earlyExitAt: 4,
+        earlyExitAt: GRADE_EARLY_EXIT_AT,
         signal,
       });
       state.documents = filtered;
@@ -287,7 +293,7 @@ export function createWorkflowOrchestrator(
     if (signal?.aborted) return;
     beginStep('web_search', NODE_LABELS.web_search);
     try {
-      const results = await withRetry('webSearch-search', () => deps.webSearch.search(question, 4), signal);
+      const results = await withRetry('webSearch-search', () => deps.webSearch.search(question, WEB_SEARCH_RESULT_COUNT), signal);
       state.webResults = results;
       endStep('web_search', { detail: `${results.length} results` });
     } catch (e) {
@@ -394,7 +400,7 @@ export function createWorkflowOrchestrator(
             },
           ],
           jsonMode: true,
-          temperature: 0,
+          temperature: EVAL_TEMPERATURE,
           model: deps.pickedModels.eval,
         }),
       );
@@ -414,7 +420,7 @@ export function createWorkflowOrchestrator(
             },
           ],
           jsonMode: true,
-          temperature: 0,
+          temperature: EVAL_TEMPERATURE,
           model: deps.pickedModels.eval,
         }),
       );
@@ -423,8 +429,10 @@ export function createWorkflowOrchestrator(
       endStep('evaluate', { detail: useful ? 'useful' : 'not useful' });
       return useful;
     } catch (e) {
+      if (import.meta.env.DEV) {
+        console.warn('[orchestrator] evaluate failed (treating as useful to avoid infinite retry):', e);
+      }
       endStep('evaluate', { detail: 'eval-error' });
-      // On eval error, treat as useful to avoid infinite retries
       return true;
     }
   }
@@ -440,7 +448,7 @@ export function createWorkflowOrchestrator(
           system: ROUTER_INSTRUCTIONS,
           messages: [{ role: 'user', content: question }],
           jsonMode: true,
-          temperature: 0,
+          temperature: EVAL_TEMPERATURE,
           model: deps.pickedModels.routing,
         }),
         signal
@@ -449,7 +457,10 @@ export function createWorkflowOrchestrator(
       try {
         const parsed = JSON.parse(routeResp.content || '{}');
         source = (parsed.datasource as SourceType) || 'vectorstore';
-      } catch {
+      } catch (e) {
+        if (import.meta.env.DEV) {
+          console.warn('[orchestrator] route JSON parse failed (defaulting to vectorstore):', e);
+        }
         source = 'vectorstore';
       }
       state.routing = source;

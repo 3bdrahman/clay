@@ -34,8 +34,10 @@ export async function expandHyDE(question: string, opts: HyDEOptions): Promise<s
     });
     const text = (resp.content || '').trim();
     if (text.length > 0) return `${question}\n\n${text}`;
-  } catch {
-    // fall through
+  } catch (e) {
+    if (import.meta.env.DEV) {
+      console.warn('[orchestratorHelpers] expandHyDE failed (falling back to original question):', e);
+    }
   }
   return question;
 }
@@ -107,7 +109,10 @@ export async function parallelGrade(
       try {
         const outcome = await grade(d);
         return { d, outcome };
-      } catch {
+      } catch (e) {
+        if (import.meta.env.DEV) {
+          console.warn('[orchestratorHelpers] parallelGrade: grade() failed (marking "keep-on-error"):', e);
+        }
         return { d, outcome: 'keep-on-error' as const };
       }
     }),
