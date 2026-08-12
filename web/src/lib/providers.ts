@@ -32,7 +32,10 @@ export function isOllamaUrl(url: string): boolean {
   try {
     const u = new URL(url.trim());
     return u.port === '11434' || u.hostname.endsWith('.ollama') || u.pathname.includes('ollama');
-  } catch {
+  } catch (e) {
+    if (import.meta.env.DEV) {
+      console.warn('[providers] isOllamaUrl: malformed URL (returning false):', e);
+    }
     return false;
   }
 }

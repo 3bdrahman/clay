@@ -119,7 +119,10 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     let data: unknown;
     try {
       data = await resp.json();
-    } catch {
+    } catch (e) {
+      if (import.meta.env.DEV) {
+        console.warn('[llm] invoke(): response JSON parse failed:', e);
+      }
       throw new GenerationFailedError(providerLabel, new Error('Invalid JSON response'));
     }
 
@@ -261,8 +264,13 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
                 : undefined;
               model = parsed.model;
             }
-          } catch {
-            // Ignore parse errors for partial chunks
+          } catch (e) {
+            // SSE chunks may split JSON across network boundaries; subsequent
+            // parse failures are expected and benign — skipping a partial chunk
+            // is correct, not a bug. DEV-only log so loud providers still surface.
+            if (import.meta.env.DEV) {
+              console.warn('[llm] stream(): partial SSE chunk parse skipped:', e);
+            }
           }
         }
       }

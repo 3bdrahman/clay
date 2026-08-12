@@ -21,6 +21,13 @@ function resolveWebSearchBaseUrl(): string {
 
 const DDG_BASE_URL = resolveWebSearchBaseUrl();
 
+/**
+ * Default result count for web search when the caller omits `k`. Mirrors the
+ * orchestrator's `WEB_SEARCH_RESULT_COUNT` — kept independent because the
+ * websearch module is reusable from non-orchestrator call sites (e.g. evals).
+ */
+const DEFAULT_WEB_SEARCH_K = 5;
+
 export interface WebSearchClient {
   search(query: string, k?: number): Promise<WebResult[]>;
 }
@@ -51,7 +58,10 @@ export function extractRealUrl(ddgUrl: string): string {
     const u = new URL(ddgUrl);
     const uddg = u.searchParams.get('uddg');
     return uddg || ddgUrl;
-  } catch {
+  } catch (e) {
+    if (import.meta.env.DEV) {
+      console.warn('[websearch] extractRealUrl: malformed URL (returning input as-is):', e);
+    }
     return ddgUrl;
   }
 }
@@ -161,7 +171,7 @@ if (resp.status === 429) {
     return parseDuckDuckGoHtml(html, k);
   }
 
-  async function search(query: string, k = 5): Promise<WebResult[]> {
+  async function search(query: string, k = DEFAULT_WEB_SEARCH_K): Promise<WebResult[]> {
     const provider = settings.webSearchProvider;
     let lastError: Error | null = null;
 
