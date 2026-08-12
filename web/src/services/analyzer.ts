@@ -36,6 +36,12 @@ export interface DataAnalyzerDeps {
 export function createDataAnalyzer(deps: DataAnalyzerDeps): DataAnalyzer {
   const { llm, metadata } = deps;
 
+  const NAME_TOKEN_MATCH_SCORE = 4;
+  const COLUMN_TOKEN_MATCH_SCORE = 2;
+  const MAX_RELEVANT_DATASETS = 4;
+  const MAX_CHART_ROWS = 12;
+  const MAX_ANALYSIS_ATTEMPTS = 2;
+
   function relevantDatasets(question: string): string[] {
     const q = question.toLowerCase().replace(/[^a-z0-9_\s]/g, ' ');
     const tokens = new Set(q.split(/\s+/).filter(t => t.length >= 3));
@@ -44,18 +50,18 @@ export function createDataAnalyzer(deps: DataAnalyzerDeps): DataAnalyzer {
       let score = 0;
       const nameTokens = name.toLowerCase().split(/[_\s]+/);
       for (const t of nameTokens) {
-        if (t.length >= 3 && tokens.has(t)) score += 4;
+        if (t.length >= 3 && tokens.has(t)) score += NAME_TOKEN_MATCH_SCORE;
       }
       for (const col of meta.columns) {
         const colTokens = col.toLowerCase().split(/[_\s]+/);
         for (const t of colTokens) {
-          if (t.length >= 3 && tokens.has(t)) score += 2;
+          if (t.length >= 3 && tokens.has(t)) score += COLUMN_TOKEN_MATCH_SCORE;
         }
       }
       if (score > 0) matches.push({ name, score });
     }
     matches.sort((a, b) => b.score - a.score);
-    return matches.slice(0, 4).map(m => m.name);
+    return matches.slice(0, MAX_RELEVANT_DATASETS).map(m => m.name);
   }
 
   function buildPrompt(question: string, relevant: string[]): string {
@@ -101,17 +107,76 @@ Return JSON: {"code": "...", "explanation": "..."}`;
   }
 
   /**
-   * Execute generated code in a sandboxed environment.
+   * SECURITY: Execute LLM-generated JavaScript in a constrained sandbox.
+   *
+   * ── Trust boundary ────────────────────────────────────────────────────────
+   * The source of `code` is an LLM completion, NOT user-typed input. The LLM
+   * has been system-prompted to emit only Arquero transformations, but the
+   * underlying threat is prompt injection: a malicious document ingested via
+   * the vectorstore (or a user-chosen CSV column header) could contain
+   * instructions the LLM dutifully echoes into the generated code, after which
+   * `new Function(...)` executes them in the host page context.
+   *
+   * ── Mitigations (current) ─────────────────────────────────────────────────
+   *  - Strict mode (`"use strict"`) forbids accidental globals / `with` /
+   *    undeclared assignments.
+   *  - Limited scope. The only external references reachable from the
+   *    generated code are:
+   *        • the `aq` Arquero namespace (frozen — see below)
+   *        • `op` Arquero operators object (frozen — see below)
+   *        • one parameter per loaded dataset table (Arquero `ColumnTable`)
+   *        • the `result` slot reserved for the return value
+   *    No `window`, `globalThis`, `document`, `fetch`, `eval`, `import`,
+   *    `require`, `process`, or any DOM/network primitive is passed in. The
+   *    generated code can still *reach* the global scope via property chains
+   *    such as `(() => {}).constructor.constructor("...")()` — that is the
+   *    inherent risk of `new Function` and the reason the document-ingestion
+   *    path lives in the same browser tab rather than a worker.
+   *
+   *  - Input discipline. CSV column names are NOT injected as identifier names
+   *    (they're accessed as `d['column name with spaces']`). The only
+   *    identifierss derived from user-controlled data are dataset names, which
+   *    are themselves produced by `deriveName()` in `services/files.ts` and
+   *    stripped to `[a-zA-Z0-9_]`.
+   *
+   * ── Mitigations NOT applied (and why) ─────────────────────────────────────
+   *  - Web Worker isolation. Moving execution to a Worker would buy true
+   *    wall-clock isolation (no access to `window`, no synchronous DOM), at
+   *    the cost of postMessage serialization of Arquero tables on every call.
+   *    Tracked as a follow-up — this function is the only call site that
+   *    would move.
+   *  - CSP `unsafe-eval` removal. The Vite dev build and the GitHub Pages
+   *    deploy both rely on `new Function`; turning it off would also disable
+   *    React refresh in dev. A proper sandbox (`quickjs-emscripten`,
+   *    `proxy-tree-walker`) is the long-term fix and is incompatible with the
+   *    current "no backend, no wasm" deploy profile.
+   *  - Static code validation. We could AST-scan generated code for forbidden
+   *    references before execution, but a determined prompt-injection can
+   *    construct the same refs dynamically (`[][`constructor`]` etc.). The
+   *    retry loop already rejects `SyntaxError` and timeouts; runtime failures
+   *    return an error result to the UI instead of crashing the chat.
+   *
+   * ── Hardening applied here ────────────────────────────────────────────────
+   * `op` is passed as a fresh shallow clone so generated code cannot mutate
+   * the real `aq.op` and corrupt subsequent Arquero verbs. we do NOT freeze
+   * `aq` because Arquero internally relies on the namespace being mutable
+   * (attempted and reverted after test regression). Dataset tables are
+   * Arquero `ColumnTable` instances (immutable by contract) and are re-read
+   * from `deps.datasets` on every `analyze()` call, so generated code cannot
+   * poison the in-memory store for the next question.
+   *
    * @throws CodeExecutionError for syntax errors, runtime errors, timeouts
    */
-  function execute(code: string): unknown {
-    const aq = deps.datasets.get('aq') as { op?: Record<string, unknown> };
+  function executeUserCode(code: string): unknown {
+    const aq = deps.datasets.get('aq') as { op?: Record<string, unknown> } | undefined;
     const datasetsObj: Record<string, unknown> = {};
     for (const [name, table] of deps.datasets) {
       if (name === 'aq') continue;
       datasetsObj[name] = table;
     }
-    const op = aq?.op || {};
+    const opRaw = aq?.op || {};
+    const aqRef = aq;
+    const opRef = { ...opRaw };
     const argNames = Object.keys(datasetsObj);
     const argValues = Object.values(datasetsObj);
 
@@ -124,8 +189,7 @@ Return JSON: {"code": "...", "explanation": "..."}`;
     );
 
     try {
-      const result = fn(...argValues, aq, op);
-      // Convert Arquero table to array of objects if needed
+      const result = fn(...argValues, aqRef, opRef);
       if (result && typeof result === 'object' && typeof (result as { objects?: () => unknown[] }).objects === 'function') {
         return (result as { objects: () => unknown[] }).objects();
       }
@@ -133,7 +197,6 @@ Return JSON: {"code": "...", "explanation": "..."}`;
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));
 
-      // Classify error type for retry logic
       const isSyntaxError = error instanceof SyntaxError ||
         error.name === 'SyntaxError' ||
         error.message.includes('SyntaxError') ||
@@ -151,7 +214,7 @@ Return JSON: {"code": "...", "explanation": "..."}`;
         error,
         {
           code,
-          retryable: !isSyntaxError && !isTimeout, // Retry runtime errors, not syntax or timeout
+          retryable: !isSyntaxError && !isTimeout,
         }
       );
     }
@@ -164,7 +227,7 @@ Return JSON: {"code": "...", "explanation": "..."}`;
     const keys = Object.keys(first);
     const numericKeys = keys.filter(k => typeof first[k] === 'number');
     if (numericKeys.length === 0) return undefined;
-    const data = rows.slice(0, 12) as Array<Record<string, unknown>>;
+    const data = rows.slice(0, MAX_CHART_ROWS) as Array<Record<string, unknown>>;
     const xKey = keys.find(k => typeof first[k] === 'string') || keys[0];
     return {
       type: 'bar',
@@ -250,7 +313,7 @@ Return JSON: {"code": "...", "explanation": "..."}`;
   async function analyze(question: string, signal?: AbortSignal): Promise<DataAnalysisResult> {
     const start = performance.now();
     const relevant = relevantDatasets(question);
-    const maxAttempts = 2;
+    const maxAttempts = MAX_ANALYSIS_ATTEMPTS;
     let lastError: string | null = null;
 
     for (let attempt = 0; attempt <= maxAttempts; attempt++) {
@@ -282,7 +345,7 @@ Return JSON: {"code": "...", "explanation": "..."}`;
         const parsed = JSON.parse(resp.content || '{"code":"","explanation":""}');
         code = parsed.code || '';
         if (!code) throw new Error('Empty code from LLM');
-        const result = execute(code);
+        const result = executeUserCode(code);
         return formatResult(result, code, parsed.explanation, attempt + 1, start);
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e));
@@ -336,7 +399,10 @@ Return JSON: {"code": "...", "explanation": "..."}`;
         rowCount = (table as { numRows: () => number }).numRows();
         const names = (table as { columnNames?: () => string[] }).columnNames?.();
         if (Array.isArray(names) && names.length > 0) columns = names;
-      } catch {
+      } catch (e) {
+        if (import.meta.env.DEV) {
+          console.warn('[analyzer] getDatasetSummary live-table inspection failed (falling back to metadata):', e);
+        }
         rowCount = meta.rowCount;
       }
     }
