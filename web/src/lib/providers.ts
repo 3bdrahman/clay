@@ -10,7 +10,11 @@ const NIM_FALLBACK_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 function resolveNimBaseUrl(): string {
   const envUrl = (import.meta.env.VITE_NIM_BASE_URL as string | undefined)?.trim();
   if (envUrl) return envUrl;
-  if (import.meta.env.DEV) return '/nim-api';
+  
+  const isLocal = typeof window !== 'undefined' && 
+                  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+  if (import.meta.env.DEV || isLocal) return '/nim-api';
   return NIM_FALLBACK_BASE_URL;
 }
 

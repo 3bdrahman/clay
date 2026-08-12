@@ -15,28 +15,31 @@ const DDG_PROXY_PREFIX = '/ddg';
 // stricter local server they can point localServerUrl at any origin they want;
 // no Vite proxy is configured for arbitrary localhost targets on purpose.
 
+const proxyConfig = {
+  [NIM_PROXY_PREFIX]: {
+    target: 'https://integrate.api.nvidia.com/v1',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (path: string) => path.replace(new RegExp(`^${NIM_PROXY_PREFIX}`), ''),
+    headers: {
+      Origin: 'https://integrate.api.nvidia.com',
+    },
+  },
+  [DDG_PROXY_PREFIX]: {
+    target: 'https://html.duckduckgo.com',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (path: string) => path.replace(new RegExp(`^${DDG_PROXY_PREFIX}`), ''),
+  },
+};
+
 export default defineConfig({
   plugins: [react()],
   server: {
-    proxy: {
-      [NIM_PROXY_PREFIX]: {
-        target: 'https://integrate.api.nvidia.com/v1',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(new RegExp(`^${NIM_PROXY_PREFIX}`), ''),
-        headers: {
-          // Strip incoming Origin so NIM doesn't reject the request based on
-          // its build.nvidia.com-only CORS policy at the proxy boundary.
-          Origin: 'https://integrate.api.nvidia.com',
-        },
-      },
-      [DDG_PROXY_PREFIX]: {
-        target: 'https://html.duckduckgo.com',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(new RegExp(`^${DDG_PROXY_PREFIX}`), ''),
-      },
-    },
+    proxy: proxyConfig,
+  },
+  preview: {
+    proxy: proxyConfig,
   },
   build: {
     chunkSizeWarningLimit: 1000,
