@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { useAppStore } from '../store';
 import { useConfirm } from '../hooks/useConfirm';
 import { useModalFocus } from '../hooks/useModalFocus';
+import { ACCEPT_EXTENSIONS } from '../lib/fileExtensions';
 
 interface Props {
   open: boolean;
@@ -78,6 +79,9 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
     setIsWorking(true);
     try {
       await loadSampleData();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setErrorMsg(msg);
     } finally {
       setIsWorking(false);
     }
@@ -183,7 +187,7 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".csv,.pdf,.md,.markdown,.txt,.text,.json"
+              accept={ACCEPT_EXTENSIONS}
               onChange={handleFileChange}
               className="hidden"
             />

@@ -151,7 +151,7 @@ describe('formatReport', () => {
   });
 });
 
-describe.skip('E2E Eval (requires VITE_NIM_API_KEY)', () => {
+describe('E2E Eval (requires VITE_NIM_API_KEY)', () => {
   it('runs full golden test set against live NIM', async () => {
     if (!TEST_SETTINGS.apiKey) {
       return;

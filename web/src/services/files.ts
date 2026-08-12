@@ -4,6 +4,7 @@ import { extractPdfText, type ExtractedPage } from './pdf';
 import { chunkText, type Chunk, type ChunkContext } from './chunker';
 import type { EmbeddingsClient } from '../lib/embeddings';
 import { hashText } from '../lib/hash';
+import { isDatasetExtension, isDocumentExtension } from '../lib/fileExtensions';
 
 export type SupportedKind = 'csv' | 'pdf' | 'text' | 'unsupported';
 
@@ -32,16 +33,9 @@ export interface ProcessedFile {
 
 export function detectKind(fileName: string, mimeType?: string): SupportedKind {
   const lower = fileName.toLowerCase();
-  if (lower.endsWith('.csv') || mimeType === 'text/csv') return 'csv';
+  if (isDatasetExtension(lower) || mimeType === 'text/csv') return 'csv';
   if (lower.endsWith('.pdf') || mimeType === 'application/pdf') return 'pdf';
-  if (
-    lower.endsWith('.md') ||
-    lower.endsWith('.markdown') ||
-    lower.endsWith('.txt') ||
-    lower.endsWith('.text') ||
-    lower.endsWith('.json') ||
-    mimeType?.startsWith('text/') === true
-  ) {
+  if (isDocumentExtension(lower) || mimeType?.startsWith('text/') === true) {
     return 'text';
   }
   return 'unsupported';

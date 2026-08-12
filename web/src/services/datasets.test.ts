@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-import { loadSampleDatasets, parseUserCsv } from '../services/datasets';
+import { loadSampleDatasets, parseUserCsv, SampleDatasetLoadError } from '../services/datasets';
 
 describe('loadSampleDatasets', () => {
   const originalFetch = globalThis.fetch;
@@ -53,16 +53,53 @@ describe('loadSampleDatasets', () => {
     await expect(loadSampleDatasets()).rejects.toThrow(/503/);
   });
 
-  it('skips missing files gracefully', async () => {
+  it('throws SampleDatasetLoadError when a single file fails (issue #16: no partial silent load)', async () => {
     mockFetch
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ files: ['missing.csv'] }),
       })
-      .mockResolvedValueOnce({ ok: false });
+      .mockResolvedValueOnce({ ok: false, status: 404, statusText: 'Not Found' });
 
-    const { tables } = await loadSampleDatasets();
-    expect(tables.has('missing')).toBe(false);
+    const p = loadSampleDatasets();
+    await expect(p).rejects.toThrow(SampleDatasetLoadError);
+    await expect(p).rejects.toThrow(/404/i);
+  });
+
+  it('aggregates multiple failures into one SampleDatasetLoadError with all failed names (issue #16)', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ files: ['ok.csv', 'bad1.csv', 'bad2.csv'] }),
+      })
+      .mockResolvedValueOnce({ ok: true, text: async () => 'a,b\n1,2' })
+      .mockResolvedValueOnce({ ok: false, status: 500, statusText: 'ISE' })
+      .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Unavailable' });
+
+    let caught: unknown;
+    try {
+      await loadSampleDatasets();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(SampleDatasetLoadError);
+    const err = caught as SampleDatasetLoadError;
+    expect(err.failedFiles).toEqual(['bad1', 'bad2']);
+    expect(err.succeededFiles).toEqual(['ok']);
+    expect(err.message).toMatch(/bad1/);
+    expect(err.message).toMatch(/bad2/);
+  });
+
+  it('surfaces a non-partial failure message when every file fails (issue #16)', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ files: ['bad1.csv', 'bad2.csv'] }),
+      })
+      .mockResolvedValueOnce({ ok: false, status: 404, statusText: 'Not Found' })
+      .mockResolvedValueOnce({ ok: false, status: 500, statusText: 'ISE' });
+
+    await expect(loadSampleDatasets()).rejects.toThrow(/could not be loaded/i);
   });
 });
 

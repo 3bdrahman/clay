@@ -1,10 +1,52 @@
 import * as aq from 'arquero';
 import type { DatasetMeta } from '../services/analyzer';
+import { isDatasetExtension } from '../lib/fileExtensions';
+import { RagError, RagErrorCode } from '../lib/errors';
 
 export interface SampleLoadResult {
   tables: Map<string, unknown>;
   metadata: DatasetMeta;
   rawCsv: Record<string, string>;
+}
+
+/**
+ * Typed error raised when one or more per-file fetches/parse steps fail inside
+ * `loadSampleDatasets`. Replaces the prior silent `catch e => console.warn`
+ * partial-load behavior — see GH issue #16. The caller surfaces this to the
+ * user via the existing error toast in DataSandbox.
+ */
+export class SampleDatasetLoadError extends RagError {
+  public readonly failedFiles: ReadonlyArray<string>;
+  public readonly succeededFiles: ReadonlyArray<string>;
+
+  constructor(
+    failed: ReadonlyArray<{ name: string; cause: Error }>,
+    succeeded: ReadonlyArray<string>,
+  ) {
+    const failedNames = failed.map(f => f.name);
+    const detail = failed
+      .map(f => `${f.name} (${f.cause.message || f.cause.name || 'unknown error'})`)
+      .join(', ');
+    const all = succeeded.length === 0;
+    const message = all
+      ? `Sample data could not be loaded. Failed: ${detail}.`
+      : `Sample data partially loaded. ${succeeded.length} OK, ${failed.length} failed: ${detail}. The failed datasets will be missing from the sandbox.`;
+
+    super({
+      code: RagErrorCode.UNKNOWN_ERROR,
+      message,
+      retryable: true,
+      context: {
+        failedCount: failed.length,
+        succeededCount: succeeded.length,
+        failedNames,
+        succeededNames: succeeded,
+      },
+    });
+    this.name = 'SampleDatasetLoadError';
+    this.failedFiles = failedNames;
+    this.succeededFiles = succeeded;
+  }
 }
 
 // Get the base path for correct asset loading on GitHub Pages
@@ -27,17 +69,22 @@ export async function loadSampleDatasets(): Promise<SampleLoadResult> {
     );
   }
   const idx = (await indexResp.json()) as { files?: string[] };
-  const names = (idx.files || []).filter(n => n.endsWith('.csv'));
+  const names = (idx.files || []).filter(n => isDatasetExtension(n));
   if (names.length === 0) {
-    throw new Error('Sample dataset index is empty (no CSV files listed).');
+    throw new Error('Sample dataset index is empty (no supported dataset files listed).');
   }
+
+  const failures: Array<{ name: string; cause: Error }> = [];
+  const successes: string[] = [];
 
   await Promise.all(
     names.map(async fileName => {
       const name = fileName.replace(/\.csv$/i, '');
       try {
         const resp = await fetch(`${basePath}data/datasets/${fileName}`, { cache: 'no-store' });
-        if (!resp.ok) return;
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+        }
         const text = await resp.text();
         const table = aq.fromCSV(text);
         const rows = table.objects() as Array<Record<string, unknown>>;
@@ -52,11 +99,18 @@ export async function loadSampleDatasets(): Promise<SampleLoadResult> {
         tables.set(name, normalizedTable);
         metadata[name] = { columns, rowCount };
         rawCsv[name] = text;
+        successes.push(name);
       } catch (e) {
-        if (import.meta.env.DEV) console.warn(`[clay] failed to load dataset ${name}:`, e);
+        const cause = e instanceof Error ? e : new Error(String(e));
+        failures.push({ name, cause });
+        if (import.meta.env.DEV) console.warn(`[clay] failed to load dataset ${name}:`, cause);
       }
     })
   );
+
+  if (failures.length > 0) {
+    throw new SampleDatasetLoadError(failures, successes);
+  }
 
   tables.set('aq', aq);
 

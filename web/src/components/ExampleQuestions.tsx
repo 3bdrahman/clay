@@ -1,18 +1,12 @@
 // ExampleQuestions — quick-start prompts showcasing each path
 
 import { useAppStore } from '../store';
-import { deriveDataQueries } from '../lib/exampleQueries';
+import { deriveDataQueries, deriveDocumentQueries } from '../lib/exampleQueries';
 
 interface Props {
   onSelect: (q: string) => void;
   onLoadSample?: () => void;
 }
-
-const DOC_QUESTIONS = [
-  'Summarize the key points from my documents',
-  'What are the main themes across my files?',
-  'Find any action items mentioned',
-];
 
 const WEB_QUESTIONS = [
   'What are the latest trends in AI for business?',
@@ -56,22 +50,13 @@ export function ExampleQuestions({ onSelect, onLoadSample }: Props) {
         />
       )}
 
-      {hasDocs ? (
+      {hasDocs && (
         <Group
           category="Documents (Vector Store)"
           color="text-brand-600 bg-brand-50 dark:bg-brand-900/30 dark:text-brand-400"
           icon="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-          questions={DOC_QUESTIONS}
+          questions={deriveDocumentQueries(sandboxDocuments)}
           onSelect={onSelect}
-        />
-      ) : (
-        <Group
-          category="Documents (upload a PDF/MD/TXT to enable)"
-          color="text-ink-500 bg-ink-100 dark:bg-ink-800 dark:text-ink-400"
-          icon="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-          questions={DOC_QUESTIONS}
-          onSelect={onSelect}
-          disabled
         />
       )}
 

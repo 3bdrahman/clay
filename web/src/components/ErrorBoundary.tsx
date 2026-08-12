@@ -17,6 +17,9 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
+    // Intentionally logs in production too: React error boundaries are the
+    // last line of defense and the operator needs the stack trace to debug
+    // component-tree crashes that the user can recover from via "Reload page".
     console.error('ErrorBoundary caught an error:', error, info.componentStack);
   }
 

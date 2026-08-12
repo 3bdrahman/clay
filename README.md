@@ -152,7 +152,7 @@ Click **Discover** to fetch the list of models the server exposes, then pick one
 
 ### Dynamic model picker (NIM only)
 
-On startup, Clay calls `GET https://integrate.api.nvidia.com/v1/models` and picks the best model per task by size + family. No hardcoded model names — when NIM rotates its catalog, picks update automatically.
+On startup, Clay calls `GET https://integrate.api.nvidia.com/v1/models` and picks the best model per task by size + family using heuristic patterns for known model families (see `web/src/lib/modelPatterns.ts`). The patterns are designed to work with the current NIM catalog but may require updates if the catalog changes significantly.
 
 | Task | Heuristic |
 |---|---|
