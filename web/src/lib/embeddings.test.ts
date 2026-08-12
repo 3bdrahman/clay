@@ -6,7 +6,6 @@ import {
   RateLimitError,
   ProviderUnreachableError,
   EmbeddingModelMissingError,
-  VectorStoreCorruptedError,
 } from './errors';
 
 describe('createEmbeddingsClient', () => {
@@ -186,22 +185,32 @@ describe('createEmbeddingsClient', () => {
     await expect(client.embed('test')).rejects.toThrow(InvalidApiKeyError);
   });
 
-  it.skip('throws RateLimitError on 429 response - skipped due to fake timer issues in test environment', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 429,
-      headers: new Map([['retry-after', '60']]),
-      text: async () => 'Rate limited',
-    });
+  it('throws RateLimitError on 429 response after exhausting retries', async () => {
+    vi.useFakeTimers();
+    mockFetch.mockImplementation(() =>
+      Promise.resolve({
+        ok: false,
+        status: 429,
+        headers: new Map([['retry-after', '60']]),
+        text: async () => 'Rate limited',
+        json: async () => ({}),
+      } as Record<string, unknown>),
+    );
 
     const client = createEmbeddingsClient({
       baseUrl: NIM_BASE_URL,
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
-    await expect(client.embed('test')).rejects.toThrow(RateLimitError);
-    await expect(client.embed('test')).rejects.toThrow('rate limit exceeded');
-  });
+    const pending = client.embed('test').catch((e: unknown) => e);
+    // Drive through all 3 attempts (Retry-After=60s, capped at MAX_BACKOFF_MS=8000)
+    await vi.advanceTimersByTimeAsync(30000);
+    const error = await pending;
+
+    expect(error).toBeInstanceOf(RateLimitError);
+    expect(String(error)).toMatch(/rate limit/i);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  }, 15000);
 
   it('throws ProviderUnreachableError on 500 response', async () => {
     mockFetch.mockResolvedValue({
@@ -320,7 +329,7 @@ describe('createEmbeddingsClient', () => {
     expect(result).toHaveLength(200);
   });
 
-  it.skip('retries on 429 then succeeds - skipped due to fake timer issues in test environment', async () => {
+  it('retries on 429 then succeeds', async () => {
     vi.useFakeTimers();
     let attempt = 0;
     mockFetch.mockImplementation(() => {

@@ -55,11 +55,17 @@ const MAX_BATCH = 64;
 const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 8000;
+/**
+ * Words-to-tokens multiplier used by `estimateTokens`. Must stay in sync with
+ * the heuristic in `lib/tokens.ts` — both code sites use the same factor so
+ * cache sizes and rate-limit windows line up. Trained on a sample of English
+ * prose + code across NIM's BPE-family tokenizers.
+ */
+const TOKEN_ESTIMATE_WORD_FACTOR = 1.3;
 
-/** Word-count token estimate (heuristic; matches the 1.3x factor in T1's tokens.ts). */
 function estimateTokens(text: string): number {
   const words = text.split(/\s+/).filter(Boolean).length;
-  return Math.ceil(words * 1.3);
+  return Math.ceil(words * TOKEN_ESTIMATE_WORD_FACTOR);
 }
 
 /** L2-normalize a vector in place-free form. Zero-norm → returned unchanged. */
