@@ -1,30 +1,15 @@
-name: Deploy to GitHub Pages
+name: Deploy to Netlify
 
 on:
   push:
     branches: [master, main]
   workflow_dispatch:
-    inputs:
-      base-path:
-        description: 'Base path for deployment (use "/" for user/org pages, "/repo-name" for project pages)'
-        required: false
-        default: '/clay'
-        type: choice
-        options:
-          - '/'
-          - '/clay'
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,29 +23,23 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-        run: npm ci || npm install
+        run: npm ci
 
       - name: Build
         working-directory: web
-        env:
-          BASE_PATH: ${{ github.event.inputs.base-path || '/clay' }}
-        run: |
-          npm run build
-          # Add a 404.html for SPA routing on GitHub Pages
-          cp dist/index.html dist/404.html
+        run: npm run build
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Deploy to Netlify
+        uses: nwtgck/actions-netlify@v3.0
         with:
-          path: web/dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          publish-dir: './web/dist'
+          production-branch: master
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          deploy-message: "Deploy from GitHub Actions"
+          enable-pull-request-comment: false
+          enable-commit-comment: true
+          overwrites-pull-request-comment: true
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        timeout-minutes: 5

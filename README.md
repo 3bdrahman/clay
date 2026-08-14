@@ -7,8 +7,8 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-6.0-646CFF.svg)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-06B6D4.svg)](https://tailwindcss.com/)
-[![Tests](https://img.shields.io/badge/Tests-130_passing-brightgreen.svg)](https://github.com/usef/clay/actions)
-[![Deploy](https://img.shields.io/badge/Deploy-GitHub_Pages-2ea44f.svg)](https://github.com/usef/clay/actions)
+[![Tests](https://img.shields.io/badge/Tests-396_passing-brightgreen.svg)](https://github.com/usef/clay/actions)
+[![Deploy](https://img.shields.io/badge/Deploy-Netlify-00C7B7.svg)](https://app.netlify.com/sites/clay-rag/deploys)
 
 Clay combines three retrieval paths behind a single chat surface:
 
@@ -24,9 +24,11 @@ All processing runs in the browser. Two outbound paths are supported for LLM inf
 
 ## Live Demo
 
-**Try it now:** [https://3bdrahman.github.io/clay](https://3bdrahman.github.io/clay)
+**Try it now:** [https://clay-rag.netlify.app](https://clay-rag.netlify.app)
 
 Add your NVIDIA NIM API key in Settings (free tier: [build.nvidia.com/settings/api-keys](https://build.nvidia.com/settings/api-keys)) or configure a local OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp) to use the full AI capabilities.
+
+> **Note:** The Netlify deployment includes a Netlify Function proxy (`web/netlify/functions/nim-proxy.ts`) that automatically handles CORS for NVIDIA NIM. NIM cloud works zero-config on Netlify.
 
 ---
 
@@ -64,7 +66,7 @@ Then paste your NVIDIA NIM API key in **Settings** (free tier: [build.nvidia.com
 npm run build        # → web/dist/ (static files, ready to deploy)
 ```
 
-Deploys to GitHub Pages, Netlify, Vercel, Cloudflare Pages, or any static host.
+Deploys to **Netlify** (recommended — NIM cloud works zero-config via Netlify Function), or any static host.
 
 ---
 

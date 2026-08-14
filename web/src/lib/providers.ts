@@ -2,10 +2,19 @@
 
 // NIM only serves CORS headers for build.nvidia.com. To make the 100%
 // client-side app work in dev, vite.config.ts proxies /nim-api → NIM.
-// In production, set VITE_NIM_BASE_URL to whatever edge proxy you deploy
-// (Cloudflare Worker, Vercel function, Netlify function, ...). When unset,
-// fall back to the direct URL — works only from build.nvidia.com.
+// On Netlify, the netlify.toml redirects /nim-api/* to the Netlify Function.
+// In production on other hosts, set VITE_NIM_BASE_URL to your edge proxy.
 const NIM_FALLBACK_BASE_URL = 'https://integrate.api.nvidia.com/v1';
+
+function isNetlify(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    return window.location.hostname.endsWith('.netlify.app') || 
+           window.location.hostname === '3bdrahman.github.io';
+  } catch {
+    return false;
+  }
+}
 
 function resolveNimBaseUrl(): string {
   const envUrl = (import.meta.env.VITE_NIM_BASE_URL as string | undefined)?.trim();
@@ -15,6 +24,7 @@ function resolveNimBaseUrl(): string {
                   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
   if (import.meta.env.DEV || isLocal) return '/nim-api';
+  if (isNetlify()) return '/nim-api'; // Netlify Function proxy via redirect
   return NIM_FALLBACK_BASE_URL;
 }
 
