@@ -21,6 +21,7 @@ export enum RagErrorCode {
   INVALID_API_KEY = 'INVALID_API_KEY',
   RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
   PROVIDER_TIMEOUT = 'PROVIDER_TIMEOUT',
+  CORS_BLOCKED = 'CORS_BLOCKED',
 
   // Streaming/Generation errors
   STREAM_INTERRUPTED = 'STREAM_INTERRUPTED',
@@ -283,6 +284,32 @@ export class ProviderTimeoutError extends RagError {
   }
 }
 
+export class CorsBlockedError extends RagError {
+  constructor(provider: string, cause?: Error, customMessage?: string) {
+    const shortMessage = `Browser blocked request to ${provider} (CORS). ${provider} only allows requests from build.nvidia.com.`;
+    const detailedMessage = customMessage
+      ? customMessage
+      : `Browser blocked the request to ${provider} due to CORS policy. ` +
+        `${provider} does not allow requests from this origin. ` +
+        `Solutions: (1) Switch to Local server in Settings (Ollama, LM Studio, etc.), or ` +
+        `(2) Deploy an edge proxy (Cloudflare Worker, Vercel function, Netlify function) ` +
+        `and set VITE_NIM_BASE_URL at build time. See README for details.`;
+
+    super({
+      code: RagErrorCode.CORS_BLOCKED,
+      message: detailedMessage,
+      cause,
+      retryable: false,
+      provider,
+      context: { blockedBy: 'browser-cors', shortMessage },
+    });
+  }
+
+  toUserMessage(): string {
+    return (this.context?.shortMessage as string) ?? this.message;
+  }
+}
+
 // ============================================================================
 // Streaming/Generation Errors
 // ============================================================================
@@ -409,6 +436,30 @@ export class CodeExecutionError extends RagError {
 // ============================================================================
 
 /**
+ * Checks if the current origin is build.nvidia.com (the only origin NIM allows CORS from).
+ */
+function isBuildNvidiaOrigin(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    return window.location.hostname === 'build.nvidia.com';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks if the error is likely a CORS block when calling NIM.
+ * CORS failures manifest as TypeError: Failed to fetch with no response.
+ */
+function isLikelyCorsBlock(error: unknown, provider: string): boolean {
+  if (!(error instanceof TypeError && error.message.includes('fetch'))) return false;
+  if (provider !== 'NVIDIA NIM') return false;
+  if (import.meta.env.DEV) return false; // Dev uses Vite proxy, CORS is bypassed
+  if (isBuildNvidiaOrigin()) return false; // build.nvidia.com is allowed
+  return true;
+}
+
+/**
  * Classifies a generic error into a typed RagError.
  * Used as a safety net when calling external APIs.
  */
@@ -434,6 +485,10 @@ export function classifyError(
 
     // TypeError usually means network failure in fetch
     if (error instanceof TypeError && error.message.includes('fetch')) {
+      // Check if this is likely a CORS block (NIM only allows build.nvidia.com)
+      if (isLikelyCorsBlock(error, provider)) {
+        return new CorsBlockedError(provider, error);
+      }
       return new ProviderUnreachableError(provider, error);
     }
   }
@@ -506,3 +561,5 @@ export function getUserMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
 }
+
+export { isLikelyCorsBlock };

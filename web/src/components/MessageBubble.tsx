@@ -17,8 +17,13 @@ export function MessageBubble({ message }: Props) {
 
   const isUser = message.role === 'user';
   const isError = !!message.error;
+  const workflowError = message.workflow?.error;
+  const isWorkflowError = !!workflowError;
+  const isCorsError = isWorkflowError && 
+    (workflowError.code === 'CORS_BLOCKED' || 
+     String(workflowError.message).includes('CORS'));
   const wf = message.workflow;
-  const isStreaming = !!message.streaming && !isError;
+  const isStreaming = !!message.streaming && !isError && !isWorkflowError;
 
   if (isUser) {
     return (
@@ -42,10 +47,10 @@ export function MessageBubble({ message }: Props) {
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
             </svg>
           </div>
-          <div className="flex-1 min-w-0">
+<div className="flex-1 min-w-0">
             <div
               className={`rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm ${
-                isError
+                isError || isWorkflowError
                   ? 'bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800'
                   : 'bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700'
               }`}
@@ -54,7 +59,26 @@ export function MessageBubble({ message }: Props) {
                 <div className="text-sm text-rose-700 dark:text-rose-300">
                   <div className="font-semibold mb-1">Error</div>
                   <div className="whitespace-pre-wrap">{message.error}</div>
-               </div>
+                </div>
+              ) : isWorkflowError ? (
+                isCorsError ? (
+                  <details className="group">
+                    <summary className="cursor-pointer text-sm font-medium text-rose-700 dark:text-rose-300 select-none flex items-center gap-1.5">
+                      <svg className="w-4 h-4 flex-shrink-0 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      CORS blocked — NVIDIA NIM does not allow requests from this origin
+                    </summary>
+                    <div className="mt-2 text-sm text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-800 rounded px-3 py-2 whitespace-pre-line animate-fade-in">
+                      {workflowError.message}
+                    </div>
+                  </details>
+                ) : (
+                  <div className="text-sm text-rose-700 dark:text-rose-300">
+                    <div className="font-semibold mb-1">Error</div>
+                    <div className="whitespace-pre-wrap">{workflowError.message}</div>
+                  </div>
+                )
               ) : isStreaming ? (
                 <div className="markdown-content text-ink-800 dark:text-ink-100 text-sm leading-relaxed whitespace-pre-wrap break-words">
                   {message.content}

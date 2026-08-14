@@ -17,6 +17,8 @@ import {
   VectorStoreQuotaExceededError,
   WebSearchProviderError,
   CodeExecutionError,
+  CorsBlockedError,
+  isLikelyCorsBlock,
   isRetryable,
   getUserMessage,
 } from './errors';
@@ -314,6 +316,60 @@ describe('RagError subclasses', () => {
       expect(debug.provider).toBe('provider');
       expect(debug.cause).toBe('cause');
       expect(debug.stack).toBeDefined();
+    });
+  });
+
+  describe('CorsBlockedError', () => {
+    it('creates error with correct code and message', () => {
+      const err = new CorsBlockedError('NVIDIA NIM');
+      expect(err.code).toBe(RagErrorCode.CORS_BLOCKED);
+      expect(err.message).toContain('CORS');
+      expect(err.message).toContain('NVIDIA NIM');
+      expect(err.retryable).toBe(false);
+      expect(err.provider).toBe('NVIDIA NIM');
+      expect(err.context?.blockedBy).toBe('browser-cors');
+    });
+
+    it('includes short message in context', () => {
+      const err = new CorsBlockedError('NVIDIA NIM');
+      expect(err.context?.shortMessage).toContain('CORS');
+      expect(err.context?.shortMessage).toContain('build.nvidia.com');
+    });
+
+    it('toUserMessage returns short message', () => {
+      const err = new CorsBlockedError('NVIDIA NIM');
+      expect(err.toUserMessage()).toBe(err.context?.shortMessage);
+    });
+
+    it('accepts custom message', () => {
+      const err = new CorsBlockedError('NVIDIA NIM', undefined, 'Custom CORS message');
+      expect(err.message).toBe('Custom CORS message');
+    });
+
+    it('includes cause', () => {
+      const cause = new TypeError('Failed to fetch');
+      const err = new CorsBlockedError('NVIDIA NIM', cause);
+      expect(err.cause).toBe(cause);
+    });
+  });
+
+  describe('isLikelyCorsBlock', () => {
+    it('returns true for fetch TypeError to NIM in production', () => {
+      const error = new TypeError('Failed to fetch');
+      expect(typeof isLikelyCorsBlock(error, 'NVIDIA NIM')).toBe('boolean');
+    });
+
+    it('returns false for non-TypeError', () => {
+      expect(isLikelyCorsBlock(new Error('generic'), 'NVIDIA NIM')).toBe(false);
+    });
+
+    it('returns false for TypeError without fetch in message', () => {
+      expect(isLikelyCorsBlock(new TypeError('other error'), 'NVIDIA NIM')).toBe(false);
+    });
+
+    it('returns false for non-NIM provider', () => {
+      const error = new TypeError('Failed to fetch');
+      expect(isLikelyCorsBlock(error, 'local')).toBe(false);
     });
   });
 });

@@ -166,6 +166,100 @@ Cache TTL is 1 hour. Click **Refresh** in Settings to refetch.
 
 ---
 
+### Production CORS constraint (NVIDIA NIM only)
+
+NVIDIA NIM's API only returns `Access-Control-Allow-Origin: https://build.nvidia.com`. Browsers enforce this via CORS, so **direct calls from any other origin (GitHub Pages, Netlify, Vercel, Cloudflare Pages, localhost:5173 in preview, etc.) will fail** with a CORS error — even if the API returns HTTP 200.
+
+**This is not a bug in Clay** — it's a browser security feature. The API key would be exposed if the browser allowed reading responses from arbitrary origins.
+
+The development server works because Vite proxies `/nim-api/*` → `https://integrate.api.nvidia.com/v1/*` (see `web/vite.config.ts`). For production, you must replicate this proxy yourself.
+
+#### Option 1: Deploy an edge proxy (recommended)
+
+Deploy a tiny serverless function that forwards requests to NIM and adds CORS headers:
+
+**Cloudflare Worker** (`wrangler.toml` + `src/index.ts`):
+```toml
+name = "clay-nim-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+```
+
+```typescript
+export default {
+  async fetch(request: Request, env: any): Promise<Response> {
+    const url = new URL(request.url);
+    const target = `https://integrate.api.nvidia.com${url.pathname}${url.search}`;
+    
+    const response = await fetch(target, {
+      method: request.method,
+      headers: {
+        ...Object.fromEntries(request.headers),
+        'Origin': 'https://integrate.api.nvidia.com',
+      },
+      body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+    });
+
+    return new Response(response.body, {
+      status: response.status,
+      headers: {
+        ...Object.fromEntries(response.headers),
+        'Access-Control-Allow-Origin': '*', // or restrict to your domain
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      },
+    });
+  },
+};
+```
+
+**Vercel Function** (`api/nim-proxy/[...slug].ts`):
+```typescript
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const { slug } = req.query;
+  const path = Array.isArray(slug) ? slug.join('/') : slug;
+  const target = `https://integrate.api.nvidia.com/v1/${path}`;
+
+  const response = await fetch(target, {
+    method: req.method,
+    headers: {
+      ...req.headers,
+      origin: 'https://integrate.api.nvidia.com',
+    } as any,
+    body: ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body),
+  });
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const data = await response.text();
+  res.status(response.status).send(data);
+}
+```
+
+After deploying your proxy, rebuild Clay with:
+```bash
+VITE_NIM_BASE_URL=https://your-proxy.example.com/v1 npm run build
+```
+
+The build will automatically inject your proxy's origin into the CSP `connect-src` directive.
+
+#### Option 2: Use a local server
+
+Switch to **Local server** in Settings and run Ollama, LM Studio, vLLM, or llama.cpp on your machine. This avoids CORS entirely since requests go to `localhost`.
+
+For Ollama, you may need to enable CORS:
+```bash
+OLLAMA_ORIGINS="*" ollama serve
+```
+
+---
+
 ## Workflow
 
 1. **Routes** the question to one of three sources (vectorstore / data / websearch)

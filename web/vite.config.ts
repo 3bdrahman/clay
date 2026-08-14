@@ -33,8 +33,48 @@ const proxyConfig = {
   },
 };
 
+function cspPlugin() {
+  return {
+    name: 'csp-inject',
+    transformIndexHtml(html: string) {
+      const extraConnectSrc = process.env.VITE_CSP_EXTRA_CONNECT_SRC?.trim();
+      const nimBaseUrl = process.env.VITE_NIM_BASE_URL?.trim();
+
+      const connectSrc = [
+        "'self'",
+        'http://localhost:*',
+        'http://127.0.0.1:*',
+        'https://integrate.api.nvidia.com',
+        'https://*.nvidia.com',
+        'https://duckduckgo.com',
+        'https://*.duckduckgo.com',
+        'https://google.serper.dev',
+      ];
+
+      if (nimBaseUrl && !nimBaseUrl.startsWith('/')) {
+        try {
+          const url = new URL(nimBaseUrl);
+          connectSrc.push(url.origin);
+        } catch {
+        }
+      }
+
+      if (extraConnectSrc) {
+        connectSrc.push(...extraConnectSrc.split(',').map(s => s.trim()).filter(Boolean));
+      }
+
+      const csp = `default-src 'self'; connect-src ${connectSrc.join(' ')}; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`;
+
+      return html.replace(
+        '<meta http-equiv="Content-Security-Policy" content="%CSP%" />',
+        `<meta http-equiv="Content-Security-Policy" content="${csp}" />`
+      );
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cspPlugin()],
   server: {
     proxy: proxyConfig,
   },
