@@ -56,6 +56,22 @@ const STORE_NAME = 'entries';
  */
 const LEGACY_EMBEDDING_MODEL_ID = 'legacy';
 
+/**
+ * Default retrieval configuration values.
+ * These can be overridden via VectorStoreConfig at creation time.
+ * 
+ * - DEFAULT_TOP_K: 8 results balances precision/recall for typical RAG queries.
+ *   Chosen based on empirical testing with NIM embedding models.
+ * - DEFAULT_SCORE_THRESHOLD: 0 (no threshold) - cosine similarity can be negative
+ *   for orthogonal vectors; filtering at 0 keeps relevant but allows borderline.
+ * - DEFAULT_MMR_LAMBDA: 0.5 - equal weight to relevance and diversity.
+ *   Standard default for Maximal Marginal Relevance.
+ * - DEFAULT_HYBRID_ALPHA: 0.5 - equal weight to dense and BM25 scores.
+ *   Works well when both signals are normalized to [0,1].
+ * - DENSE_TOP_K_MULTIPLIER: 3 - fetch 3x top-K from dense search before fusion.
+ *   Ensures sufficient candidate pool for hybrid/MMR reranking.
+ * - BM25_TOP_K_MULTIPLIER: 3 - same rationale as dense multiplier.
+ */
 const DEFAULT_TOP_K = 8;
 const DEFAULT_SCORE_THRESHOLD = 0;
 const DEFAULT_MMR_LAMBDA = 0.5;

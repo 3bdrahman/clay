@@ -2,7 +2,7 @@
  * In-memory LRU embedding cache keyed by `${modelId}:${textHash}`.
  *
  * The `textHash` is opaque to this module — the caller (T4 embeddings client)
- * computes it (FNV-1a of text) and passes it in. T5 only stores and retrieves
+ * computes it (SHA-256 of text) and passes it in. T5 only stores and retrieves
  * by the provided composite key. No localStorage, no IndexedDB; intra-session only.
  *
  * LRU semantics rely on JS Map insertion order: on a cache hit, we `delete` then

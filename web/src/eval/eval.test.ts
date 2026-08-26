@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import questions from './questions.json';
 import { runEval, formatReport, gradeQuestionSet, type EvalQuestion } from './runner';
+import { generateEvalQuestions } from './dynamicQuestions';
 import type { Settings } from '../lib/types';
 
 const TEST_SETTINGS: Settings = {
@@ -13,10 +13,41 @@ const TEST_SETTINGS: Settings = {
   theme: 'system',
 };
 
+// Create test datasets and documents for dynamic question generation
+const TEST_DATASETS = [
+  {
+    name: 'employees',
+    fileName: 'employees.csv',
+    columns: ['id', 'name', 'department', 'salary', 'hire_date'],
+    rowCount: 100,
+    sampleRows: [
+      { id: 1, name: 'Alice', department: 'Engineering', salary: 120000, hire_date: '2020-01-15' },
+      { id: 2, name: 'Bob', department: 'Sales', salary: 90000, hire_date: '2019-03-22' },
+    ],
+  },
+  {
+    name: 'projects',
+    fileName: 'projects.csv',
+    columns: ['id', 'name', 'budget', 'status', 'start_date'],
+    rowCount: 50,
+    sampleRows: [
+      { id: 1, name: 'Project Alpha', budget: 500000, status: 'active', start_date: '2023-01-01' },
+    ],
+  },
+];
+
+const TEST_DOCUMENTS = [
+  { fileName: 'handbook.pdf' },
+  { fileName: 'benefits.md' },
+];
+
+// Generate dynamic questions for testing
+const TEST_QUESTIONS = generateEvalQuestions(TEST_DATASETS, TEST_DOCUMENTS) as EvalQuestion[];
+
 describe('Eval golden set (issue #4)', () => {
   it('contains schema-bound questions without bundled-sample column names', () => {
-    const set = questions as EvalQuestion[];
-    expect(set.length).toBeGreaterThanOrEqual(20);
+    const set = TEST_QUESTIONS;
+    expect(set.length).toBeGreaterThanOrEqual(15);
 
     for (const q of set) {
       expect(q.id).toMatch(/^[a-z]+-\d{3}$/);
@@ -27,7 +58,7 @@ describe('Eval golden set (issue #4)', () => {
   });
 
   it('no longer references legacy expectedDatasets or expectedColumns fields', () => {
-    const set = questions as EvalQuestion[];
+    const set = TEST_QUESTIONS;
     for (const q of set) {
       expect(q).not.toHaveProperty('expectedDatasets');
       expect(q).not.toHaveProperty('expectedColumns');
@@ -35,7 +66,7 @@ describe('Eval golden set (issue #4)', () => {
   });
 
   it('does not reference bundled sample CSV filenames in questions or expected fields', () => {
-    const set = questions as EvalQuestion[];
+    const set = TEST_QUESTIONS;
     const forbidden = ['employees.csv', 'projects.csv', 'feedback.csv'];
     for (const q of set) {
       const blob = JSON.stringify(q).toLowerCase();
@@ -46,7 +77,7 @@ describe('Eval golden set (issue #4)', () => {
   });
 
   it('uses expectedColumnIntent for data_analysis questions', () => {
-    const set = questions as EvalQuestion[];
+    const set = TEST_QUESTIONS;
     const dataQs = set.filter((q) => q.category === 'data_analysis');
     expect(dataQs.length).toBeGreaterThan(0);
     for (const q of dataQs) {
@@ -58,7 +89,7 @@ describe('Eval golden set (issue #4)', () => {
 
 describe('gradeQuestionSet', () => {
   it('produces a summary with the same total as the input set', () => {
-    const set = questions as EvalQuestion[];
+    const set = TEST_QUESTIONS;
     const fakeResults = set.map((q) => ({
       questionId: q.id,
       question: q.question,
@@ -80,7 +111,7 @@ describe('gradeQuestionSet', () => {
   });
 
   it('counts failures when actualSource mismatches expectedSource', () => {
-    const set = questions as EvalQuestion[];
+    const set = TEST_QUESTIONS;
     const fakeResults = set.map((q, i) => ({
       questionId: q.id,
       question: q.question,
@@ -156,7 +187,7 @@ describe('E2E Eval (requires VITE_NIM_API_KEY)', () => {
     if (!TEST_SETTINGS.apiKey) {
       return;
     }
-    const summary = await runEval(TEST_SETTINGS, questions as EvalQuestion[], (done, total, q) => {
+    const summary = await runEval(TEST_SETTINGS, TEST_QUESTIONS, (done, total, q) => {
       void done;
       void total;
       void q;

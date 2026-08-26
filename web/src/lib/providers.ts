@@ -2,15 +2,38 @@
 
 // NIM only serves CORS headers for build.nvidia.com. To make the 100%
 // client-side app work in dev, vite.config.ts proxies /nim-api → NIM.
-// On Netlify, the netlify.toml redirects /nim-api/* to the Netlify Function.
+// On Netlify/Cloudflare, a Worker proxy handles CORS.
 // In production on other hosts, set VITE_NIM_BASE_URL to your edge proxy.
 const NIM_FALLBACK_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 
-function isNetlify(): boolean {
+// Cloudflare Worker proxy URL for NIM CORS bypass in production.
+// Configure via VITE_CLOUDFLARE_PROXY_URL at build time.
+// Falls back to a documented default for the official clay-rag.netlify.app deployment.
+function resolveCloudflareProxy(): string {
+  const envUrl = (import.meta.env.VITE_CLOUDFLARE_PROXY_URL as string | undefined)?.trim();
+  if (envUrl) return envUrl;
+  // Default to the official Clay proxy for the primary deployment.
+  // Override at build time for custom deployments.
+  return 'https://clay-nim-proxy.mixed-account.workers.dev';
+}
+
+function isBuildNvidia(): boolean {
   try {
     if (typeof window === 'undefined') return false;
-    return window.location.hostname.endsWith('.netlify.app') || 
-           window.location.hostname === '3bdrahman.github.io';
+    return window.location.hostname === 'build.nvidia.com';
+  } catch {
+    return false;
+  }
+}
+
+function isNetlifyOrCloudflare(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    const h = window.location.hostname;
+    return h.endsWith('.netlify.app') || 
+           h.endsWith('.cloudflare.workers.dev') ||
+           h === 'clay-rag.netlify.app' ||
+           h === '3bdrahman.github.io';
   } catch {
     return false;
   }
@@ -24,7 +47,8 @@ function resolveNimBaseUrl(): string {
                   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
   if (import.meta.env.DEV || isLocal) return '/nim-api';
-  if (isNetlify()) return '/nim-api'; // Netlify Function proxy via redirect
+  if (isBuildNvidia()) return NIM_FALLBACK_BASE_URL;
+  if (isNetlifyOrCloudflare()) return resolveCloudflareProxy();
   return NIM_FALLBACK_BASE_URL;
 }
 

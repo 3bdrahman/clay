@@ -1,18 +1,12 @@
 // ExampleQuestions — quick-start prompts showcasing each path
 
 import { useAppStore } from '../store';
-import { deriveDataQueries, deriveDocumentQueries } from '../lib/exampleQueries';
+import { deriveDataQueries, deriveDocumentQueries, deriveWebQueries } from '../lib/exampleQueries';
 
 interface Props {
   onSelect: (q: string) => void;
   onLoadSample?: () => void;
 }
-
-const WEB_QUESTIONS = [
-  'What are the latest trends in AI for business?',
-  'Compare AWS vs Azure for ML workloads',
-  'What are the best practices for vector search?',
-];
 
 export function ExampleQuestions({ onSelect, onLoadSample }: Props) {
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
@@ -20,6 +14,7 @@ export function ExampleQuestions({ onSelect, onLoadSample }: Props) {
   const hasData = sandboxDatasets.length > 0;
   const hasDocs = sandboxDocuments.length > 0;
   const dataQuestions = deriveDataQueries(sandboxDatasets);
+  const webQuestions = deriveWebQueries();
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -64,7 +59,7 @@ export function ExampleQuestions({ onSelect, onLoadSample }: Props) {
         category="Web Search"
         color="text-amber-600 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400"
         icon="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"
-        questions={WEB_QUESTIONS}
+        questions={webQuestions}
         onSelect={onSelect}
       />
     </div>

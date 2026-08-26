@@ -1,18 +1,17 @@
 /**
  * Model classification patterns used by the dynamic model picker.
  *
+ * Patterns are loaded from `modelPatterns.config.json` at build time (via Vite import)
+ * with hardcoded defaults as fallback. This allows updating model preferences without
+ * code changes by replacing the JSON config file.
+ *
  * Each pattern set is a list of `{ pattern, points }` entries that contribute
- * to a model's score when picked for a task. Extracted from the legacy
- * monolithic `models.ts` so the heuristics are:
- *
- *   1. Inspectable — easy to see at a glance which model families win.
- *   2. Editable   — adding a new preferred model family is a one-line change.
- *   3. Testable   — each rule is a pure function of the model ID.
- *
- * The pattern matcher is intentionally regex-based so we can match model
- * identifiers the catalog hasn't seen yet (e.g. new NIM releases) by family
- * suffix or size class.
+ * to a model's score when picked for a task. The pattern matcher is intentionally
+ * regex-based so we can match model identifiers the catalog hasn't seen yet
+ * (e.g. new NIM releases) by family suffix or size class.
  */
+
+import modelPatternsConfig from './modelPatterns.config.json?raw';
 
 export interface ScoreRule {
   /** Human-readable description, surfaced in test failure messages. */
@@ -23,7 +22,21 @@ export interface ScoreRule {
   readonly points: number;
 }
 
-export const CHAT_PATTERNS: readonly ScoreRule[] = [
+export interface ModelPatternsConfig {
+  version: number;
+  chatPatterns: Array<{ family: string; pattern: string; points: number }>;
+  codePatterns: Array<{ family: string; pattern: string; points: number }>;
+  embeddingPatterns: Array<{ family: string; pattern: string; points: number }>;
+  embeddingDetect: string[];
+  codeDetect: string[];
+  safetyDetect: string[];
+  visionDetect: string[];
+  chatDetect: string[];
+  sizePatterns: Array<{ class: 'huge' | 'large' | 'medium' | 'small' | 'tiny'; patterns: string[] }>;
+}
+
+// Hardcoded defaults matching the config file - used as fallback if config fails to load
+const DEFAULT_CHAT_PATTERNS: readonly ScoreRule[] = [
   { family: 'meta-llama-3.3',          pattern: /^meta\/llama-3\.3-/,                     points: 30 },
   { family: 'meta-llama-3.1-70b-8b',   pattern: /^meta\/llama-3\.1-(70b|8b)/,              points: 25 },
   { family: 'mistral-large-2',         pattern: /^mistralai\/mistral-large-2/,             points: 28 },
@@ -45,7 +58,7 @@ export const CHAT_PATTERNS: readonly ScoreRule[] = [
   { family: 'zamba',                   pattern: /^zyphra\/zamba/,                          points: 12 },
 ] as const;
 
-export const CODE_PATTERNS: readonly ScoreRule[] = [
+const DEFAULT_CODE_PATTERNS: readonly ScoreRule[] = [
   { family: 'codestral-22b',           pattern: /codestral-22b/,                           points: 50 },
   { family: 'codestral',               pattern: /codestral/,                               points: 45 },
   { family: 'codellama-70b',           pattern: /codellama-70b/,                           points: 35 },
@@ -62,7 +75,7 @@ export const CODE_PATTERNS: readonly ScoreRule[] = [
   { family: 'size-70b',                pattern: /70b/,                                     points: 12 },
 ] as const;
 
-export const EMBEDDING_PATTERNS: readonly ScoreRule[] = [
+const DEFAULT_EMBEDDING_PATTERNS: readonly ScoreRule[] = [
   { family: 'nv-embedqa-e5',           pattern: /nv-embedqa-e5/,                           points: 50 },
   { family: 'nv-embedqa-mistral',      pattern: /nv-embedqa-mistral/,                      points: 35 },
   { family: 'embedqa',                 pattern: /embedqa/,                                 points: 30 },
@@ -76,27 +89,108 @@ export const EMBEDDING_PATTERNS: readonly ScoreRule[] = [
   { family: 'embed-qa-4',              pattern: /embed-qa-4/,                              points: 5  },
 ] as const;
 
-export const EMBEDDING_DETECT: readonly RegExp[] = [/embed|embedqa/i];
-export const CODE_DETECT: readonly RegExp[] = [
+const DEFAULT_EMBEDDING_DETECT: readonly RegExp[] = [/embed|embedqa/i];
+const DEFAULT_CODE_DETECT: readonly RegExp[] = [
   /codestral|codellama|codegemma|granite.*code|deepseek-coder|nemotron.*code|starcoder|embedcode/,
 ];
-export const SAFETY_DETECT: readonly RegExp[] = [
+const DEFAULT_SAFETY_DETECT: readonly RegExp[] = [
   /guard|safety|content-safety|topic-control|reward|parse|translate|detector|calibration|neva|vila|ai-synthetic|cosmo/,
 ];
-export const VISION_DETECT: readonly RegExp[] = [
+const DEFAULT_VISION_DETECT: readonly RegExp[] = [
   /vision|vl$|clip|video|diffusion|deplot|recurrent|cosmos/,
 ];
-export const CHAT_DETECT: readonly RegExp[] = [
+const DEFAULT_CHAT_DETECT: readonly RegExp[] = [
   /instruct|chat|^.*\/gpt-|it$|nemotron|moe|reasoning|creative|magistral|laguna|kimi|step-|glm|inkling|palmyra|sea-lion|yi-|zamba|granite|gemma/,
 ];
 
-export const SIZE_PATTERNS: ReadonlyArray<{ class: 'huge' | 'large' | 'medium' | 'small' | 'tiny'; patterns: RegExp[] }> = [
+const DEFAULT_SIZE_PATTERNS: ReadonlyArray<{ class: 'huge' | 'large' | 'medium' | 'small' | 'tiny'; patterns: RegExp[] }> = [
   { class: 'huge',   patterns: [/ultra|550b|340b|253b|122b/] },
   { class: 'large',  patterns: [/120b|90b|72b|70b|^.*large/] },
   { class: 'medium', patterns: [/49b|51b|34b|30b|22b|15b|14b|13b|12b|11b/] },
   { class: 'small',  patterns: [/8b|7b|nano/] },
   { class: 'tiny',   patterns: [/mini|4b|3b|2b|1b/] },
 ] as const;
+
+function parseConfig(json: string): ModelPatternsConfig | null {
+  try {
+    const parsed = JSON.parse(json);
+    // Validate required fields
+    if (!parsed.version || !parsed.chatPatterns || !parsed.codePatterns || !parsed.embeddingPatterns) {
+      return null;
+    }
+    return parsed as ModelPatternsConfig;
+  } catch {
+    return null;
+  }
+}
+
+function buildPatterns(config: ModelPatternsConfig | null) {
+  const useDefaults = !config;
+
+  const chatRules: readonly ScoreRule[] = useDefaults
+    ? DEFAULT_CHAT_PATTERNS
+    : config.chatPatterns.map(r => ({ family: r.family, pattern: new RegExp(r.pattern), points: r.points }));
+
+  const codeRules: readonly ScoreRule[] = useDefaults
+    ? DEFAULT_CODE_PATTERNS
+    : config.codePatterns.map(r => ({ family: r.family, pattern: new RegExp(r.pattern), points: r.points }));
+
+  const embeddingRules: readonly ScoreRule[] = useDefaults
+    ? DEFAULT_EMBEDDING_PATTERNS
+    : config.embeddingPatterns.map(r => ({ family: r.family, pattern: new RegExp(r.pattern), points: r.points }));
+
+  const embeddingDetect: readonly RegExp[] = useDefaults
+    ? DEFAULT_EMBEDDING_DETECT
+    : config.embeddingDetect.map(p => new RegExp(p, 'i'));
+
+  const codeDetect: readonly RegExp[] = useDefaults
+    ? DEFAULT_CODE_DETECT
+    : config.codeDetect.map(p => new RegExp(p));
+
+  const safetyDetect: readonly RegExp[] = useDefaults
+    ? DEFAULT_SAFETY_DETECT
+    : config.safetyDetect.map(p => new RegExp(p));
+
+  const visionDetect: readonly RegExp[] = useDefaults
+    ? DEFAULT_VISION_DETECT
+    : config.visionDetect.map(p => new RegExp(p));
+
+  const chatDetect: readonly RegExp[] = useDefaults
+    ? DEFAULT_CHAT_DETECT
+    : config.chatDetect.map(p => new RegExp(p));
+
+  const sizePatterns: ReadonlyArray<{ class: 'huge' | 'large' | 'medium' | 'small' | 'tiny'; patterns: RegExp[] }> = useDefaults
+    ? DEFAULT_SIZE_PATTERNS
+    : config.sizePatterns.map(s => ({ class: s.class, patterns: s.patterns.map(p => new RegExp(p)) }));
+
+  return {
+    chatRules,
+    codeRules,
+    embeddingRules,
+    embeddingDetect,
+    codeDetect,
+    safetyDetect,
+    visionDetect,
+    chatDetect,
+    sizePatterns,
+  };
+}
+
+// Load and parse config at module initialization
+const config = parseConfig(modelPatternsConfig);
+const patterns = buildPatterns(config);
+
+export const CHAT_PATTERNS: readonly ScoreRule[] = patterns.chatRules;
+export const CODE_PATTERNS: readonly ScoreRule[] = patterns.codeRules;
+export const EMBEDDING_PATTERNS: readonly ScoreRule[] = patterns.embeddingRules;
+
+export const EMBEDDING_DETECT: readonly RegExp[] = patterns.embeddingDetect;
+export const CODE_DETECT: readonly RegExp[] = patterns.codeDetect;
+export const SAFETY_DETECT: readonly RegExp[] = patterns.safetyDetect;
+export const VISION_DETECT: readonly RegExp[] = patterns.visionDetect;
+export const CHAT_DETECT: readonly RegExp[] = patterns.chatDetect;
+
+export const SIZE_PATTERNS: ReadonlyArray<{ class: 'huge' | 'large' | 'medium' | 'small' | 'tiny'; patterns: RegExp[] }> = patterns.sizePatterns;
 
 /** Apply every rule in `rules` to a lowercased model id and sum the points. */
 export function scoreByRules(idLower: string, rules: readonly ScoreRule[]): number {

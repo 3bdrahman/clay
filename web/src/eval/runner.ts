@@ -17,6 +17,8 @@ import {
 } from '../lib/models';
 import { resolveProviderEndpoint } from '../lib/providers';
 import type { Settings } from '../lib/types';
+import type { DatasetSummary, DocumentSummary } from '../lib/exampleQueries';
+import { generateEvalQuestions } from './dynamicQuestions';
 
 export interface EvalQuestion {
   id: string;
@@ -114,17 +116,46 @@ function computeRecallAtK(relevant: number, total: number): number {
   return Math.min(1, relevant / total);
 }
 
+/**
+ * Generate evaluation questions dynamically from actual loaded data.
+ * If questions array is provided, use it (backwards compatibility).
+ * Otherwise, generate questions based on the datasets and documents.
+ */
+async function getEvalQuestions(
+  _settings: Settings,
+  providedQuestions: EvalQuestion[] | undefined,
+  datasets: DatasetSummary[],
+  documents: DocumentSummary[]
+): Promise<EvalQuestion[]> {
+  if (providedQuestions && providedQuestions.length > 0) {
+    return providedQuestions;
+  }
+  return generateEvalQuestions(datasets, documents);
+}
+
 export async function runEval(
   settings: Settings,
-  questions: EvalQuestion[],
+  questions: EvalQuestion[] | undefined,
   onProgress?: (done: number, total: number, current: EvalQuestion) => void,
 ): Promise<EvalSummary> {
   const services = await createServices(settings);
+  
+  // Get datasets and documents for dynamic question generation
+  const { metadata } = await loadSampleDatasets();
+  const datasets: DatasetSummary[] = Object.entries(metadata).map(([name, meta]) => ({
+    name,
+    fileName: name + '.csv',
+    columns: meta.columns,
+    rowCount: meta.rowCount,
+  }));
+  const documents: DocumentSummary[] = []; // Would be populated from vectorstore in real use
+
+  const evalQuestions = await getEvalQuestions(settings, questions, datasets, documents);
   const results: EvalResult[] = [];
 
-  for (let i = 0; i < questions.length; i++) {
-    const q = questions[i];
-    onProgress?.(i, questions.length, q);
+  for (let i = 0; i < evalQuestions.length; i++) {
+    const q = evalQuestions[i];
+    onProgress?.(i, evalQuestions.length, q);
 
     const start = Date.now();
     let actualSource: string | undefined;

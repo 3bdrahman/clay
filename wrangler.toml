@@ -1,0 +1,13 @@
+name = "clay-nim-proxy"
+main = "workers/nim-proxy.ts"
+compatibility_date = "2024-01-01"
+
+[build]
+  command = "npm run build"
+  cwd = "web"
+
+[build.upload]
+  format = "service-worker"
+
+[observability]
+  enabled = true

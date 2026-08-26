@@ -3,3 +3,5 @@ faiss_index
 .omo/
 .playwright-mcp/
 *.local
+# Local Netlify folder
+.netlify
