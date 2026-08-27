@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { createLLMClient } from './llm';
-import { NIM_BASE_URL } from './providers';
 import {
   InvalidApiKeyError,
   RateLimitError,
@@ -65,7 +64,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'nvapi-abc' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'nvapi-abc' });
     await client.invoke({ messages: [{ role: 'user', content: 'hi' }] });
 
     const callHeaders = (mockFetch.mock.calls[0][1] as { headers: Record<string, string> }).headers;
@@ -94,7 +93,7 @@ describe('createLLMClient', () => {
       }),
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'test-key', temperature: 0.3 });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'test-key', temperature: 0.3 });
     const resp = await client.invoke({
       system: 'You are helpful',
       messages: [{ role: 'user', content: 'Hi' }],
@@ -120,7 +119,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [{ message: { content: 'Hi' } }] }),
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', temperature: 0.7 });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', temperature: 0.7 });
     await client.invoke({ messages: [{ role: 'user', content: 'Hi' }] });
 
     const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
@@ -133,7 +132,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [{ message: { content: '{"key": "value"}' } }] }),
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
     await client.invoke({
       messages: [{ role: 'user', content: 'Output JSON' }],
       jsonMode: true,
@@ -149,7 +148,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [{ message: { content: 'Hi' } }] }),
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
     await client.invoke({
       messages: [{ role: 'user', content: 'Hi' }],
       maxTokens: 100,
@@ -169,12 +168,12 @@ describe('createLLMClient', () => {
       text: async () => 'Invalid API key',
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(InvalidApiKeyError);
     await expect(client.invoke({ messages: [] })).rejects.toThrow('Invalid API key for NVIDIA NIM');
   });
 
-  it('throws InvalidApiKeyError on 403 response', async () => {
+  it('throws InvalidApiKeyError on 403 response (forbidden)', async () => {
     mockFetch.mockResolvedValue({
       ok: false,
       status: 403,
@@ -182,7 +181,7 @@ describe('createLLMClient', () => {
       text: async () => 'Forbidden',
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(InvalidApiKeyError);
     await expect(client.invoke({ messages: [] })).rejects.toThrow('API key rejected');
   });
@@ -196,7 +195,7 @@ describe('createLLMClient', () => {
       text: async () => 'Rate limited',
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(RateLimitError);
     await expect(client.invoke({ messages: [] })).rejects.toThrow('rate limit exceeded');
   });
@@ -209,7 +208,7 @@ describe('createLLMClient', () => {
       text: async () => 'Server error',
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(ProviderUnreachableError);
     await expect(client.invoke({ messages: [] })).rejects.toThrow('Cannot reach');
   });
@@ -222,7 +221,7 @@ describe('createLLMClient', () => {
       text: async () => 'Unavailable',
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(ProviderUnreachableError);
     const error = await client.invoke({ messages: [] }).catch(e => e);
     expect(error.retryable).toBe(true);
@@ -236,7 +235,7 @@ describe('createLLMClient', () => {
       text: async () => 'Model not found',
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(ModelNotFoundError);
   });
 
@@ -248,14 +247,14 @@ describe('createLLMClient', () => {
       text: async () => 'Bad request',
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(GenerationFailedError);
   });
 
   it('throws ProviderUnreachableError on network error', async () => {
     mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(ProviderUnreachableError);
   });
 
@@ -263,7 +262,7 @@ describe('createLLMClient', () => {
     const abortError = new DOMException('Aborted', 'AbortError');
     mockFetch.mockRejectedValue(abortError);
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
     await expect(client.stream({ messages: [] }, () => {})).rejects.toThrow(StreamInterruptedError);
   });
 
@@ -271,7 +270,7 @@ describe('createLLMClient', () => {
     const controller = new AbortController();
     controller.abort();
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
     await expect(client.stream({ messages: [] }, () => {}, controller.signal)).rejects.toThrow(StreamInterruptedError);
   });
 
@@ -281,7 +280,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [] }),
     });
 
-    const client = createLLMClient({ baseUrl: NIM_BASE_URL, apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(GenerationFailedError);
   });
 });

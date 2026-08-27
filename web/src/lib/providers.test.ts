@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveProviderEndpoint } from './providers';
-import { LOCAL_DEFAULT_BASE_URL, NIM_BASE_URL } from './providers';
+import { resolveProviderEndpoint, LOCAL_DEFAULT_BASE_URL } from './providers';
 import type { Settings } from './types';
 
 const baseSettings: Settings = {
@@ -22,12 +21,19 @@ const baseSettings: Settings = {
   localModels: { chat: '', embeddings: '' },
   localCatalog: [],
   localCatalogFetchedAt: 0,
+  pickedModelsOverride: {
+    routing: '',
+    codeGen: '',
+    answer: '',
+    eval: '',
+    embedding: '',
+  },
 };
 
 describe('resolveProviderEndpoint', () => {
   it('returns NIM base URL and nimApiKey for nim provider', () => {
     const out = resolveProviderEndpoint({ ...baseSettings, provider: 'nim', nimApiKey: 'nvapi-x' });
-    expect(out.baseUrl).toBe(NIM_BASE_URL);
+    expect(out.baseUrl).toBe('https://integrate.api.nvidia.com/v1');
     expect(out.apiKey).toBe('nvapi-x');
     expect(out.providerLabel).toBe('NVIDIA NIM');
   });

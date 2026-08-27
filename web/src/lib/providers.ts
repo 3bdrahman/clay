@@ -1,5 +1,5 @@
-// Provider registry with all supported providers
-// Each provider config includes base URL, API key hints, free tier info, and model discovery endpoint
+// Provider registry - all providers work client-side without proxy (except Ollama CORS)
+// OpenRouter is default - works everywhere with generous free tier
 
 import type { ProviderKind } from './types';
 
@@ -19,59 +19,10 @@ export interface ProviderConfig {
   description: string;
 }
 
-// NIM only serves CORS headers for build.nvidia.com. To make the 100%
-// client-side app work in dev, vite.config.ts proxies /nim-api → NIM.
-// On Netlify/Cloudflare, a Worker proxy handles CORS.
-// In production on other hosts, set VITE_NIM_BASE_URL to your edge proxy.
-const NIM_FALLBACK_BASE_URL = 'https://integrate.api.nvidia.com/v1';
-
-function resolveCloudflareProxy(): string {
-  const envUrl = (import.meta.env.VITE_CLOUDFLARE_PROXY_URL as string | undefined)?.trim();
-  if (envUrl) return envUrl;
-  return 'https://clay-nim-proxy.mixed-account.workers.dev';
-}
-
-function isBuildNvidia(): boolean {
-  try {
-    if (typeof window === 'undefined') return false;
-    return window.location.hostname === 'build.nvidia.com';
-  } catch {
-    return false;
-  }
-}
-
-function isNetlifyOrCloudflare(): boolean {
-  try {
-    if (typeof window === 'undefined') return false;
-    const h = window.location.hostname;
-    return h.endsWith('.netlify.app') ||
-           h.endsWith('.cloudflare.workers.dev') ||
-           h === 'clay-rag.netlify.app' ||
-           h === '3bdrahman.github.io';
-  } catch {
-    return false;
-  }
-}
-
-function resolveNimBaseUrl(): string {
-  const envUrl = (import.meta.env.VITE_NIM_BASE_URL as string | undefined)?.trim();
-  if (envUrl) return envUrl;
-
-  const isLocal = typeof window !== 'undefined' &&
-                  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-
-  if (import.meta.env.DEV || isLocal) return '/nim-api';
-  if (isBuildNvidia()) return NIM_FALLBACK_BASE_URL;
-  if (isNetlifyOrCloudflare()) return resolveCloudflareProxy();
-  return NIM_FALLBACK_BASE_URL;
-}
-
-export const NIM_BASE_URL: string = resolveNimBaseUrl();
-
 export const LOCAL_DEFAULT_BASE_URL = 'http://localhost:11434/v1';
 
 export const LOCAL_PROVIDER_HINT =
-  'Any OpenAI-compatible endpoint — Ollama, LM Studio, vLLM, llama.cpp server.';
+  'Any OpenAI-compatible endpoint — LM Studio, vLLM, llama.cpp server, Jan, GPT4All.';
 
 export const OLLAMA_CORS_HINT =
   'If using Ollama, browser CORS blocks requests unless OLLAMA_ORIGINS is set. ' +
@@ -90,18 +41,6 @@ export function isOllamaUrl(url: string): boolean {
 }
 
 export const PROVIDER_REGISTRY: Record<ProviderKind, ProviderConfig> = {
-  nim: {
-    kind: 'nim',
-    displayName: 'NVIDIA NIM',
-    baseUrl: NIM_BASE_URL,
-    modelsEndpoint: '/models',
-    apiKeyEnvVar: 'VITE_NIM_API_KEY',
-    apiKeyHint: 'nvapi-...',
-    freeTier: true,
-    requiresApiKey: true,
-    apiKeyUrl: 'https://build.nvidia.com/settings/api-keys',
-    description: 'NVIDIA hosted models with free tier. Auto-picks best model per task from live catalog.',
-  },
   openrouter: {
     kind: 'openrouter',
     displayName: 'OpenRouter',
@@ -116,7 +55,7 @@ export const PROVIDER_REGISTRY: Record<ProviderKind, ProviderConfig> = {
       'X-Title': 'Clay RAG',
     },
     apiKeyUrl: 'https://openrouter.ai/keys',
-    description: 'Access 300+ models from all providers. Free tier includes many models. Auto-selects best free model.',
+    description: '300+ models from all providers. Generous free tier. Best all-around choice.',
   },
   groq: {
     kind: 'groq',
@@ -141,6 +80,18 @@ export const PROVIDER_REGISTRY: Record<ProviderKind, ProviderConfig> = {
     requiresApiKey: true,
     apiKeyUrl: 'https://api.together.xyz/settings/api-keys',
     description: 'Open models with fast inference. Free credits on signup. Good model variety.',
+  },
+  nim: {
+    kind: 'nim',
+    displayName: 'NVIDIA NIM',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    modelsEndpoint: '/models',
+    apiKeyEnvVar: 'VITE_NIM_API_KEY',
+    apiKeyHint: 'nvapi-...',
+    freeTier: true,
+    requiresApiKey: true,
+    apiKeyUrl: 'https://build.nvidia.com/settings/api-keys',
+    description: 'NVIDIA hosted models. Only works from build.nvidia.com or via proxy. Not recommended for production deployments.',
   },
   local: {
     kind: 'local',
@@ -172,10 +123,10 @@ export function getProvidersWithFreeTier(): ProviderKind[] {
 
 export function getProviderApiKeyField(kind: ProviderKind): string {
   const fieldMap: Record<ProviderKind, string> = {
-    nim: 'nimApiKey',
     openrouter: 'openrouterApiKey',
     groq: 'groqApiKey',
     together: 'togetherApiKey',
+    nim: 'nimApiKey',
     local: '',
   };
   return fieldMap[kind];

@@ -1,30 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// NVIDIA NIM only serves Access-Control-Allow-Origin: https://build.nvidia.com.
-// To make the 100% client-side app work from any other origin (localhost,
-// GitHub Pages, Netlify, etc.) we proxy /nim-api to NIM in dev. Production
-// deploys must replicate this via a serverless function or edge proxy
-// (Cloudflare Worker, Vercel function, Netlify function, etc.).
-const NIM_PROXY_PREFIX = '/nim-api';
 // DuckDuckGo HTML search returns no CORS headers. Proxying lets the in-browser
-// app reach it. Same caveat as NIM: production needs an edge proxy.
+// app reach it. Production needs an edge proxy.
 const DDG_PROXY_PREFIX = '/ddg';
-// In dev, browser-to-localhost requests are allowed by the CSP above and most
-// local servers (Ollama, LM Studio) set permissive CORS. If a user runs a
-// stricter local server they can point localServerUrl at any origin they want;
-// no Vite proxy is configured for arbitrary localhost targets on purpose.
 
+// In dev, browser-to-localhost requests are allowed by the CSP above and most
+// local servers (LM Studio, vLLM) set permissive CORS. If a user runs a
+// stricter local server they can point localServerUrl at any origin they want;
 const proxyConfig = {
-  [NIM_PROXY_PREFIX]: {
-    target: 'https://integrate.api.nvidia.com/v1',
-    changeOrigin: true,
-    secure: true,
-    rewrite: (path: string) => path.replace(new RegExp(`^${NIM_PROXY_PREFIX}`), ''),
-    headers: {
-      Origin: 'https://integrate.api.nvidia.com',
-    },
-  },
   [DDG_PROXY_PREFIX]: {
     target: 'https://html.duckduckgo.com',
     changeOrigin: true,
@@ -38,26 +22,19 @@ function cspPlugin() {
     name: 'csp-inject',
     transformIndexHtml(html: string) {
       const extraConnectSrc = process.env.VITE_CSP_EXTRA_CONNECT_SRC?.trim();
-      const nimBaseUrl = process.env.VITE_NIM_BASE_URL?.trim();
 
       const connectSrc = [
         "'self'",
         'http://localhost:*',
         'http://127.0.0.1:*',
+        'https://openrouter.ai',
+        'https://api.groq.com',
+        'https://api.together.xyz',
         'https://integrate.api.nvidia.com',
-        'https://*.nvidia.com',
         'https://duckduckgo.com',
         'https://*.duckduckgo.com',
         'https://google.serper.dev',
       ];
-
-      if (nimBaseUrl && !nimBaseUrl.startsWith('/')) {
-        try {
-          const url = new URL(nimBaseUrl);
-          connectSrc.push(url.origin);
-        } catch {
-        }
-      }
 
       if (extraConnectSrc) {
         connectSrc.push(...extraConnectSrc.split(',').map(s => s.trim()).filter(Boolean));

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { createEmbeddingsClient } from './embeddings';
-import { NIM_BASE_URL } from './providers';
 import {
   InvalidApiKeyError,
   RateLimitError,
@@ -27,7 +26,7 @@ describe('createEmbeddingsClient', () => {
 
   it('throws EmbeddingModelMissingError when embedding model is empty', async () => {
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: '',
     });
@@ -50,14 +49,14 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'my-key',
       embeddingModel: 'test-model',
     });
     await client.embed('test');
 
     expect(mockFetch).toHaveBeenCalledWith(
-      `${NIM_BASE_URL}/embeddings`,
+      'https://integrate.api.nvidia.com/v1/embeddings',
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer my-key' }),
       }),
@@ -123,7 +122,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -141,7 +140,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -162,7 +161,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -178,7 +177,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -198,7 +197,7 @@ describe('createEmbeddingsClient', () => {
     );
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -220,7 +219,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -235,7 +234,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -248,7 +247,7 @@ describe('createEmbeddingsClient', () => {
     mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -265,7 +264,7 @@ describe('createEmbeddingsClient', () => {
     } as Record<string, unknown>);
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -296,7 +295,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -319,7 +318,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -347,7 +346,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -378,7 +377,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -403,7 +402,7 @@ describe('createEmbeddingsClient', () => {
     );
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -426,7 +425,7 @@ describe('createEmbeddingsClient', () => {
     );
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -439,7 +438,7 @@ describe('createEmbeddingsClient', () => {
     const huge = Array.from({ length: 7000 }, () => 'word').join(' ');
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -454,7 +453,7 @@ describe('createEmbeddingsClient', () => {
     );
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -469,7 +468,7 @@ describe('createEmbeddingsClient', () => {
     );
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -484,7 +483,7 @@ describe('createEmbeddingsClient', () => {
     );
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'nv-embedqa-e5-v5',
     });
@@ -500,7 +499,7 @@ describe('createEmbeddingsClient', () => {
     );
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'nv-embedqa-e5-v5',
     });
@@ -516,7 +515,7 @@ describe('createEmbeddingsClient', () => {
     );
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'nomic-embed-text',
     });
@@ -540,7 +539,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -560,7 +559,7 @@ describe('createEmbeddingsClient', () => {
     );
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -586,7 +585,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });
@@ -618,7 +617,7 @@ describe('createEmbeddingsClient', () => {
     });
 
     const client = createEmbeddingsClient({
-      baseUrl: NIM_BASE_URL,
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
       apiKey: 'key',
       embeddingModel: 'test-model',
     });

@@ -74,7 +74,7 @@ interface AppState {
 }
 
 const DEFAULT_SETTINGS: Settings = {
-  provider: 'nim',
+  provider: 'openrouter',
   nimApiKey: '',
   openrouterApiKey: '',
   groqApiKey: '',
