@@ -17,11 +17,18 @@ const proxyConfig = {
   },
 };
 
+// GitHub Pages deployment: set BASE_PATH=/<repo-name> at build time
+// For user.github.io repo, use BASE_PATH=/
+const repoName = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? 'clay';
+const isGitHubPages = process.env.DEPLOY_TARGET === 'github-pages';
+const base = isGitHubPages ? `/${repoName}/` : (process.env.BASE_PATH || './');
+
 function cspPlugin() {
   return {
     name: 'csp-inject',
     transformIndexHtml(html: string) {
       const extraConnectSrc = process.env.VITE_CSP_EXTRA_CONNECT_SRC?.trim();
+      const deployUrl = process.env.VITE_DEPLOY_URL?.trim();
 
       const connectSrc = [
         "'self'",
@@ -35,6 +42,14 @@ function cspPlugin() {
         'https://*.duckduckgo.com',
         'https://google.serper.dev',
       ];
+
+      if (deployUrl) {
+        try {
+          const url = new URL(deployUrl);
+          connectSrc.push(url.origin);
+        } catch {
+        }
+      }
 
       if (extraConnectSrc) {
         connectSrc.push(...extraConnectSrc.split(',').map(s => s.trim()).filter(Boolean));
@@ -77,5 +92,5 @@ export default defineConfig({
       },
     },
   },
-  base: process.env.BASE_PATH || './',
+  base,
 });

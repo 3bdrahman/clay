@@ -19,6 +19,15 @@ export interface ProviderConfig {
   description: string;
 }
 
+// Dynamic referer for OpenRouter - can be overridden via VITE_OPENROUTER_REFERER
+// Defaults to the current window origin at runtime
+function getOpenRouterReferer(): string {
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return 'https://clay-rag.netlify.app'; // fallback for SSR/build
+}
+
 export const LOCAL_DEFAULT_BASE_URL = 'http://localhost:11434/v1';
 
 export const LOCAL_PROVIDER_HINT =
@@ -51,7 +60,6 @@ export const PROVIDER_REGISTRY: Record<ProviderKind, ProviderConfig> = {
     freeTier: true,
     requiresApiKey: true,
     defaultHeaders: {
-      'HTTP-Referer': 'https://clay-rag.netlify.app',
       'X-Title': 'Clay RAG',
     },
     apiKeyUrl: 'https://openrouter.ai/keys',
@@ -155,10 +163,15 @@ export function resolveProviderEndpoint(settings: Settings): ProviderEndpoint {
 
   const apiKey = (settings as unknown as Record<string, string>)[apiKeyField] || settings.apiKey || '';
 
+  const defaultHeaders = { ...config.defaultHeaders };
+  if (settings.provider === 'openrouter') {
+    defaultHeaders['HTTP-Referer'] = getOpenRouterReferer();
+  }
+
   return {
     baseUrl: config.baseUrl,
     apiKey,
     providerLabel: config.displayName,
-    defaultHeaders: config.defaultHeaders,
+    defaultHeaders,
   };
 }
