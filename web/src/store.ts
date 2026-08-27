@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { ChatMessage, Settings, ModelInfo } from './lib/types';
 import { LOCAL_DEFAULT_BASE_URL } from './lib/providers';
 import { migrateLegacyLocalModels, type LegacyLocalModelPicks } from './lib/localModelsMigrate';
+import type { ProviderKind } from './lib/types';
 
 export interface SandboxDataset {
   name: string;
@@ -74,7 +75,13 @@ interface AppState {
 
 const DEFAULT_SETTINGS: Settings = {
   provider: 'nim',
-  apiKey: '',
+  nimApiKey: '',
+  openrouterApiKey: '',
+  groqApiKey: '',
+  togetherApiKey: '',
+  openaiApiKey: '',
+  anthropicApiKey: '',
+  apiKey: '', // legacy field for migration
   embeddingApiKey: '',
   webSearchProvider: 'duckduckgo',
   serperApiKey: '',
@@ -89,6 +96,13 @@ const DEFAULT_SETTINGS: Settings = {
   },
   localCatalog: [],
   localCatalogFetchedAt: 0,
+  pickedModelsOverride: {
+    routing: '',
+    codeGen: '',
+    answer: '',
+    eval: '',
+    embedding: '',
+  },
 };
 
 function trimMessage(msg: ChatMessage): ChatMessage {
@@ -293,10 +307,24 @@ export const useAppStore = create<AppState>()(
         const persistedLocalModels = (state.settings as {
           localModels?: Partial<LegacyLocalModelPicks>;
         } | undefined)?.localModels;
+        const persistedSettings = state.settings ?? {};
+
+        // Migrate legacy single apiKey to provider-specific key
+        const legacyApiKey = persistedSettings.apiKey as string | undefined;
+        const provider = (persistedSettings.provider as ProviderKind) ?? 'nim';
+        const providerApiKeyField = {
+          nim: 'nimApiKey',
+          openrouter: 'openrouterApiKey',
+          groq: 'groqApiKey',
+          together: 'togetherApiKey',
+          local: '',
+        }[provider];
+
         const mergedSettings: Settings = {
           ...DEFAULT_SETTINGS,
-          ...((state.settings as Omit<Partial<Settings>, 'localModels'> | undefined) ?? {}),
+          ...((persistedSettings as Omit<Partial<Settings>, 'localModels'> | undefined) ?? {}),
           localModels: migrateLegacyLocalModels(persistedLocalModels),
+          [providerApiKeyField]: legacyApiKey ?? '',
         };
 
         let conversations: Conversation[] = [];

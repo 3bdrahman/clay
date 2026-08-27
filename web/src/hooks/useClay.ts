@@ -440,7 +440,15 @@ export function useClay(): {
     if (settings.provider === 'local') {
       return pickLocalModels(settings.localModels);
     }
-    return resolveModels(settings, availableModels).picked;
+    const autoPicked = resolveModels(settings, availableModels).picked;
+    const override = settings.pickedModelsOverride || {};
+    return {
+      routing: override.routing || autoPicked.routing,
+      codeGen: override.codeGen || autoPicked.codeGen,
+      answer: override.answer || autoPicked.answer,
+      eval: override.eval || autoPicked.eval,
+      embedding: override.embedding || autoPicked.embedding,
+    };
   }, [settings, availableModels]);
 
   return {

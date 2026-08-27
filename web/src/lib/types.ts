@@ -7,12 +7,28 @@ export interface LocalModelPicks {
   embeddings: string;
 }
 
-export type ProviderKind = 'nim' | 'local';
+export type ProviderKind = 'nim' | 'openrouter' | 'groq' | 'together' | 'local';
+
+export interface PickedModelsOverride {
+  routing?: string;
+  codeGen?: string;
+  answer?: string;
+  eval?: string;
+  embedding?: string;
+}
 
 export interface Settings {
   provider: ProviderKind;
-  apiKey: string;
+  // Provider API keys - each provider has its own key
+  nimApiKey: string;
+  openrouterApiKey: string;
+  groqApiKey: string;
+  togetherApiKey: string;
+  openaiApiKey: string;
+  anthropicApiKey: string;
   embeddingApiKey: string;
+  // Legacy field for backward compat (migration)
+  apiKey: string;
   webSearchProvider: 'serper' | 'duckduckgo' | 'none';
   serperApiKey: string;
   temperature: number;
@@ -23,6 +39,8 @@ export interface Settings {
   localModels: LocalModelPicks;
   localCatalog: ModelInfo[];
   localCatalogFetchedAt: number;
+  // User-overridable model selections per task (empty = auto-pick)
+  pickedModelsOverride: PickedModelsOverride;
 }
 
 export interface Document {

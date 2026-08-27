@@ -1,6 +1,7 @@
 import { useAppStore } from '../store';
 import type { PickedModels } from '../lib/models';
 import { useConfirm } from '../hooks/useConfirm';
+import type { ProviderKind } from '../lib/types';
 
 function countActivateMessages(state: { conversations: { id: string; messages: unknown[] }[]; activeConversationId: string | null }): number {
   const conv = state.conversations.find(c => c.id === state.activeConversationId);
@@ -12,7 +13,7 @@ interface Props {
   onOpenData: () => void;
   onToggleSidebar: () => void;
   pickedModels: PickedModels;
-  provider: 'nim' | 'local';
+  provider: ProviderKind;
 }
 
 export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedModels, provider }: Props) {
@@ -47,16 +48,25 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
     settings.theme === 'dark' ? 'Dark theme' :
     'System theme';
 
+  // Provider display mapping for the header
+  const providerDisplayNames: Record<ProviderKind, string> = {
+    nim: 'NVIDIA NIM',
+    openrouter: 'OpenRouter',
+    groq: 'Groq',
+    together: 'Together AI',
+    local: 'Local server',
+  };
+
   const isLocal = provider === 'local';
-  const hasKey = !isLocal && settings.apiKey.length > 0;
+  const apiKeyField = provider === 'nim' ? 'nimApiKey' :
+    provider === 'openrouter' ? 'openrouterApiKey' :
+    provider === 'groq' ? 'groqApiKey' :
+    provider === 'together' ? 'togetherApiKey' : '';
+  const hasKey = !isLocal && ((settings as unknown as Record<string, string>)[apiKeyField]?.length ?? 0) > 0;
   const hasLocalModel = isLocal && !!pickedModels.answer;
   const connected = hasKey || hasLocalModel;
   const answerModel = pickedModels.answer ?? (isLocal ? 'No local answer model set' : availableModels[0]?.id ?? 'Loading models…');
-  const providerLabel = isLocal ? 'Local server' : 'NVIDIA NIM';
-  const providerDocsUrl = isLocal
-    ? (settings.localServerUrl || '#')
-    : 'https://docs.nvidia.com/nim/';
-  const providerDocsLabel = isLocal ? 'Local server' : 'NVIDIA NIM docs';
+  const providerLabel = providerDisplayNames[provider];
 
   return (
     <header className="border-b border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-900 px-4 py-3 flex items-center justify-between">
@@ -118,21 +128,8 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
            </svg>
          </button>
         )}
-         <a
-           href={providerDocsUrl}
-           target="_blank"
-           rel="noreferrer"
-           className="px-2.5 py-1.5 text-xs text-ink-600 dark:text-ink-300 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition hidden sm:inline-flex items-center gap-1"
-           title={providerDocsLabel}
-           aria-label={`Open ${providerDocsLabel} in a new tab`}
-         >
-           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-             <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-           {providerDocsLabel}
-        </a>
-         <button
-           onClick={cycleTheme}
+<button
+            onClick={cycleTheme}
            className="px-2.5 py-1.5 text-xs text-ink-600 dark:text-ink-300 hover:bg-ink-100 dark:hover:bg-ink-800 rounded-lg transition"
            title={themeLabel}
            aria-label={`Switch theme (currently ${settings.theme})`}

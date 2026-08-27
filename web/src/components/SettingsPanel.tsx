@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
 import {
-  NIM_FREE_KEY_URL,
   LOCAL_PROVIDER_HINT,
   OLLAMA_CORS_HINT,
   isOllamaUrl,
+  PROVIDER_REGISTRY,
+  getProviderConfig,
+  getProviderApiKeyField,
+  type ProviderKind,
 } from '../lib/providers';
 import { modelClass } from '../lib/models';
 import type { LocalModelPicks } from '../lib/types';
@@ -97,7 +100,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
     { key: 'embeddings', label: 'Embeddings', hint: 'Document + query vectors' },
   ];
 
-  const nimTaskDisplay: NimTaskDisplay[] = [
+  const apiProviderTaskDisplay: NimTaskDisplay[] = [
     { key: 'routing', label: 'Routing', hint: 'Decides source (docs/data/web)' },
     { key: 'codeGen', label: 'Code generation', hint: 'Writes Arquero code' },
     { key: 'answer', label: 'Answer', hint: 'Final RAG answer' },
@@ -106,6 +109,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
   ];
 
   const isLocal = settings.provider === 'local';
+  const config = getProviderConfig(settings.provider);
   const providerBadge = isLocal
     ? `${localCatalog.length} models loaded`
     : availableModels.length > 0
@@ -113,11 +117,15 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
     : 'not loaded';
   const providerHintLine = isLocal
     ? `All LLM calls go to ${settings.localServerUrl || '(unset)'}. No API key required.`
-    : 'All LLM calls go to integrate.api.nvidia.com/v1. One API key — Clay picks the best model per task from the live catalog.';
+    : `All LLM calls go to ${config.baseUrl}. One API key — Clay picks the best model per task from the live catalog.`;
 
   function setLocalModel(key: LocalModelKey, value: string) {
     updateSettings({ localModels: { ...settings.localModels, [key]: value } });
   }
+
+  // Get API key field name for current provider
+  const apiKeyField = getProviderApiKeyField(settings.provider);
+  const currentApiKey = apiKeyField ? (settings as unknown as Record<string, string>)[apiKeyField] : '';
 
   return (
     <div className="fixed inset-0 z-50 flex" onClick={onClose}>
@@ -149,44 +157,38 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
             <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
               Provider
            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => updateSettings({ provider: 'nim' })}
-                className={`px-3 py-2 rounded-lg border text-sm font-medium ${
-                  !isLocal
-                    ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30'
-                    : 'border-ink-200 dark:border-ink-700'
-                }`}
-                type="button"
-              >
-                NVIDIA NIM
-                <div className="text-[10px] text-ink-500 dark:text-ink-400 font-normal">cloud · needs key</div>
-             </button>
-              <button
-                onClick={() => {
-                  const switching = !isLocal;
-                  updateSettings({ provider: 'local' });
-                  if (switching && settings.localServerUrl.trim() && !urlValidationError && localCatalog.length === 0) {
-                    void refreshModels();
-                  }
-                }}
-                className={`px-3 py-2 rounded-lg border text-sm font-medium ${
-                  isLocal
-                    ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30'
-                    : 'border-ink-200 dark:border-ink-700'
-                }`}
-                type="button"
-              >
-                Local server
-                <div className="text-[10px] text-ink-500 dark:text-ink-400 font-normal">Ollama / LM Studio / vLLM</div>
-            </button>
-           </div>
-         </div>
+            <>
+              {Object.entries(PROVIDER_REGISTRY).map(([kind, config]) => (
+                <button
+                  key={kind}
+                  onClick={() => {
+                    const switching = settings.provider !== kind;
+                    updateSettings({ provider: kind as ProviderKind });
+                    // Auto-fetch models when switching to local with URL set
+                    if (switching && kind === 'local' && settings.localServerUrl.trim() && !urlValidationError && localCatalog.length === 0) {
+                      void refreshModels();
+                    }
+                  }}
+                  className={`px-3 py-2 rounded-lg border text-sm font-medium ${
+                    settings.provider === kind
+                      ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30'
+                      : 'border-ink-200 dark:border-ink-700'
+                  }`}
+                  type="button"
+                >
+                  {config.displayName}
+                  <div className="text-[10px] text-ink-500 dark:text-ink-400 font-normal">
+                    {config.freeTier ? 'free tier' : 'paid'} · {config.requiresApiKey ? 'needs key' : 'no key'}
+                  </div>
+                </button>
+              ))}
+</>
+          </div>
 
           {isLocal ? (
             <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/20 p-3 space-y-2">
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm">Local server</span>
+                <span className="font-semibold text-sm">{config.displayName}</span>
                 <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400">
                   Private
                </span>
@@ -198,9 +200,9 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
           ) : (
             <div className="rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50/60 dark:bg-brand-900/20 p-3">
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm">NVIDIA NIM</span>
+                <span className="font-semibold text-sm">{config.displayName}</span>
                 <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400">
-                  Free tier
+                  {config.freeTier ? 'Free tier' : 'Paid'}
                </span>
                 <span className="text-[10px] text-ink-400 ml-auto">{providerBadge}</span>
              </div>
@@ -350,18 +352,22 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                 ))}
              </div>
             </>
-          ) : (
+) : (
             <>
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
-                  NVIDIA NIM API Key <span className="text-ink-400 normal-case">(nvapi-</span>
+                  {config.displayName} API Key <span className="text-ink-400 normal-case">({config.apiKeyHint}</span>
                </label>
                 <div className="relative">
                   <input
                     type={showKey ? 'text' : 'password'}
-                    value={settings.apiKey}
-                    onChange={e => updateSettings({ apiKey: e.target.value })}
-                    placeholder="nvapi-..."
+                    value={currentApiKey}
+                    onChange={e => {
+                      const patch: Record<string, string> = {};
+                      patch[apiKeyField] = e.target.value;
+                      updateSettings(patch as any);
+                    }}
+                    placeholder={config.apiKeyHint}
                     className="w-full px-3 py-2 pr-10 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none font-mono"
                   />
                   <button
@@ -381,37 +387,39 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                             : 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z'
                         }
                       />
-                   </svg>
-                 </button>
-               </div>
+                    </svg>
+                  </button>
+                </div>
                 <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5">
-                  Stored locally in your browser only. Never sent anywhere except NVIDIA NIM.
+                  Stored locally in your browser only. Never sent anywhere except {config.displayName}.
                </p>
-                <a
-                  href={NIM_FREE_KEY_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 mt-2 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M13.828 10.172a4 4 0 015.656 0l1.415 1.415a4 4 0 010 5.656l-3 3a4 4 0 01-5.656 0M10.172 13.828a4 4 0 01-5.656 0l-1.415-1.415a4 4 0 010-5.656l3-3a4 4 0 015.656 0"
-                    />
-                 </svg>
-                  Get a free NVIDIA NIM API key
-                  <svg className="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                    />
-                 </svg>
-               </a>
-             </div>
+                {config.apiKeyUrl && (
+                  <a
+                    href={config.apiKeyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 mt-2 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13.828 10.172a4 4 0 015.656 0l1.415 1.415a4 4 0 010 5.656l-3 3a4 4 0 01-5.656 0M10.172 13.828a4 4 0 01-5.656 0l-1.415-1.415a4 4 0 010-5.656l3-3a4 4 0 015.656 0"
+                      />
+                    </svg>
+                    Get API key for {config.displayName}
+                    <svg className="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                      />
+                    </svg>
+                  </a>
+                )}
+              </div>
 
               <div className="rounded-lg border border-ink-200 dark:border-ink-700 p-3 space-y-2 bg-ink-50/50 dark:bg-ink-800/30">
                 <div className="flex items-center justify-between gap-2">
@@ -420,15 +428,15 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                       Auto-picked task models
                    </div>
                     <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-0.5">
-                      Picked from NIM's live catalog by size + family. Refresh after NIM updates its lineup.
+                      Picked from {config.displayName}'s live catalog by size + family. Refresh after catalog updates.
                    </p>
-                 </div>
+                  </div>
                   <button
                     onClick={refreshModels}
-                    disabled={!settings.apiKey || modelsLoading}
+                    disabled={!currentApiKey || modelsLoading}
                     className="px-2 py-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                     type="button"
-                    title="Fetch latest model catalog from NIM"
+                    title={`Fetch latest model catalog from ${config.displayName}`}
                   >
                     <svg
                       className={`w-3 h-3 ${modelsLoading ? 'animate-spin' : ''}`}
@@ -442,10 +450,10 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                         strokeWidth={2}
                         d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                       />
-                   </svg>
+                    </svg>
                     {modelsLoading ? 'Loading…' : 'Refresh'}
                  </button>
-               </div>
+                </div>
 
                 {modelsError && (
                   <div className="text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 rounded px-2 py-1.5">
@@ -459,22 +467,51 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                  </div>
                 )}
 
-                <ul className="text-[11px] space-y-1">
-                  {nimTaskDisplay.map(t => (
-                    <li key={t.key} className="flex items-center justify-between gap-2">
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-ink-600 dark:text-ink-300 font-medium">{t.label}</span>
-                        <span className="text-[10px] text-ink-400">{t.hint}</span>
-                     </div>
-                      <span
-                        className="font-mono text-ink-700 dark:text-ink-200 truncate text-right max-w-[60%]"
-                        title={pickedModels[t.key] ?? '—'}
-                      >
-                        {pickedModels[t.key] ?? <span className="text-ink-400 italic">—</span>}
-                     </span>
-                   </li>
+                <div className="space-y-3">
+                  {apiProviderTaskDisplay.map(t => (
+                    <div key={t.key}>
+                      <label className="block text-[10px] font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-1">
+                        {t.label}
+                        <span className="ml-1 normal-case text-ink-400">— {t.hint}</span>
+                     </label>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={settings.pickedModelsOverride[t.key] || ''}
+                          onChange={e => updateSettings({
+                            pickedModelsOverride: { ...settings.pickedModelsOverride, [t.key]: e.target.value }
+                          })}
+                          className="flex-1 px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none font-mono"
+                        >
+                          <option value="">Auto-pick</option>
+                          {availableModels.map(m => (
+                            <option key={m.id} value={m.id}>
+                              {m.id}
+                            </option>
+                          ))}
+                        </select>
+                        {settings.pickedModelsOverride[t.key] && (
+                          <button
+                            onClick={() => updateSettings({
+                              pickedModelsOverride: { ...settings.pickedModelsOverride, [t.key]: '' }
+                            })}
+                            className="px-2 py-1 text-[10px] text-ink-500 hover:text-ink-700 dark:hover:text-ink-300"
+                            type="button"
+                            title="Reset to auto-pick"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-ink-500 dark:text-ink-400 mt-0.5">
+                        Current: <span className="font-mono text-ink-700 dark:text-ink-200">
+                          {settings.pickedModelsOverride[t.key] ? `Manual: ${settings.pickedModelsOverride[t.key]}` : `Auto: ${pickedModels[t.key] ?? '—'}`}
+                        </span>
+                      </p>
+                    </div>
                   ))}
-                </ul>
+                </div>
 
                 {pickedModels.answer && (
                   <div className="pt-2 mt-1 border-t border-ink-200 dark:border-ink-700 text-[10px] text-ink-500 dark:text-ink-400 flex items-center justify-between">
@@ -515,15 +552,15 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                             : 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z'
                         }
                       />
-                   </svg>
-                 </button>
-               </div>
+                    </svg>
+                  </button>
+                </div>
                 <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5">
                   Leave empty to reuse your LLM key.
                </p>
-             </div>
-            </>
-          )}
+              </div>
+             </>
+           )}
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">

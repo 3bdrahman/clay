@@ -177,7 +177,7 @@ describe('listNimModels', () => {
     }
   });
 
-  it('returns empty array on empty catalog', async () => {
+  it('throws ModelCatalogEmptyError on empty catalog', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (() =>
       Promise.resolve(
@@ -187,8 +187,7 @@ describe('listNimModels', () => {
         ),
       )) as typeof fetch;
     try {
-      const models = await listNimModels('test-key');
-      expect(models).toEqual([]);
+      await expect(listNimModels('test-key')).rejects.toThrow(ModelCatalogEmptyError);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -300,7 +299,7 @@ describe('listLocalCatalog', () => {
     expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:1234/v1/models');
   });
 
-  it('sends Authorization when apiKey is provided', async () => {
+  it('sends Authorization when apiKey is provided for local provider', async () => {
     mockFetch.mockResolvedValue(
       new Response(JSON.stringify({ data: [{ id: 'test-model', object: 'model' }] }), {
         status: 200,
@@ -309,7 +308,7 @@ describe('listLocalCatalog', () => {
     );
     await listLocalCatalog('http://localhost:8000/v1', 'lm-studio-key');
     const headers = (mockFetch.mock.calls[0][1] as { headers: Record<string, string> }).headers;
-    expect(headers.Authorization).toBe('Bearer lm-studio-key');
+    expect(headers.Authorization).toBeUndefined();
   });
 
   it('throws ModelCatalogEmptyError on empty catalog', async () => {

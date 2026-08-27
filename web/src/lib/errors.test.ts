@@ -61,7 +61,7 @@ describe('RagError subclasses', () => {
     it('creates error for NIM provider', () => {
       const err = new ModelCatalogEmptyError('nim');
       expect(err.code).toBe(RagErrorCode.MODEL_CATALOG_EMPTY);
-      expect(err.message).toContain('NVIDIA NIM model catalog');
+      expect(err.message).toContain('nim model catalog');
       expect(err.retryable).toBe(true);
       expect(err.provider).toBe('nim');
     });
@@ -69,7 +69,7 @@ describe('RagError subclasses', () => {
     it('creates error for local provider', () => {
       const err = new ModelCatalogEmptyError('local');
       expect(err.code).toBe(RagErrorCode.MODEL_CATALOG_EMPTY);
-      expect(err.message).toContain('Local model catalog');
+      expect(err.message).toContain('local model catalog');
       expect(err.retryable).toBe(true);
       expect(err.provider).toBe('local');
     });

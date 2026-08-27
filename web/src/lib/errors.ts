@@ -128,19 +128,21 @@ export class RagError extends Error {
 // ============================================================================
 
 export class NoProviderError extends RagError {
-  constructor(providerKind: 'nim' | 'local', cause?: Error) {
+  constructor(provider: string, cause?: Error) {
     const message =
-      providerKind === 'nim'
+      provider === 'nim'
         ? 'No NVIDIA NIM API key configured. Add your API key in Settings.'
-        : 'No local server URL configured. Set the server URL in Settings.';
+        : provider === 'local' || provider === 'ollama'
+        ? 'No local server URL configured. Set the server URL in Settings.'
+        : `No ${provider} API key configured. Add your API key in Settings.`;
 
     super({
       code: RagErrorCode.NO_PROVIDER_CONFIGURED,
       message,
       cause,
       retryable: false,
-      provider: providerKind,
-      context: { providerKind },
+      provider,
+      context: { provider },
     });
   }
 }
@@ -158,19 +160,16 @@ export class EmbeddingModelMissingError extends RagError {
 }
 
 export class ModelCatalogEmptyError extends RagError {
-  constructor(providerKind: 'nim' | 'local', cause?: Error) {
-    const message =
-      providerKind === 'nim'
-        ? 'NVIDIA NIM model catalog is empty. Check your API key and click Refresh in Settings.'
-        : 'Local model catalog is empty. Click Discover in Settings to fetch models from your server.';
+  constructor(provider: string, cause?: Error) {
+    const message = `${provider} model catalog is empty. Check your API key and click Refresh in Settings.`;
 
     super({
       code: RagErrorCode.MODEL_CATALOG_EMPTY,
       message,
       cause,
       retryable: true,
-      provider: providerKind,
-      context: { providerKind },
+      provider,
+      context: { provider },
     });
   }
 }
@@ -448,14 +447,16 @@ function isBuildNvidiaOrigin(): boolean {
 }
 
 /**
- * Checks if the error is likely a CORS block when calling NIM.
+ * Checks if the error is likely a CORS block for a given provider.
  * CORS failures manifest as TypeError: Failed to fetch with no response.
  */
 function isLikelyCorsBlock(error: unknown, provider: string): boolean {
   if (!(error instanceof TypeError && error.message.includes('fetch'))) return false;
-  if (provider !== 'NVIDIA NIM') return false;
   if (import.meta.env.DEV) return false; // Dev uses Vite proxy, CORS is bypassed
-  if (isBuildNvidiaOrigin()) return false; // build.nvidia.com is allowed
+
+  const nimProviders = ['NVIDIA NIM', 'OpenRouter', 'Groq', 'Together AI'];
+  if (!nimProviders.includes(provider)) return false;
+  if (provider === 'NVIDIA NIM' && isBuildNvidiaOrigin()) return false;
   return true;
 }
 
@@ -485,11 +486,16 @@ export function classifyError(
 
     // TypeError usually means network failure in fetch
     if (error instanceof TypeError && error.message.includes('fetch')) {
-      // Check if this is likely a CORS block (NIM only allows build.nvidia.com)
+      // Check if this is likely a CORS block
       if (isLikelyCorsBlock(error, provider)) {
         return new CorsBlockedError(provider, error);
       }
       return new ProviderUnreachableError(provider, error);
+    }
+
+    // DOMException for abort
+    if (error.name === 'AbortError') {
+      return new StreamInterruptedError(provider, '', error);
     }
   }
 

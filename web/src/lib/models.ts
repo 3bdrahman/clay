@@ -1,4 +1,4 @@
-import { NIM_BASE_URL } from './providers';
+import { getProviderConfig, type ProviderKind } from './providers';
 import type { ModelInfo, Settings, LocalModelPicks } from './types';
 import {
   ProviderUnreachableError,
@@ -36,105 +36,85 @@ export interface PickedModels {
 }
 
 /**
- * Fetch the live model catalog from NVIDIA NIM.
- * @param apiKey - NVIDIA NIM API key (nvapi-...)
+ * Fetch the model catalog from any supported provider.
+ * @param provider - Provider kind (nim, openrouter, groq, together, openai, anthropic, ollama, local)
+ * @param apiKey - API key for providers that require it
+ * @param baseUrl - Optional custom base URL (for local/ollama)
  * @returns Array of model info objects with id, ownedBy, created
  * @throws ModelCatalogEmptyError if catalog is empty
  * @throws InvalidApiKeyError if API key is invalid (401/403)
  * @throws ProviderUnreachableError if network error or server unavailable
  * @throws RateLimitError if rate limited (429)
  */
-export async function listNimModels(apiKey: string): Promise<ModelInfo[]> {
-  if (!apiKey) {
-    throw new InvalidApiKeyError('NVIDIA NIM', 401);
+export async function listModels(
+  provider: ProviderKind,
+  apiKey: string,
+  baseUrl?: string,
+): Promise<ModelInfo[]> {
+  const config = getProviderConfig(provider);
+  const url = (baseUrl || config.baseUrl).replace(/\/+$/, '');
+
+  if (!url) {
+    throw new ProviderUnreachableError(provider, undefined, { isTimeout: false });
   }
+
+  if (config.requiresApiKey && !apiKey) {
+    throw new InvalidApiKeyError(config.displayName, 401);
+  }
+
+  const headers: Record<string, string> = {};
+  if (config.defaultHeaders) {
+    Object.assign(headers, config.defaultHeaders);
+  }
+  if (apiKey && config.requiresApiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  const modelsEndpoint = config.modelsEndpoint;
   let resp: Response;
   try {
-    resp = await fetch(`${NIM_BASE_URL}/models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
+    resp = await fetch(`${url}${modelsEndpoint}`, { headers });
   } catch (e) {
-    throw classifyError(e, 'NVIDIA NIM', 'listNimModels');
+    throw classifyError(e, config.displayName, 'listModels');
   }
 
   if (!resp.ok) {
     if (resp.status === 401 || resp.status === 403) {
-      throw new InvalidApiKeyError('NVIDIA NIM', resp.status as 401 | 403);
+      throw new InvalidApiKeyError(config.displayName, resp.status as 401 | 403);
     }
     if (resp.status === 429) {
       const retryAfter = resp.headers.get('retry-after');
       const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined;
-      throw new RateLimitError('NVIDIA NIM', retryAfterMs);
+      throw new RateLimitError(config.displayName, retryAfterMs);
     }
-    throw new ProviderUnreachableError('NVIDIA NIM', new Error(`${resp.status} ${resp.statusText}`), {
+    throw new ProviderUnreachableError(config.displayName, new Error(`${resp.status} ${resp.statusText}`), {
       retryable: resp.status >= 500,
     });
   }
 
   const json = await resp.json();
-  const data: Array<{ id: string; object?: string; created?: number; owned_by?: string }> =
-    json.data || [];
 
-  return data.map(m => ({
+  // Standard OpenAI-compatible format: { data: [{ id, object, created, owned_by }] }
+  const data = json.data || [];
+
+  if (data.length === 0) {
+    throw new ModelCatalogEmptyError(config.displayName);
+  }
+
+  return data.map((m: { id: string; object?: string; created?: number; owned_by?: string }) => ({
     id: m.id,
     ownedBy: m.owned_by ?? '',
     created: m.created ?? 0,
   }));
 }
 
-/**
- * Fetch the model catalog from a local OpenAI-compatible server.
- * @param baseUrl - Base URL of local server (e.g., http://localhost:11434/v1)
- * @param apiKey - Optional API key for servers that require it
- * @returns Array of model info objects
- * @throws ModelCatalogEmptyError if catalog is empty
- * @throws ProviderUnreachableError if network error or server unavailable
- * @throws InvalidApiKeyError if API key is invalid (401/403)
- */
-export async function listLocalCatalog(
-  baseUrl: string,
-  apiKey: string,
-): Promise<ModelInfo[]> {
-  const url = baseUrl.replace(/\/+$/, '');
-  if (!url) {
-    throw new ProviderUnreachableError('local', undefined, { isTimeout: false });
-  }
-  const headers: Record<string, string> = {};
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-  let resp: Response;
-  try {
-    resp = await fetch(`${url}/models`, { headers });
-  } catch (e) {
-    throw classifyError(e, 'local', 'listLocalCatalog');
-  }
+// Legacy exports for backward compatibility
+export async function listNimModels(apiKey: string): Promise<ModelInfo[]> {
+  return listModels('nim', apiKey);
+}
 
-  if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
-      throw new InvalidApiKeyError('local', resp.status as 401 | 403);
-    }
-    if (resp.status === 429) {
-      const retryAfter = resp.headers.get('retry-after');
-      const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined;
-      throw new RateLimitError('local', retryAfterMs);
-    }
-    throw new ProviderUnreachableError('local', new Error(`${resp.status} ${resp.statusText}`), {
-      retryable: resp.status >= 500,
-    });
-  }
-
-  const json = await resp.json();
-  const data: Array<{ id: string; object?: string; created?: number; owned_by?: string }> =
-    json.data || [];
-
-  if (data.length === 0) {
-    throw new ModelCatalogEmptyError('local');
-  }
-
-  return data.map(m => ({
-    id: m.id,
-    ownedBy: m.owned_by ?? '',
-    created: m.created ?? 0,
-  }));
+export async function listLocalCatalog(baseUrl: string, apiKey: string): Promise<ModelInfo[]> {
+  return listModels('local', apiKey, baseUrl);
 }
 
 /**
@@ -165,14 +145,18 @@ export interface ResolvedModels {
 
 /**
  * Resolve the final model set for the current session.
- * For NIM: auto-picks best models from catalog. For local: validates user picks against catalog.
+ * For API providers with catalogs (NIM, OpenRouter, Groq, Together, OpenAI, Anthropic): auto-picks best models.
+ * For local/Ollama: validates user picks against catalog.
  * @throws ModelNotFoundError if picked model not in catalog
  */
 export function resolveModels(
   settings: Settings,
-  nimCatalog: ModelInfo[],
+  catalog: ModelInfo[],
 ): ResolvedModels {
-  if (settings.provider === 'local') {
+  const provider = settings.provider;
+
+  // Local uses user-selected models
+  if (provider === 'local') {
     const picked = pickLocalModels(settings.localModels);
     const warnings: string[] = [];
     if (settings.localCatalog.length === 0) {
@@ -193,7 +177,9 @@ export function resolveModels(
     }
     return { catalog: settings.localCatalog, picked, warnings };
   }
-  return { catalog: nimCatalog, picked: pickBestModels(nimCatalog), warnings: [] };
+
+  // All other providers use auto-pick from their catalog
+  return { catalog, picked: pickBestModels(catalog), warnings: [] };
 }
 
 function isEmbedding(id: string): boolean {

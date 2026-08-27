@@ -5,6 +5,11 @@ import { ConversationSidebar } from './components/ConversationSidebar';
 import { useAppStore } from './store';
 import { useClay } from './hooks/useClay';
 import { SettingsPanelSuspense, DataSandboxSuspense } from './components/LazyPanels';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { initGlobalErrorHandler } from './lib/globalErrorHandler';
+
+// Initialize global error handler
+initGlobalErrorHandler();
 
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -52,37 +57,39 @@ export default function App() {
   const toggleSidebar = () => setSidebarOpen(prev => !prev);
 
   return (
-    <div className="h-screen flex flex-col bg-ink-50 dark:bg-ink-900">
-      <Header
-        onOpenSettings={openSettings}
-        onOpenData={openData}
-        onToggleSidebar={toggleSidebar}
-        pickedModels={pickedModels}
-        provider={settingsProvider}
-      />
-      <div className="flex-1 flex min-h-0">
-        <ConversationSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+    <ErrorBoundary>
+      <div className="h-screen flex flex-col bg-ink-50 dark:bg-ink-900">
+        <Header
+          onOpenSettings={openSettings}
+          onOpenData={openData}
+          onToggleSidebar={toggleSidebar}
+          pickedModels={pickedModels}
+          provider={settingsProvider}
+        />
         <div className="flex-1 flex min-h-0">
-          <ChatPanel onOpenData={openData} />
+          <ConversationSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+          <div className="flex-1 flex min-h-0">
+            <ChatPanel onOpenData={openData} />
+          </div>
         </div>
+        <SettingsPanelSuspense
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          refreshModels={refreshModels}
+          pickedModels={pickedModels}
+          resetAll={resetAll}
+          clearSandboxData={clearSandboxData}
+        />
+        <DataSandboxSuspense
+          open={dataOpen}
+          onClose={() => setDataOpen(false)}
+          addFiles={addFiles}
+          loadSampleData={loadSampleData}
+          clearSandboxData={clearSandboxData}
+          removeSandboxDocument={removeSandboxDocument}
+          removeSandboxDataset={removeSandboxDataset}
+        />
       </div>
-      <SettingsPanelSuspense
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        refreshModels={refreshModels}
-        pickedModels={pickedModels}
-        resetAll={resetAll}
-        clearSandboxData={clearSandboxData}
-      />
-      <DataSandboxSuspense
-        open={dataOpen}
-        onClose={() => setDataOpen(false)}
-        addFiles={addFiles}
-        loadSampleData={loadSampleData}
-        clearSandboxData={clearSandboxData}
-        removeSandboxDocument={removeSandboxDocument}
-        removeSandboxDataset={removeSandboxDataset}
-      />
-    </div>
+    </ErrorBoundary>
   );
 }
