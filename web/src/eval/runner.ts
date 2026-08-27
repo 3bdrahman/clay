@@ -9,7 +9,7 @@ import { createVectorStore, type VectorStore } from '../lib/vectorstore';
 import { createDataAnalyzer, type DataAnalyzer } from '../services/analyzer';
 import { createWorkflowOrchestrator } from '../services/orchestrator';
 import {
-  listNimModels,
+  listModels,
   listLocalCatalog,
   resolveModels,
   pickLocalModels,
@@ -69,7 +69,7 @@ async function createServices(settings: Settings): Promise<{
   const catalog =
     settings.provider === 'local'
       ? await listLocalCatalog(endpoint.baseUrl, '')
-      : await listNimModels(endpoint.apiKey);
+      : await listModels(settings.provider, endpoint.apiKey);
   const picked: PickedModels =
     settings.provider === 'local'
       ? pickLocalModels(settings.localModels)

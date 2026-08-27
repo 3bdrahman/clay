@@ -14,7 +14,7 @@ import {
 } from '../services/sandboxTables';
 import { useAppStore, type SandboxDataset } from '../store';
 import {
-  listNimModels,
+  listModels,
   listLocalCatalog,
   resolveModels,
   pickLocalModels,
@@ -90,7 +90,8 @@ export function useClay(): {
       setModelsLoading(true);
       setModelsError(null);
       try {
-        const models = await listNimModels(key);
+        const settings = useAppStore.getState().settings;
+        const models = await listModels(settings.provider, key);
         setModels(models);
         fetchedKeyRef.current = key;
         return models;

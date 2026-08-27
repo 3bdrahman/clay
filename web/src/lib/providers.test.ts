@@ -3,13 +3,10 @@ import { resolveProviderEndpoint, LOCAL_DEFAULT_BASE_URL } from './providers';
 import type { Settings } from './types';
 
 const baseSettings: Settings = {
-  provider: 'nim',
-  nimApiKey: '',
+  provider: 'openrouter',
   openrouterApiKey: '',
   groqApiKey: '',
   togetherApiKey: '',
-  openaiApiKey: '',
-  anthropicApiKey: '',
   apiKey: '',
   embeddingApiKey: '',
   webSearchProvider: 'duckduckgo',
@@ -31,13 +28,6 @@ const baseSettings: Settings = {
 };
 
 describe('resolveProviderEndpoint', () => {
-  it('returns NIM base URL and nimApiKey for nim provider', () => {
-    const out = resolveProviderEndpoint({ ...baseSettings, provider: 'nim', nimApiKey: 'nvapi-x' });
-    expect(out.baseUrl).toBe('https://integrate.api.nvidia.com/v1');
-    expect(out.apiKey).toBe('nvapi-x');
-    expect(out.providerLabel).toBe('NVIDIA NIM');
-  });
-
   it('returns local server URL and empty key for local provider', () => {
     const out = resolveProviderEndpoint({
       ...baseSettings,

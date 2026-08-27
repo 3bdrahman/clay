@@ -50,7 +50,6 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
 
   // Provider display mapping for the header
   const providerDisplayNames: Record<ProviderKind, string> = {
-    nim: 'NVIDIA NIM',
     openrouter: 'OpenRouter',
     groq: 'Groq',
     together: 'Together AI',
@@ -58,8 +57,7 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
   };
 
   const isLocal = provider === 'local';
-  const apiKeyField = provider === 'nim' ? 'nimApiKey' :
-    provider === 'openrouter' ? 'openrouterApiKey' :
+  const apiKeyField = provider === 'openrouter' ? 'openrouterApiKey' :
     provider === 'groq' ? 'groqApiKey' :
     provider === 'together' ? 'togetherApiKey' : '';
   const hasKey = !isLocal && ((settings as unknown as Record<string, string>)[apiKeyField]?.length ?? 0) > 0;

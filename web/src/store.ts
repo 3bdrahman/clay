@@ -75,12 +75,9 @@ interface AppState {
 
 const DEFAULT_SETTINGS: Settings = {
   provider: 'openrouter',
-  nimApiKey: '',
   openrouterApiKey: '',
   groqApiKey: '',
   togetherApiKey: '',
-  openaiApiKey: '',
-  anthropicApiKey: '',
   apiKey: '', // legacy field for migration
   embeddingApiKey: '',
   webSearchProvider: 'duckduckgo',
@@ -311,9 +308,8 @@ export const useAppStore = create<AppState>()(
 
         // Migrate legacy single apiKey to provider-specific key
         const legacyApiKey = persistedSettings.apiKey as string | undefined;
-        const provider = (persistedSettings.provider as ProviderKind) ?? 'nim';
+        const provider = (persistedSettings.provider as ProviderKind) ?? 'openrouter';
         const providerApiKeyField = {
-          nim: 'nimApiKey',
           openrouter: 'openrouterApiKey',
           groq: 'groqApiKey',
           together: 'togetherApiKey',

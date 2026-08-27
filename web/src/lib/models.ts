@@ -37,9 +37,9 @@ export interface PickedModels {
 
 /**
  * Fetch the model catalog from any supported provider.
- * @param provider - Provider kind (nim, openrouter, groq, together, openai, anthropic, ollama, local)
+ * @param provider - Provider kind (openrouter, groq, together, local)
  * @param apiKey - API key for providers that require it
- * @param baseUrl - Optional custom base URL (for local/ollama)
+ * @param baseUrl - Optional custom base URL (for local)
  * @returns Array of model info objects with id, ownedBy, created
  * @throws ModelCatalogEmptyError if catalog is empty
  * @throws InvalidApiKeyError if API key is invalid (401/403)
@@ -109,10 +109,6 @@ export async function listModels(
 }
 
 // Legacy exports for backward compatibility
-export async function listNimModels(apiKey: string): Promise<ModelInfo[]> {
-  return listModels('nim', apiKey);
-}
-
 export async function listLocalCatalog(baseUrl: string, apiKey: string): Promise<ModelInfo[]> {
   return listModels('local', apiKey, baseUrl);
 }

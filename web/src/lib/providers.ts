@@ -89,18 +89,6 @@ export const PROVIDER_REGISTRY: Record<ProviderKind, ProviderConfig> = {
     apiKeyUrl: 'https://api.together.xyz/settings/api-keys',
     description: 'Open models with fast inference. Free credits on signup. Good model variety.',
   },
-  nim: {
-    kind: 'nim',
-    displayName: 'NVIDIA NIM',
-    baseUrl: 'https://integrate.api.nvidia.com/v1',
-    modelsEndpoint: '/models',
-    apiKeyEnvVar: 'VITE_NIM_API_KEY',
-    apiKeyHint: 'nvapi-...',
-    freeTier: true,
-    requiresApiKey: true,
-    apiKeyUrl: 'https://build.nvidia.com/settings/api-keys',
-    description: 'NVIDIA hosted models. Only works from build.nvidia.com or via proxy. Not recommended for production deployments.',
-  },
   local: {
     kind: 'local',
     displayName: 'Local (OpenAI-compatible)',
@@ -134,7 +122,6 @@ export function getProviderApiKeyField(kind: ProviderKind): string {
     openrouter: 'openrouterApiKey',
     groq: 'groqApiKey',
     together: 'togetherApiKey',
-    nim: 'nimApiKey',
     local: '',
   };
   return fieldMap[kind];

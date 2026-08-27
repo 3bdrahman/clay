@@ -7,7 +7,7 @@ export interface LocalModelPicks {
   embeddings: string;
 }
 
-export type ProviderKind = 'nim' | 'openrouter' | 'groq' | 'together' | 'local';
+export type ProviderKind = 'openrouter' | 'groq' | 'together' | 'local';
 
 export interface PickedModelsOverride {
   routing?: string;
@@ -20,12 +20,9 @@ export interface PickedModelsOverride {
 export interface Settings {
   provider: ProviderKind;
   // Provider API keys - each provider has its own key
-  nimApiKey: string;
   openrouterApiKey: string;
   groqApiKey: string;
   togetherApiKey: string;
-  openaiApiKey: string;
-  anthropicApiKey: string;
   embeddingApiKey: string;
   // Legacy field for backward compat (migration)
   apiKey: string;

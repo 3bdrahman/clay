@@ -3,7 +3,7 @@ import {
   modelClass,
   pickBestModels,
   pickLocalModels,
-  listNimModels,
+  listModels,
   listLocalCatalog,
   resolveModels,
   ModelNotFoundError,
@@ -138,77 +138,84 @@ describe('pickBestModels', () => {
   });
 });
 
-describe('listNimModels', () => {
+describe('listModels', () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    globalThis.fetch = vi.fn();
+  });
+
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
+  });
+
   it('throws InvalidApiKeyError when API key is missing', async () => {
-    await expect(listNimModels('')).rejects.toThrow(InvalidApiKeyError);
-    await expect(listNimModels('')).rejects.toThrow('Invalid API key');
+    await expect(listModels('openrouter', '')).rejects.toThrow(InvalidApiKeyError);
+    await expect(listModels('openrouter', '')).rejects.toThrow('Invalid API key');
   });
 
   it('throws InvalidApiKeyError on 401 response', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (() =>
-      Promise.resolve(new Response('Unauthorized', { status: 401 }))) as typeof fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('Unauthorized', { status: 401 })
+    );
     try {
-      await expect(listNimModels('test-key')).rejects.toThrow(InvalidApiKeyError);
+      await expect(listModels('openrouter', 'test-key')).rejects.toThrow(InvalidApiKeyError);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
   it('throws ProviderUnreachableError on 500 response', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (() =>
-      Promise.resolve(new Response('Server Error', { status: 500 }))) as typeof fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('Server Error', { status: 500 })
+    );
     try {
-      await expect(listNimModels('test-key')).rejects.toThrow(ProviderUnreachableError);
+      await expect(listModels('openrouter', 'test-key')).rejects.toThrow(ProviderUnreachableError);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
   it('throws RateLimitError on 429 response', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (() =>
-      Promise.resolve(new Response('Rate Limited', { status: 429 }))) as typeof fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('Rate Limited', { status: 429 })
+    );
     try {
-      await expect(listNimModels('test-key')).rejects.toThrow(RateLimitError);
+      await expect(listModels('openrouter', 'test-key')).rejects.toThrow(RateLimitError);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
   it('throws ModelCatalogEmptyError on empty catalog', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({ data: [] }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      )) as typeof fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
     try {
-      await expect(listNimModels('test-key')).rejects.toThrow(ModelCatalogEmptyError);
+      await expect(listModels('openrouter', 'test-key')).rejects.toThrow(ModelCatalogEmptyError);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
   it('parses the catalog response', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({
-            data: [
-              { id: 'meta/llama-3.1-8b-instruct', owned_by: 'meta', created: 123 },
-              { id: 'nvidia/nv-embedqa-e5-v5', owned_by: 'nvidia', created: 456 },
-            ],
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      )) as typeof fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: 'meta/llama-3.1-8b-instruct', owned_by: 'meta', created: 123 },
+            { id: 'nvidia/nv-embedqa-e5-v5', owned_by: 'nvidia', created: 456 },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
     try {
-      const models = await listNimModels('test-key');
+      const models = await listModels('openrouter', 'test-key');
       expect(models).toHaveLength(2);
       expect(models[0]).toEqual({ id: 'meta/llama-3.1-8b-instruct', ownedBy: 'meta', created: 123 });
       expect(models[1]).toEqual({ id: 'nvidia/nv-embedqa-e5-v5', ownedBy: 'nvidia', created: 456 });
@@ -218,16 +225,14 @@ describe('listNimModels', () => {
   });
 
   it('handles missing optional fields', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({ data: [{ id: 'test/model' }] }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      )) as typeof fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [{ id: 'test/model' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
     try {
-      const models = await listNimModels('test-key');
+      const models = await listModels('openrouter', 'test-key');
       expect(models[0]).toEqual({ id: 'test/model', ownedBy: '', created: 0 });
     } finally {
       globalThis.fetch = originalFetch;
@@ -275,7 +280,7 @@ describe('listLocalCatalog', () => {
             { id: 'nomic-embed-text', object: 'model' },
           ],
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
       ),
     );
 
@@ -299,7 +304,7 @@ describe('listLocalCatalog', () => {
     expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:1234/v1/models');
   });
 
-  it('sends Authorization when apiKey is provided for local provider', async () => {
+  it('does not send Authorization for local provider', async () => {
     mockFetch.mockResolvedValue(
       new Response(JSON.stringify({ data: [{ id: 'test-model', object: 'model' }] }), {
         status: 200,
@@ -355,8 +360,11 @@ describe('pickLocalModels', () => {
 
 describe('resolveModels', () => {
   const baseSettings: Settings = {
-    provider: 'nim',
-    apiKey: 'k',
+    provider: 'openrouter',
+    openrouterApiKey: 'k',
+    groqApiKey: '',
+    togetherApiKey: '',
+    apiKey: '',
     embeddingApiKey: '',
     webSearchProvider: 'duckduckgo',
     serperApiKey: '',
@@ -367,9 +375,16 @@ describe('resolveModels', () => {
     localModels: { chat: '', embeddings: '' },
     localCatalog: [],
     localCatalogFetchedAt: 0,
+    pickedModelsOverride: {
+      routing: '',
+      codeGen: '',
+      answer: '',
+      eval: '',
+      embedding: '',
+    },
   };
 
-  it('uses pickBestModels for the NIM provider', () => {
+  it('uses pickBestModels for the OpenRouter provider', () => {
     const out = resolveModels(baseSettings, fakeModels);
     expect(out.picked.answer).toBe('nvidia/nemotron-3-ultra-550b-a55b');
     expect(out.catalog).toBe(fakeModels);

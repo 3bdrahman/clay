@@ -15,7 +15,7 @@ import {
 
 export interface ValidationResult {
   valid: boolean;
-  errors: Array<{ code: RagErrorCode; message: string; providerKind?: 'nim' | 'local' }>;
+  errors: Array<{ code: RagErrorCode; message: string; providerKind?: 'local' }>;
   warnings: string[];
 }
 
@@ -28,22 +28,11 @@ export function validateSettings(
   settings: Settings,
   options: { throwOnError?: boolean } = {}
 ): ValidationResult {
-  const errors: Array<{ code: RagErrorCode; message: string; providerKind?: 'nim' | 'local' }> = [];
+  const errors: Array<{ code: RagErrorCode; message: string; providerKind?: 'local' }> = [];
   const warnings: string[] = [];
 
   // 1. Provider configuration
-  if (settings.provider === 'nim') {
-    if (!settings.apiKey || !settings.apiKey.trim()) {
-      const err = new NoProviderError('nim');
-      errors.push({ code: err.code, message: err.message, providerKind: 'nim' });
-    }
-
-    // NIM requires embedding API key for embeddings
-    if (!settings.embeddingApiKey || !settings.embeddingApiKey.trim()) {
-      const err = new EmbeddingModelMissingError();
-      errors.push({ code: err.code, message: err.message, providerKind: 'nim' });
-    }
-  } else if (settings.provider === 'local') {
+  if (settings.provider === 'local') {
     if (!settings.localServerUrl || !settings.localServerUrl.trim()) {
       const err = new LocalServerUrlMissingError();
       errors.push({ code: err.code, message: err.message, providerKind: 'local' });
@@ -59,13 +48,28 @@ export function validateSettings(
       const err = new EmbeddingModelMissingError();
       errors.push({ code: err.code, message: err.message, providerKind: 'local' });
     }
+  } else {
+    // API providers (openrouter, groq, together)
+    const apiKeyField = {
+      openrouter: 'openrouterApiKey',
+      groq: 'groqApiKey',
+      together: 'togetherApiKey',
+    }[settings.provider];
+
+    const apiKey = (settings as unknown as Record<string, string>)[apiKeyField];
+    if (!apiKey || !apiKey.trim()) {
+      const err = new NoProviderError(settings.provider);
+      errors.push({ code: err.code, message: err.message });
+    }
+
+    if (!settings.embeddingApiKey || !settings.embeddingApiKey.trim()) {
+      const err = new EmbeddingModelMissingError();
+      errors.push({ code: err.code, message: err.message });
+    }
   }
 
   // 2. Model catalog validation
-  if (settings.provider === 'nim') {
-    // For NIM, catalog is fetched dynamically; warn if empty but don't block
-    // (fetch happens in resolveModels)
-  } else if (settings.provider === 'local') {
+  if (settings.provider === 'local') {
     if (!settings.localCatalog || settings.localCatalog.length === 0) {
       const err = new ModelCatalogEmptyError('local');
       warnings.push(err.message);
@@ -93,7 +97,7 @@ export function validateSettings(
   if (options.throwOnError && !valid) {
     // Throw the first error
     const firstError = errors[0];
-    throw createErrorFromCode(firstError.code, firstError.message, firstError.providerKind);
+    throw createErrorFromCode(firstError.code, firstError.message);
   }
 
   return { valid, errors, warnings };
@@ -105,16 +109,15 @@ export function validateSettings(
  */
 function createErrorFromCode(
   code: RagErrorCode,
-  message: string,
-  providerKind?: 'nim' | 'local'
+  message: string
 ): Error {
   switch (code) {
     case RagErrorCode.NO_PROVIDER_CONFIGURED:
-      return new NoProviderError(providerKind ?? 'nim', undefined);
+      return new NoProviderError('local', undefined);
     case RagErrorCode.EMBEDDING_MODEL_MISSING:
       return new EmbeddingModelMissingError();
     case RagErrorCode.MODEL_CATALOG_EMPTY:
-      return new ModelCatalogEmptyError(providerKind ?? 'local', undefined);
+      return new ModelCatalogEmptyError('local', undefined);
     case RagErrorCode.MODEL_NOT_FOUND:
       return new ModelNotFoundError('', []);
     case RagErrorCode.LOCAL_SERVER_URL_MISSING:
@@ -148,12 +151,26 @@ export function getSettingsStatus(settings: Settings): {
   const result = validateSettings(settings);
   const issues = [...result.errors.map((e) => e.message), ...result.warnings];
 
+  const providerNames: Record<string, string> = {
+    openrouter: 'OpenRouter',
+    groq: 'Groq',
+    together: 'Together AI',
+    local: 'Local Server',
+  };
+
+  const apiKeyField = {
+    openrouter: 'openrouterApiKey',
+    groq: 'groqApiKey',
+    together: 'togetherApiKey',
+    local: '',
+  }[settings.provider];
+
   return {
     configured: result.valid,
-    provider: settings.provider === 'nim' ? 'NVIDIA NIM' : 'Local Server',
-    hasApiKey: settings.provider === 'nim' ? !!settings.apiKey : !!settings.localServerUrl,
-    hasEmbeddingKey: settings.provider === 'nim' ? !!settings.embeddingApiKey : !!settings.localModels?.embeddings,
-    modelCount: settings.provider === 'nim' ? 0 : settings.localCatalog?.length ?? 0,
+    provider: providerNames[settings.provider] ?? settings.provider,
+    hasApiKey: settings.provider === 'local' ? !!settings.localServerUrl : !!(settings as unknown as Record<string, string>)[apiKeyField],
+    hasEmbeddingKey: settings.provider === 'local' ? !!settings.localModels?.embeddings : !!settings.embeddingApiKey,
+    modelCount: settings.provider === 'local' ? settings.localCatalog?.length ?? 0 : 0,
     issues,
   };
 }
