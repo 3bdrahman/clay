@@ -324,6 +324,7 @@ export const useAppStore = create<AppState>()(
           ...DEFAULT_SETTINGS,
           ...((persistedSettings as Omit<Partial<Settings>, 'localModels'> | undefined) ?? {}),
           localModels: migrateLegacyLocalModels(persistedLocalModels),
+          pickedModelsOverride: persistedSettings.pickedModelsOverride ?? DEFAULT_SETTINGS.pickedModelsOverride,
           [providerApiKeyField]: legacyApiKey ?? '',
         };
 
