@@ -2,6 +2,19 @@
 
 import type { RagErrorCode } from './errors';
 
+export interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: {
+      type: 'object';
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+  };
+}
+
 export interface LocalModelPicks {
   chat: string;
   embeddings: string;
@@ -10,10 +23,7 @@ export interface LocalModelPicks {
 export type ProviderKind = 'openrouter' | 'groq' | 'together' | 'local';
 
 export interface PickedModelsOverride {
-  routing?: string;
-  codeGen?: string;
-  answer?: string;
-  eval?: string;
+  chatModel?: string;
   embedding?: string;
 }
 
@@ -31,12 +41,15 @@ export interface Settings {
   temperature: number;
   maxRetries: number;
   vectorstoreInitialK?: number;
+  maxToolLoopTokens?: number; // cumulative tool-loop token budget per analysis (undefined = default)
   theme: 'light' | 'dark' | 'system';
   localServerUrl: string;
   localModels: LocalModelPicks;
   localCatalog: ModelInfo[];
   localCatalogFetchedAt: number;
-  // User-overridable model selections per task (empty = auto-pick)
+  // User-overridable model selections (empty = auto-pick)
+  // chatModel: single model for routing, codeGen, answer, eval
+  // embedding: separate embedding model
   pickedModelsOverride: PickedModelsOverride;
 }
 
@@ -51,8 +64,11 @@ export interface Document {
 
 export interface DatasetSummary {
   name: string;
+  fileName?: string;
   rowCount: number;
   columns: string[];
+  /** Optional sample rows for type detection */
+  sampleRows?: Array<Record<string, unknown>>;
 }
 
 export interface DataAnalysisResult {
@@ -66,6 +82,10 @@ export interface DataAnalysisResult {
   attempts: number;
   durationMs: number;
   timestamp: number;
+  insights?: Insight[];
+  mode?: 'tools' | 'single-shot';
+  fallbackReason?: string;
+  toolTrace?: Array<{ tool: string; calls: number; durationMs: number; tokensUsed: number }>;
 }
 
 export interface ChartConfig {
@@ -143,12 +163,20 @@ export interface ChatMessage {
 
 export interface LLMRequest {
   system?: string;
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
+  messages: Array<LLMMessage>;
   jsonMode?: boolean;
   temperature?: number;
   maxTokens?: number;
   model?: string;
+  tools?: ToolDefinition[];
+  toolChoice?: 'auto' | 'none';
 }
+
+export type LLMMessage =
+  | { role: 'user'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | { role: 'tool'; content: string; toolCallId: string };
 
 export interface LLMResponse {
   content: string;
@@ -158,6 +186,8 @@ export interface LLMResponse {
     totalTokens?: number;
   };
   model?: string;
+  toolCalls?: ToolCall[];
+  finishReason?: string;
 }
 
 export interface EmbeddingRequest {
@@ -216,6 +246,22 @@ export interface EvalResultV2 {
   };
   routingCorrect: boolean;
   error?: string;
+}
+
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface Insight {
+  finding: string;
+  evidence: string;
+  confidence: 'high' | 'medium' | 'low';
+  implication?: string;
 }
 
 /** Default retrieval configuration: top-k 8, score gate 0.25, hybrid fusion on (alpha 0.5), MMR off. */

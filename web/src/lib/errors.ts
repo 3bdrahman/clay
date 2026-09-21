@@ -26,6 +26,7 @@ export enum RagErrorCode {
   // Streaming/Generation errors
   STREAM_INTERRUPTED = 'STREAM_INTERRUPTED',
   TOKEN_BUDGET_EXCEEDED = 'TOKEN_BUDGET_EXCEEDED',
+  ANALYSIS_BUDGET_EXCEEDED = 'ANALYSIS_BUDGET_EXCEEDED',
   GENERATION_FAILED = 'GENERATION_FAILED',
 
   // Vector store errors
@@ -130,9 +131,7 @@ export class RagError extends Error {
 export class NoProviderError extends RagError {
   constructor(provider: string, cause?: Error) {
     const message =
-      provider === 'nim'
-        ? 'No NVIDIA NIM API key configured. Add your API key in Settings.'
-        : provider === 'local' || provider === 'ollama'
+      provider === 'local' || provider === 'ollama'
         ? 'No local server URL configured. Set the server URL in Settings.'
         : `No ${provider} API key configured. Add your API key in Settings.`;
 
@@ -285,14 +284,14 @@ export class ProviderTimeoutError extends RagError {
 
 export class CorsBlockedError extends RagError {
   constructor(provider: string, cause?: Error, customMessage?: string) {
-    const shortMessage = `Browser blocked request to ${provider} (CORS). ${provider} only allows requests from build.nvidia.com.`;
+    const shortMessage = `Browser blocked request to ${provider} (CORS). ${provider} does not allow requests from this origin.`;
     const detailedMessage = customMessage
       ? customMessage
       : `Browser blocked the request to ${provider} due to CORS policy. ` +
         `${provider} does not allow requests from this origin. ` +
         `Solutions: (1) Switch to Local server in Settings (Ollama, LM Studio, etc.), or ` +
-        `(2) Deploy an edge proxy (Cloudflare Worker, Vercel function, Netlify function) ` +
-        `and set VITE_NIM_BASE_URL at build time. See README for details.`;
+        `(2) Add ${provider} to the app's CSP connect-src by setting VITE_CSP_EXTRA_CONNECT_SRC at build time. ` +
+        `See README for details.`;
 
     super({
       code: RagErrorCode.CORS_BLOCKED,
@@ -338,6 +337,35 @@ export class TokenBudgetExceededError extends RagError {
       cause,
       retryable: false,
       context: { requested, budget },
+    });
+  }
+}
+
+/** Which analyst tool-loop budget was exceeded: iteration count, wall-clock time, or cumulative tokens. */
+export type AnalysisBudgetKind = 'iterations' | 'time' | 'tokens';
+
+export interface AnalysisBudgetExceededContext {
+  iterations: number;
+  elapsedMs: number;
+  tokensUsed: number;
+  tripped: AnalysisBudgetKind;
+  limit: number;
+}
+
+export class AnalysisBudgetExceededError extends RagError {
+  constructor(context: AnalysisBudgetExceededContext, cause?: Error) {
+    const budgetName =
+      context.tripped === 'iterations' ? 'iteration' :
+      context.tripped === 'time' ? 'time' : 'token';
+    super({
+      code: RagErrorCode.ANALYSIS_BUDGET_EXCEEDED,
+      message:
+        `Analysis budget exceeded: ${budgetName} budget (limit ${context.limit}) tripped — ` +
+        `${context.iterations} iterations, ${context.elapsedMs}ms elapsed, ${context.tokensUsed} tokens used. ` +
+        `Try a narrower question or increase the budget.`,
+      cause,
+      retryable: false,
+      context: { ...context },
     });
   }
 }
@@ -435,18 +463,6 @@ export class CodeExecutionError extends RagError {
 // ============================================================================
 
 /**
- * Checks if the current origin is build.nvidia.com (the only origin NIM allows CORS from).
- */
-function isBuildNvidiaOrigin(): boolean {
-  try {
-    if (typeof window === 'undefined') return false;
-    return window.location.hostname === 'build.nvidia.com';
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Checks if the error is likely a CORS block for a given provider.
  * CORS failures manifest as TypeError: Failed to fetch with no response.
  */
@@ -454,9 +470,8 @@ function isLikelyCorsBlock(error: unknown, provider: string): boolean {
   if (!(error instanceof TypeError && error.message.includes('fetch'))) return false;
   if (import.meta.env.DEV) return false; // Dev uses Vite proxy, CORS is bypassed
 
-  const nimProviders = ['NVIDIA NIM', 'OpenRouter', 'Groq', 'Together AI'];
-  if (!nimProviders.includes(provider)) return false;
-  if (provider === 'NVIDIA NIM' && isBuildNvidiaOrigin()) return false;
+  const corsAwareProviders = ['OpenRouter', 'Groq', 'Together AI'];
+  if (!corsAwareProviders.includes(provider)) return false;
   return true;
 }
 

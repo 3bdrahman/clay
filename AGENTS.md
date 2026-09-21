@@ -50,18 +50,29 @@ Before opening a PR, the author MUST verify:
 
 The user has been emphatic: every issue is to be pursued with **complete FULL implementations**, never simplified, never mocked, never deferred. The original audit (GH issues #1–#12) found and fixed multiple stubs/hard-codes in the codebase. This AGENTS.md documents the standard that prevents regressions.
 
-### Active issues
+### Issue inventory (all closed)
 
-The following GitHub issues track the stub/mock/placeholder inventory:
-- #1  initialK = maxRetries copy-paste bug — **FIXED** in commit c2df56a
-- #2  Silent IDB load failure — **FIXED** in commit ca87c69
-- #3  Hardcoded model-name patterns in scoring heuristics
-- #4  Eval suite is describe.skip + questions.json scenario-bound stub
-- #5  Hardcoded example questions referencing bundled sample CSVs
-- #6  Silent fallback in loadSampleDatasets — **FIXED** in commit 319eae9
-- #7  modelId 'unknown' placeholders — **FIXED** in commit c57f9ea
-- #8  Doc/code mismatch: SHA-256 vs FNV-1a
-- #9  `as any` escape hatches for error step context
-- #10 Production console leak (3 sites)
-- #11 Suspense fallback={null} + file extension drift
-- #12 Math.random step IDs — **FIXED** in commit 567918f
+The GitHub issues that tracked the stub/mock/placeholder inventory — all **CLOSED**. Mapping reflects the actual tracker; a few historical commit messages cite swapped issue numbers (#10↔#11 in `14a4359`/`630eabe`, #9↔#12 in `6d529ab`/`567918f`, and a #5→#7→#6→#8 cycle in `8b87ce2`/`c57f9ea`/`319eae9`/`79dbcd9`), so trust this table over old commit labels:
+
+- #1  initialK = maxRetries copy-paste bug — fixed in `c2df56a`
+- #2  Silent IDB load failure (persistenceAvailable exposure) — fixed in `ca87c69`
+- #3  Hardcoded model-name patterns in scoring heuristics — fixed in `0e058a8` (externalized to `modelPatterns.config.json`)
+- #4  Eval suite describe.skip + scenario-bound stub — fixed in `aa4454c` (schema-bound golden set, suite un-skipped)
+- #5  Doc/code mismatch: SHA-256 comment vs FNV-1a impl + duplicate hashText variants — fixed in `79dbcd9` (single FNV-1a in `lib/hash.ts`)
+- #6  modelId 'unknown' placeholders discard real embedding IDs — fixed in `c57f9ea`
+- #7  Hardcoded example questions referencing bundled sample CSVs — fixed in `8b87ce2` (queries derived from loaded data)
+- #8  loadSampleDatasets silently falls back to hardcoded CSV list — fixed in `319eae9`
+- #9  Math.random() step IDs — fixed in `567918f` (crypto.randomUUID)
+- #10 Suspense fallback={null} + duplicated file-extension list drift — fixed in `14a4359` + `8b87e86`
+- #11 Production console.error/warn not gated by import.meta.env.DEV (3 sites) — fixed in `630eabe`
+- #12 `as any` escape hatches for error step context — fixed in `6d529ab` (typed `RagError.step`)
+- #14 Empty catch blocks across 7 files — fixed in `f21b1f1` + `2096f49` (capture + DEV-log)
+- #15 Magic numbers without named constants — fixed in `f21b1f1`, `94b73f0`, `d41e029`
+- #16 Silent catch in loadSampleDatasets per-file failures — fixed in `8b87e86` (typed `SampleDatasetLoadError`)
+- #17 LLM-generated code lacks security documentation — fixed in `49e2320`
+- #18 Hardcoded '(unspecified)' embedding placeholder — fixed in `d41e029`
+- #19 Skipped tests in embeddings.test.ts — fixed in `94b73f0`
+- #20 Duplicate file-extension list (DataSandbox vs fileExtensions) — fixed in `8b87e86`
+- #21 Doc claims SHA-256, code uses FNV-1a — fixed in `79dbcd9`
+
+(#13 is a PR — "wire initialK to its own settings field" — not an issue.)

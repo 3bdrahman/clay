@@ -123,9 +123,9 @@ export function parseUserCsv(csv: string): {
   rowCount: number;
 } {
   // Pre-process CSV to normalize currency values in data rows (not header)
-  // Only matches clear currency patterns: $X,XXX.XX or X,XXX,XXX.XX (thousands separators)
+  // Only matches unambiguous currency amounts: $1234.56, $1,234.56, or 1,234,567.89 (thousands separators)
   const currencyRegex = /\$[\d,]+\.?\d*|\b\d{1,3}(,\d{3})+\.?\d*\b/g;
-  
+
   const lines = csv.split('\n');
   if (lines.length < 2) {
     const table = aq.fromCSV(csv);

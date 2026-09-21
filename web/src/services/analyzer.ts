@@ -1,10 +1,11 @@
 // Data analyzer — replaces Python exec() with safe in-browser code generation
 // Generates Arquero-compatible code (a pandas-like dataframe library)
 
-import type { ChartConfig, DataAnalysisResult, DatasetSummary } from '../lib/types';
-import type { EmbeddingsClient } from '../lib/embeddings';
+import type { ChartConfig, DataAnalysisResult, DatasetSummary, LLMMessage } from '../lib/types';
 import type { LLMClient } from '../lib/llm';
-import { CodeExecutionError } from '../lib/errors';
+import { CodeExecutionError, GenerationFailedError, RateLimitError } from '../lib/errors';
+import { TOOL_SCHEMAS, executeToolCall, type AnalysisToolContext } from '../lib/analysisTools';
+import { AnalysisBudgetExceededError } from '../lib/errors';
 
 export interface DatasetMeta {
   [datasetName: string]: {
@@ -13,24 +14,36 @@ export interface DatasetMeta {
   };
 }
 
+export interface AnalyzerHooks {
+  onToolStart?: (info: { tool: string; argsSummary: string; startedAt: number }) => void;
+  onToolEnd?: (info: { tool: string; durationMs: number; error?: string }) => void;
+}
+
 export interface DataAnalyzer {
-  analyze(question: string, signal?: AbortSignal): Promise<DataAnalysisResult>;
+  analyze(question: string, signal?: AbortSignal, hooks?: AnalyzerHooks): Promise<DataAnalysisResult>;
   listDatasets(): DatasetSummary[];
   getDatasetSummary(name: string): DatasetSummary | undefined;
 }
 
 export interface DataAnalyzerDeps {
   llm: LLMClient;
-  embeddings: EmbeddingsClient;
   datasets: Map<string, unknown>;
   metadata: DatasetMeta;
   codeGenModel?: string;
+  maxToolLoopTokens?: number; // cumulative tool-loop token budget; undefined = default
+}
+
+class FallbackTriggered extends Error {
+  constructor(public readonly reason: 'provider-rejected-tools' | 'no-first-tool-call' | 'malformed-tool-calls') {
+    super(`Fallback triggered: ${reason}`);
+    this.name = 'FallbackTriggered';
+  }
 }
 
 /**
  * Create a data analyzer that generates and executes Arquero code for CSV analysis.
  * Uses LLM to generate JavaScript, executes safely via new Function(), detects chart config.
- * @param deps - LLM client, embeddings client, dataset Map, metadata, optional codeGenModel
+ * @param deps - LLM client, dataset Map, metadata, optional codeGenModel, optional maxToolLoopTokens
  * @returns DataAnalyzer with analyze(), listDatasets(), getDatasetSummary()
  */
 export function createDataAnalyzer(deps: DataAnalyzerDeps): DataAnalyzer {
@@ -41,6 +54,16 @@ export function createDataAnalyzer(deps: DataAnalyzerDeps): DataAnalyzer {
   const MAX_RELEVANT_DATASETS = 4;
   const MAX_CHART_ROWS = 12;
   const MAX_ANALYSIS_ATTEMPTS = 2;
+
+  // Named constants for the agentic tool loop (AGENTS.md: no magic numbers)
+  const MAX_TOOL_ITERATIONS = 8;
+  const MAX_TOOL_LOOP_MS = 120_000;
+  const DEFAULT_TOOL_LOOP_TOKENS = 100_000;
+  const MAX_TOOL_RESULT_CHARS = 4000;
+  const ARGS_SUMMARY_MAX_CHARS = 120;
+  const MAX_CONSECUTIVE_MALFORMED = 2;
+  const MAX_LLM_CALL_RETRIES = 3;
+  const LLM_CALL_BASE_BACKOFF_MS = 1000;
 
   function relevantDatasets(question: string): string[] {
     const q = question.toLowerCase().replace(/[^a-z0-9_\s]/g, ' ');
@@ -94,7 +117,7 @@ Return JSON with literal text inside the code block (no outer braces):
 
 Question: ${question}
 
-Generate FIXED JavaScript code using Arquero (loaded as 'aq'). Available datasets: ${Object.keys(deps.datasets).join(', ')}.
+Generate FIXED JavaScript code using Arquero (loaded as 'aq'). Available datasets: ${Object.keys(deps.datasets).filter(n => n !== 'aq').join(', ')}.
 
 Common pitfalls to avoid:
 - Don't use pandas syntax (no .iloc, no pd, no Python f-strings)
@@ -239,11 +262,17 @@ Return JSON: {"code": "...", "explanation": "..."}`;
   }
 
   function formatResult(
+    question: string,
     result: unknown,
     code: string,
     explanation: string,
     attempts: number,
-    start: number
+    start: number,
+    extra?: {
+      mode: 'tools' | 'single-shot';
+      insights?: Insight[];
+      toolTrace?: Array<{ tool: string; calls: number; durationMs: number; tokensUsed: number }>;
+    }
   ): DataAnalysisResult {
     let resultType: DataAnalysisResult['resultType'] = 'scalar';
     let chartConfig: ChartConfig | undefined;
@@ -298,7 +327,7 @@ Return JSON: {"code": "...", "explanation": "..."}`;
 
     return {
       type: 'data_analysis',
-      question: code,
+      question,
       code,
       explanation,
       resultType,
@@ -307,10 +336,17 @@ Return JSON: {"code": "...", "explanation": "..."}`;
       attempts,
       durationMs: performance.now() - start,
       timestamp: Date.now(),
+      insights: extra?.insights,
+      mode: extra?.mode,
+      toolTrace: extra?.toolTrace,
     };
   }
 
-  async function analyze(question: string, signal?: AbortSignal): Promise<DataAnalysisResult> {
+  // ============================================================================
+  // Single-shot analysis (capability fallback for todo 7)
+  // ============================================================================
+
+  async function _analyzeSingleShot(question: string, signal?: AbortSignal): Promise<DataAnalysisResult> {
     const start = performance.now();
     const relevant = relevantDatasets(question);
     const maxAttempts = MAX_ANALYSIS_ATTEMPTS;
@@ -346,7 +382,7 @@ Return JSON: {"code": "...", "explanation": "..."}`;
         code = parsed.code || '';
         if (!code) throw new Error('Empty code from LLM');
         const result = executeUserCode(code);
-        return formatResult(result, code, parsed.explanation, attempt + 1, start);
+        return formatResult(question, result, code, parsed.explanation, attempt + 1, start);
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e));
         lastError = error.message;
@@ -386,6 +422,452 @@ Return JSON: {"code": "...", "explanation": "..."}`;
       durationMs: performance.now() - start,
       timestamp: Date.now(),
     };
+  }
+
+  // ============================================================================
+  // Agentic tool loop (primary analyze path)
+  // ============================================================================
+
+  interface ToolTraceEntry {
+    tool: string;
+    calls: number;
+    durationMs: number;
+    tokensUsed: number;
+  }
+
+  interface LoopResult {
+    answer: string;
+    insights: Insight[];
+    chart: ChartConfig | undefined;
+    tokensUsed: number;
+    iterations: number;
+    toolTrace: ToolTraceEntry[];
+  }
+
+  interface Insight {
+    finding: string;
+    evidence: string;
+    confidence: 'high' | 'medium' | 'low';
+    implication?: string;
+  }
+
+  function buildSystemPrompt(): string {
+    return `You are a senior data analyst. You have tools to inspect the actual data — begin EVERY analysis by calling list_datasets, then profile_column on the relevant columns BEFORE reasoning. Quantify every claim with numbers from tool results. Verify patterns against the actual data (use filter_sample to inspect rows). Compute correlations where meaningful. State limitations and confidence honestly — never overclaim causation from correlation. When the evidence is sufficient, STOP calling tools and return the final synthesis as JSON with this exact structure:
+{
+  "answer": "your final answer text",
+  "insights": [
+    {"finding": "...", "evidence": "...", "confidence": "high|medium|low", "implication": "..."}
+  ],
+  "chart": {"type": "bar|line|pie", "title": "...", "xKey": "...", "yKeys": [...], "data": [...]}
+}
+
+The chart field is optional. Include it only when a visualization adds value.`;
+  }
+
+  function buildInitialUserMessage(question: string, relevant: string[]): string {
+    const datasetInfo = relevant
+      .map(name => {
+        const meta = metadata[name];
+        return `- ${name} (${meta?.rowCount || '?'} rows): columns = ${JSON.stringify(meta?.columns || [])}`;
+      })
+      .join('\n');
+    return `Question: ${question}
+
+Available datasets:
+${datasetInfo}
+
+Use the tools to explore the data and answer the question.`;
+  }
+
+  function summarizeArgs(args: Record<string, unknown>): string {
+    const json = JSON.stringify(args);
+    if (json.length <= ARGS_SUMMARY_MAX_CHARS) return json;
+    return json.slice(0, ARGS_SUMMARY_MAX_CHARS) + '…';
+  }
+
+  function truncateResult(content: string): string {
+    if (content.length <= MAX_TOOL_RESULT_CHARS) return content;
+    return content.slice(0, MAX_TOOL_RESULT_CHARS) + '… [truncated]';
+  }
+
+  async function runToolLoop(
+    question: string,
+    relevant: string[],
+    signal?: AbortSignal,
+    hooks?: AnalyzerHooks
+  ): Promise<LoopResult> {
+    const start = performance.now();
+    const tokenBudget = deps.maxToolLoopTokens ?? DEFAULT_TOOL_LOOP_TOKENS;
+
+    const messages: LLMMessage[] = [
+      { role: 'user', content: buildInitialUserMessage(question, relevant) },
+    ];
+
+    const toolTraceMap = new Map<string, { calls: number; durationMs: number; tokensUsed: number }>();
+    let tokensUsed = 0;
+    let iterations = 0;
+    let consecutiveMalformed = 0;
+
+    while (iterations < MAX_TOOL_ITERATIONS) {
+      // Check abort before each invoke
+      if (signal?.aborted) {
+        throw new CodeExecutionError('Analysis aborted', new Error('AbortSignal triggered'), {
+          code: '',
+          retryable: false,
+        });
+      }
+
+      let resp: Awaited<ReturnType<typeof llm.invoke>>;
+      let llmCallAttempt = 0;
+      while (true) {
+        try {
+          resp = await llm.invoke({
+            system: buildSystemPrompt(),
+            messages,
+            tools: TOOL_SCHEMAS,
+            toolChoice: 'auto',
+            temperature: 0,
+            model: deps.codeGenModel,
+          }, signal);
+          break;
+        } catch (e) {
+          if (iterations === 0 && e instanceof GenerationFailedError) {
+            throw new FallbackTriggered('provider-rejected-tools');
+          }
+          if (e instanceof RateLimitError && llmCallAttempt < MAX_LLM_CALL_RETRIES) {
+            llmCallAttempt++;
+            const delay = LLM_CALL_BASE_BACKOFF_MS * Math.pow(2, llmCallAttempt - 1);
+            if (import.meta.env.DEV) {
+              console.warn(`[analyzer] Rate limited, retrying LLM call (attempt ${llmCallAttempt}/${MAX_LLM_CALL_RETRIES}) after ${delay}ms`);
+            }
+            await new Promise(r => setTimeout(r, delay));
+            if (signal?.aborted) {
+              throw new CodeExecutionError('Analysis aborted', new Error('AbortSignal triggered'), {
+                code: '',
+                retryable: false,
+              });
+            }
+            continue;
+          }
+          throw e;
+        }
+      }
+
+      // Check abort after invoke
+      if (signal?.aborted) {
+        throw new CodeExecutionError('Analysis aborted', new Error('AbortSignal triggered'), {
+          code: '',
+          retryable: false,
+        });
+      }
+
+      iterations++;
+      const iterationTokens = resp.usage?.totalTokens ?? 0;
+      tokensUsed += iterationTokens;
+
+      // Budget checks
+      const elapsedMs = performance.now() - start;
+      if (iterations > MAX_TOOL_ITERATIONS) {
+        throw new AnalysisBudgetExceededError({
+          iterations,
+          elapsedMs,
+          tokensUsed,
+          tripped: 'iterations',
+          limit: MAX_TOOL_ITERATIONS,
+        });
+      }
+      if (elapsedMs > MAX_TOOL_LOOP_MS) {
+        throw new AnalysisBudgetExceededError({
+          iterations,
+          elapsedMs,
+          tokensUsed,
+          tripped: 'time',
+          limit: MAX_TOOL_LOOP_MS,
+        });
+      }
+      if (tokensUsed > tokenBudget) {
+        throw new AnalysisBudgetExceededError({
+          iterations,
+          elapsedMs,
+          tokensUsed,
+          tripped: 'tokens',
+          limit: tokenBudget,
+        });
+      }
+
+      const toolCalls = resp.toolCalls;
+      const finishReason = resp.finishReason;
+
+      if (toolCalls && toolCalls.length > 0) {
+        // Assistant message with tool calls
+        messages.push({
+          role: 'assistant',
+          content: resp.content || '',
+          toolCalls,
+        });
+
+        for (const call of toolCalls) {
+          const toolName = call.function.name;
+          let toolResult: unknown;
+          let toolError: string | undefined;
+          const toolStart = Date.now();
+
+          // Validate tool call
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(call.function.arguments || '{}');
+          } catch {
+            // Malformed arguments
+            consecutiveMalformed++;
+            toolError = `malformed tool call: invalid JSON arguments`;
+            toolResult = { error: toolError };
+            if (import.meta.env.DEV) console.warn('[analyzer] Malformed tool call arguments:', call.function.arguments);
+          }
+
+          if (!toolError) {
+            if (!toolName || typeof toolName !== 'string') {
+              consecutiveMalformed++;
+              toolError = 'malformed tool call: missing function name';
+              toolResult = { error: toolError };
+              if (import.meta.env.DEV) console.warn('[analyzer] Malformed tool call: missing name');
+            }
+          }
+
+          if (!toolError) {
+            // Valid call - reset malformed counter
+            consecutiveMalformed = 0;
+
+            // Fire onToolStart hook
+            try {
+              hooks?.onToolStart?.({
+                tool: toolName,
+                argsSummary: summarizeArgs(args),
+                startedAt: toolStart,
+              });
+            } catch (hookErr) {
+              if (import.meta.env.DEV) console.warn('[analyzer] onToolStart hook threw:', hookErr);
+            }
+
+            // Execute tool
+            try {
+              const ctx: AnalysisToolContext = {
+                datasets: deps.datasets,
+                metadata,
+              };
+              toolResult = executeToolCall(ctx, toolName, args, executeUserCode);
+            } catch (e) {
+              const err = e instanceof Error ? e : new Error(String(e));
+              toolError = err.message;
+              toolResult = { error: toolError };
+              if (import.meta.env.DEV) console.warn(`[analyzer] Tool ${toolName} failed:`, toolError);
+            }
+
+            const durationMs = Date.now() - toolStart;
+
+            const tokensPerCall = toolCalls.length > 0 ? Math.round(iterationTokens / toolCalls.length) : 0;
+            const trace = toolTraceMap.get(toolName) || { calls: 0, durationMs: 0, tokensUsed: 0 };
+            trace.calls += 1;
+            trace.durationMs += durationMs;
+            trace.tokensUsed += tokensPerCall;
+            toolTraceMap.set(toolName, trace);
+
+            try {
+              hooks?.onToolEnd?.({
+                tool: toolName,
+                durationMs,
+                error: toolError,
+              });
+            } catch (hookErr) {
+              if (import.meta.env.DEV) console.warn('[analyzer] onToolEnd hook threw:', hookErr);
+            }
+          } else {
+            const durationMs = Date.now() - toolStart;
+            const tokensPerCall = toolCalls.length > 0 ? Math.round(iterationTokens / toolCalls.length) : 0;
+            const trace = toolTraceMap.get(toolName) || { calls: 0, durationMs: 0, tokensUsed: 0 };
+            trace.calls += 1;
+            trace.durationMs += durationMs;
+            trace.tokensUsed += tokensPerCall;
+            toolTraceMap.set(toolName, trace);
+          }
+
+          // Tool result message
+          messages.push({
+            role: 'tool',
+            content: truncateResult(JSON.stringify(toolResult)),
+            toolCallId: call.id,
+          });
+        }
+
+        // Check consecutive malformed limit - Trigger (c)
+        if (consecutiveMalformed >= MAX_CONSECUTIVE_MALFORMED) {
+          throw new FallbackTriggered('malformed-tool-calls');
+        }
+
+        continue; // Next iteration
+      }
+
+      // No tool calls - check finish reason
+      // Trigger (b): first iteration, no tool calls, finishReason 'stop'
+      if (iterations === 1 && finishReason === 'stop') {
+        throw new FallbackTriggered('no-first-tool-call');
+      }
+
+      if (finishReason === 'stop' || !toolCalls || toolCalls.length === 0) {
+        // Final synthesis
+        let synthesis: { answer: string; insights?: Insight[]; chart?: ChartConfig } = {
+          answer: resp.content || '',
+          insights: [],
+        };
+
+        try {
+          // Strip markdown fences if present
+          let content = resp.content || '';
+          const fenceMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+          if (fenceMatch) content = fenceMatch[1].trim();
+          const parsed = JSON.parse(content);
+          synthesis = {
+            answer: parsed.answer ?? content,
+            insights: parsed.insights ?? [],
+            chart: parsed.chart,
+          };
+        } catch {
+          // Unparseable - treat whole content as answer
+          synthesis = { answer: resp.content || '', insights: [] };
+        }
+
+        // FIX 2a: Normalize insight confidence to 'high' | 'medium' | 'low' enum
+        const validConfidence = new Set(['high', 'medium', 'low'] as const);
+        if (Array.isArray(synthesis.insights)) {
+          for (const insight of synthesis.insights) {
+            if (!validConfidence.has(insight.confidence)) {
+              insight.confidence = 'low';
+            }
+          }
+        }
+
+        // FIX 2b: Validate synthesis chart shape before trusting it
+        const validChartTypes = new Set(['bar', 'line', 'pie'] as const);
+        let chart: ChartConfig | undefined = synthesis.chart;
+        if (chart) {
+          const isValidChart =
+            typeof chart === 'object' &&
+            chart !== null &&
+            validChartTypes.has(chart.type) &&
+            typeof chart.title === 'string' &&
+            typeof chart.xKey === 'string' &&
+            Array.isArray(chart.yKeys) &&
+            chart.yKeys.length > 0 &&
+            chart.yKeys.every(k => typeof k === 'string') &&
+            Array.isArray(chart.data) &&
+            chart.data.length > 0 &&
+            chart.data.every(d => d && typeof d === 'object');
+          if (!isValidChart) {
+            chart = undefined;
+          }
+        }
+
+        const toolTrace: ToolTraceEntry[] = Array.from(toolTraceMap.entries()).map(([tool, data]) => ({
+          tool,
+          calls: data.calls,
+          durationMs: data.durationMs,
+          tokensUsed: data.tokensUsed,
+        }));
+
+        return {
+          answer: synthesis.answer,
+          insights: synthesis.insights ?? [],
+          chart,
+          tokensUsed,
+          iterations,
+          toolTrace,
+        };
+      }
+
+      // Other finish reasons (length, content_filter, etc.) - treat as stop
+      const toolTrace: ToolTraceEntry[] = Array.from(toolTraceMap.entries()).map(([tool, data]) => ({
+        tool,
+        calls: data.calls,
+        durationMs: data.durationMs,
+        tokensUsed: data.tokensUsed,
+      }));
+
+      return {
+        answer: resp.content || '',
+        insights: [],
+        chart: undefined,
+        tokensUsed,
+        iterations,
+        toolTrace,
+      };
+    }
+
+    // Should not reach here due to budget checks, but safety net
+    throw new AnalysisBudgetExceededError({
+      iterations,
+      elapsedMs: performance.now() - start,
+      tokensUsed,
+      tripped: 'iterations',
+      limit: MAX_TOOL_ITERATIONS,
+    });
+  }
+
+  async function analyze(question: string, signal?: AbortSignal, hooks?: AnalyzerHooks): Promise<DataAnalysisResult> {
+    const start = performance.now();
+
+    // FIX 1: Empty datasets guard — return early with helpful message if no real datasets loaded
+    const realDatasetNames = [...deps.datasets.keys()].filter(n => n !== 'aq');
+    if (realDatasetNames.length === 0) {
+      return {
+        type: 'data_analysis',
+        question,
+        code: '',
+        explanation: 'No datasets are loaded yet. Upload a CSV in the Data panel first, then ask again.',
+        resultType: 'scalar',
+        result: 'No datasets loaded',
+        chartConfig: undefined,
+        attempts: 0,
+        durationMs: performance.now() - start,
+        timestamp: Date.now(),
+      };
+    }
+
+    const relevant = relevantDatasets(question);
+
+    try {
+      const loopResult = await runToolLoop(question, relevant, signal, hooks);
+
+      const toolTrace: Array<{ tool: string; calls: number; durationMs: number; tokensUsed: number }> = Array.from(
+        loopResult.toolTrace
+      );
+
+      // For tool loop, the result is the synthesis answer (string), and chart comes from synthesis
+      const resultType = loopResult.chart ? 'chart' : 'scalar';
+      return {
+        type: 'data_analysis',
+        question,
+        code: '',
+        explanation: loopResult.answer,
+        resultType,
+        result: loopResult.answer,
+        chartConfig: loopResult.chart,
+        insights: loopResult.insights,
+        attempts: loopResult.iterations,
+        durationMs: performance.now() - start,
+        timestamp: Date.now(),
+        mode: 'tools' as const,
+        toolTrace,
+      };
+    } catch (e) {
+      if (e instanceof FallbackTriggered) {
+        const singleShotResult = await _analyzeSingleShot(question, signal);
+        return {
+          ...singleShotResult,
+          mode: 'single-shot' as const,
+          fallbackReason: e.reason,
+        };
+      }
+      throw e;
+    }
   }
 
   function getDatasetSummary(name: string): DatasetSummary | undefined {

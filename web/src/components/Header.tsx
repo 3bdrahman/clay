@@ -1,5 +1,6 @@
 import { useAppStore } from '../store';
 import type { PickedModels } from '../lib/models';
+import { getProviderApiKeyField } from '../lib/providers';
 import { useConfirm } from '../hooks/useConfirm';
 import type { ProviderKind } from '../lib/types';
 
@@ -21,7 +22,6 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
   const updateSettings = useAppStore(s => s.updateSettings);
   const messageCount = useAppStore(countActivateMessages);
   const clearMessages = useAppStore(s => s.clearMessages);
-  const availableModels = useAppStore(s => s.availableModels);
   const modelsLoading = useAppStore(s => s.modelsLoading);
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
@@ -57,13 +57,11 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
   };
 
   const isLocal = provider === 'local';
-  const apiKeyField = provider === 'openrouter' ? 'openrouterApiKey' :
-    provider === 'groq' ? 'groqApiKey' :
-    provider === 'together' ? 'togetherApiKey' : '';
-  const hasKey = !isLocal && ((settings as unknown as Record<string, string>)[apiKeyField]?.length ?? 0) > 0;
-  const hasLocalModel = isLocal && !!pickedModels.answer;
+  const apiKeyField = getProviderApiKeyField(provider);
+  const hasKey = apiKeyField !== undefined && settings[apiKeyField].length > 0;
+  const hasLocalModel = isLocal && !!pickedModels.chat;
   const connected = hasKey || hasLocalModel;
-  const answerModel = pickedModels.answer ?? (isLocal ? 'No local answer model set' : availableModels[0]?.id ?? 'Loading models…');
+  const answerModel = pickedModels.chat ?? (isLocal || hasKey ? 'No chat model set' : 'Not configured');
   const providerLabel = providerDisplayNames[provider];
 
   return (

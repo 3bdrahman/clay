@@ -6,17 +6,19 @@ interface Props {
   onSubmit: (text: string) => void;
   onCancel: () => void;
   disabled?: boolean;
+  isRunning: boolean;
+  onConfigure?: () => void;
   placeholder?: string;
 }
 
-export function ChatInput({ onSubmit, onCancel, disabled, placeholder }: Props) {
+export function ChatInput({ onSubmit, onCancel, disabled, isRunning, onConfigure, placeholder }: Props) {
   const [value, setValue] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
   const helperTextId = useId();
 
   useEffect(() => {
-    if (!disabled) ref.current?.focus();
-  }, [disabled]);
+    if (!isRunning) ref.current?.focus();
+  }, [isRunning]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -27,17 +29,22 @@ export function ChatInput({ onSubmit, onCancel, disabled, placeholder }: Props) 
       if (e.key === '/' && !isTextField) {
         e.preventDefault();
         ref.current?.focus();
-      } else if (e.key === 'Escape' && !disabled) {
+      } else if (e.key === 'Escape' && isRunning) {
         onCancel();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [disabled, onCancel]);
+  }, [isRunning, onCancel]);
 
   const submit = () => {
     const text = value.trim();
-    if (!text || disabled) return;
+    if (!text || isRunning) return;
+    if (onConfigure) {
+      onConfigure();
+      return;
+    }
+    if (disabled) return;
     onSubmit(text);
     setValue('');
   };
@@ -56,10 +63,10 @@ export function ChatInput({ onSubmit, onCancel, disabled, placeholder }: Props) 
             }
           }}
           placeholder={placeholder || 'Ask anything about your data…'}
-          disabled={disabled}
+          disabled={isRunning}
           rows={1}
           aria-label="Ask Clay a question"
-          aria-busy={disabled}
+          aria-busy={isRunning}
           aria-describedby={helperTextId}
           className="w-full resize-none px-4 py-3 pr-24 rounded-2xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-sm text-ink-800 dark:text-ink-100 placeholder-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none disabled:opacity-50"
           style={{ minHeight: 48, maxHeight: 160 }}
@@ -70,7 +77,7 @@ export function ChatInput({ onSubmit, onCancel, disabled, placeholder }: Props) 
           }}
         />
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-          {disabled ? (
+          {isRunning ? (
             <button
               onClick={onCancel}
               aria-label="Stop generation"
@@ -81,10 +88,18 @@ export function ChatInput({ onSubmit, onCancel, disabled, placeholder }: Props) 
               </svg>
               Stop
             </button>
+          ) : onConfigure ? (
+            <button
+              onClick={onConfigure}
+              aria-label="Configure provider"
+              className="px-3 py-1.5 rounded-lg bg-brand-500 text-white hover:bg-brand-600 text-xs font-medium"
+            >
+              Settings
+            </button>
           ) : (
             <button
               onClick={submit}
-              disabled={!value.trim()}
+              disabled={disabled || !value.trim()}
               aria-label="Send message"
               className="px-3 py-1.5 rounded-lg bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-30 disabled:cursor-not-allowed text-xs font-medium flex items-center gap-1.5"
             >

@@ -3,9 +3,10 @@ import { createWorkflowOrchestrator } from '../services/orchestrator';
 import type { LLMClient } from '../lib/llm';
 import type { VectorStore } from '../lib/vectorstore';
 import type { WebSearchClient } from '../lib/websearch';
-import type { DataAnalyzer } from '../services/analyzer';
+import type { DataAnalyzer, AnalyzerHooks } from '../services/analyzer';
 import type { Settings, Document, WebResult, DataAnalysisResult } from '../lib/types';
 import type { PickedModels } from '../lib/models';
+import { AnalysisBudgetExceededError } from '../lib/errors';
 
 const mockLLM: LLMClient = {
   invoke: vi.fn<
@@ -32,7 +33,7 @@ const mockWebSearch: WebSearchClient = {
 };
 
 const mockAnalyzer: DataAnalyzer = {
-  analyze: vi.fn<Promise<DataAnalysisResult>, [string, AbortSignal?]>(),
+  analyze: vi.fn<Promise<DataAnalysisResult>, [string, AbortSignal?, AnalyzerHooks?]>(),
   listDatasets: vi.fn<DatasetSummary[], []>(),
   getDatasetSummary: vi.fn<DatasetSummary | undefined, [string]>(),
 };
@@ -48,10 +49,7 @@ const testSettings: Settings = {
 };
 
 const testPickedModels: PickedModels = {
-  routing: 'routing-model',
-  codeGen: 'codegen-model',
-  answer: 'answer-model',
-  eval: 'eval-model',
+  chat: 'user-selected-chat',
   embedding: 'embedding-model',
 };
 
@@ -102,6 +100,12 @@ describe('createWorkflowOrchestrator', () => {
     expect(state.routing).toBe('vectorstore');
     expect(state.documents).toHaveLength(1);
     expect(state.answer).toBe('Answer based on doc');
+    for (const [request] of vi.mocked(mockLLM.invoke).mock.calls) {
+      expect(request.model).toBe('user-selected-chat');
+    }
+    for (const [request] of vi.mocked(mockLLM.stream).mock.calls) {
+      expect(request.model).toBe('user-selected-chat');
+    }
   });
 
   it('routes to python for data analysis questions', async () => {
@@ -690,6 +694,397 @@ describe('createWorkflowOrchestrator — error step context via RagError (issue 
     const state = await orch.run();
     expect(state.error).toBeDefined();
     expect(state.error?.step).toBe('vectorstore-similaritySearch');
+  });
+});
+
+describe('createWorkflowOrchestrator — analyzer tool-call sub-steps and insights', () => {
+  let orchestrator: ReturnType<typeof createWorkflowOrchestrator>;
+  let stepUpdates: StepTrace[][] = [];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.similaritySearch.mockResolvedValue([]);
+    stepUpdates = [];
+
+    // Mock analyzer to capture hooks and allow test control
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockImplementation(
+      async (question: string, _signal?: AbortSignal, _hooks?: AnalyzerHooks) => {
+        return {
+          type: 'data_analysis',
+          question,
+          code: '',
+          explanation: 'Analysis complete',
+          resultType: 'scalar',
+          result: 'Analysis result',
+          attempts: 1,
+          durationMs: 100,
+          timestamp: Date.now(),
+          mode: 'tools',
+          toolTrace: [{ tool: 'profile_column', calls: 1, durationMs: 5 }],
+          insights: [{ finding: 'Revenue is up', evidence: 'sum 5000', confidence: 'high' }],
+        };
+      }
+    );
+
+    orchestrator = createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {
+        onStepUpdate: (steps) => stepUpdates.push(steps),
+      }
+    );
+
+    // Route to python path
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'python' }),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+  });
+
+  it('emits tool-call sub-steps', async () => {
+    // Override analyzer to fire hooks
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockImplementation(
+      async (question: string, signal?: AbortSignal, hooks?: AnalyzerHooks) => {
+        const startedAt = Date.now();
+        hooks?.onToolStart?.({ tool: 'profile_column', argsSummary: '{}', startedAt });
+        hooks?.onToolEnd?.({ tool: 'profile_column', durationMs: 5 });
+        return {
+          type: 'data_analysis',
+          question,
+          code: '',
+          explanation: 'Analysis complete',
+          resultType: 'scalar',
+          result: 'Analysis result',
+          attempts: 1,
+          durationMs: 100,
+          timestamp: Date.now(),
+          mode: 'tools',
+          toolTrace: [{ tool: 'profile_column', calls: 1, durationMs: 5 }],
+        };
+      }
+    );
+
+    await orchestrator.run();
+
+    // Find the analyze sub-step
+    const allSteps = stepUpdates.flat();
+    const subStep = allSteps.find(s => s.node === 'analyze:profile_column');
+    expect(subStep).toBeDefined();
+    expect(subStep?.label).toBe('profile_column');
+    expect(subStep?.status).toBe('done');
+    expect(subStep?.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('tool error marks the sub-step error', async () => {
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockImplementation(
+      async (question: string, signal?: AbortSignal, hooks?: AnalyzerHooks) => {
+        const startedAt = Date.now();
+        hooks?.onToolStart?.({ tool: 'profile_column', argsSummary: '{}', startedAt });
+        hooks?.onToolEnd?.({ tool: 'profile_column', durationMs: 5, error: 'tool blew up' });
+        return {
+          type: 'data_analysis',
+          question,
+          code: '',
+          explanation: 'Analysis complete',
+          resultType: 'scalar',
+          result: 'Analysis result',
+          attempts: 1,
+          durationMs: 100,
+          timestamp: Date.now(),
+          mode: 'tools',
+          toolTrace: [{ tool: 'profile_column', calls: 1, durationMs: 5 }],
+        };
+      }
+    );
+
+    await orchestrator.run();
+
+    const allSteps = stepUpdates.flat();
+    const subStep = allSteps.find(s => s.node === 'analyze:profile_column');
+    expect(subStep).toBeDefined();
+    expect(subStep?.status).toBe('error');
+    expect(subStep?.detail).toBe('tool blew up');
+  });
+
+  it('records mode in the analyze step meta', async () => {
+    await orchestrator.run();
+
+    const allSteps = stepUpdates.flat();
+    const analyzeStep = allSteps.find(s => s.node === 'analyze' && s.status === 'done');
+    expect(analyzeStep).toBeDefined();
+    expect(analyzeStep?.meta?.mode).toBe('tools');
+    expect(analyzeStep?.meta?.toolCount).toBe(1);
+    expect(analyzeStep?.meta?.fallbackReason).toBeUndefined();
+  });
+
+  it('insights appear in the generate context', async () => {
+    await orchestrator.run();
+
+    // Check the prompt sent to the LLM stream call
+    const streamCalls = vi.mocked(mockLLM.stream).mock.calls;
+    expect(streamCalls.length).toBeGreaterThan(0);
+    const [request] = streamCalls[0]!;
+    const prompt = request.messages[0]?.content || '';
+    expect(prompt).toContain('Insights:');
+    expect(prompt).toContain('Revenue is up');
+    expect(prompt).toContain('sum 5000');
+    expect(prompt).toContain('confidence: high');
+  });
+});
+
+describe('createWorkflowOrchestrator — route datasource validation (FIX 1)', () => {
+  it('an invalid route datasource falls back to vectorstore', async () => {
+    vi.clearAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.similaritySearch.mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+
+    // Route returns invalid datasource
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'data' }),
+    });
+    // HyDE expansion call
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Hypothetical passage for testing.',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer based on doc',
+      usage: undefined,
+      model: 'answer-model',
+    });
+
+    const orchestrator = createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {},
+    );
+
+    const state = await orchestrator.run();
+
+    expect(state.routing).toBe('vectorstore');
+    expect(state.documents).toHaveLength(1);
+    expect(state.answer).toBe('Answer based on doc');
+  });
+});
+
+describe('createWorkflowOrchestrator — withRetry RagError preservation (FIX 2)', () => {
+  it('a typed RagError from the analyzer keeps its message', async () => {
+    vi.clearAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.similaritySearch.mockResolvedValue([]);
+
+    // Route to python path
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'python' }),
+    });
+
+    // Analyzer throws AnalysisBudgetExceededError
+    const budgetError = new AnalysisBudgetExceededError({
+      iterations: 9,
+      elapsedMs: 1000,
+      tokensUsed: 500,
+      tripped: 'iterations',
+      limit: 8,
+    });
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockRejectedValue(budgetError);
+
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+
+    const orchestrator = createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {},
+    );
+
+    const state = await orchestrator.run();
+
+    expect(state.error).toBeDefined();
+    expect(state.error?.message).toContain('Analysis budget exceeded');
+    expect(state.error?.message).not.toContain('Failed to generate response');
+    expect(state.error?.code).toBe('ANALYSIS_BUDGET_EXCEEDED');
+  });
+});
+
+describe('createWorkflowOrchestrator — fallback reason visibility (FIX 3)', () => {
+  it('the fallback reason appears in the analyze step detail', async () => {
+    vi.clearAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.similaritySearch.mockResolvedValue([]);
+
+    // Route to python path
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'python' }),
+    });
+
+    // Analyzer returns result with fallbackReason
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockResolvedValue({
+      type: 'data_analysis',
+      question: 'test',
+      code: 'result = 1',
+      explanation: 'One',
+      resultType: 'scalar',
+      result: 1,
+      attempts: 1,
+      durationMs: 100,
+      timestamp: Date.now(),
+      mode: 'fallback',
+      fallbackReason: 'no-first-tool-call',
+      toolTrace: [],
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+
+    const stepUpdates: StepTrace[][] = [];
+    const orchestrator = createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {
+        onStepUpdate: (steps) => stepUpdates.push(steps),
+      },
+    );
+
+    await orchestrator.run();
+
+    const allSteps = stepUpdates.flat();
+    const analyzeStep = allSteps.find(s => s.node === 'analyze' && s.status === 'done');
+    expect(analyzeStep).toBeDefined();
+    expect(analyzeStep?.detail).toContain('fallback: no-first-tool-call');
+  });
+});
+
+describe('createWorkflowOrchestrator — rAF coalescing of onPartialUpdate', () => {
+  let orchestrator: ReturnType<typeof createWorkflowOrchestrator>;
+  let stepUpdates: StepTrace[][] = [];
+  let partialUpdates: WorkflowState[] = [];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.similaritySearch.mockResolvedValue([]);
+    stepUpdates = [];
+    partialUpdates = [];
+
+    // Mock analyzer to return quickly
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockResolvedValue({
+      type: 'data_analysis',
+      question: 'test',
+      code: '',
+      explanation: 'Analysis complete',
+      resultType: 'scalar',
+      result: 'Analysis result',
+      attempts: 1,
+      durationMs: 10,
+      timestamp: Date.now(),
+      mode: 'tools',
+      toolTrace: [],
+      insights: [],
+    });
+
+    orchestrator = createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {
+        onStepUpdate: (steps) => stepUpdates.push(steps),
+        onPartialUpdate: (state) => partialUpdates.push(state),
+      }
+    );
+
+    // Route to python path
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'python' }),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+  });
+
+  it('coalesces rapid onPartialUpdate calls within one frame', async () => {
+    // The orchestrator emits: route -> analyze -> generate -> evaluate -> end
+    // That's 5 step updates. onPartialUpdate should fire fewer times due to rAF batching.
+    await orchestrator.run();
+
+    // onStepUpdate fires for each step (at least 5: route, analyze, generate, evaluate, end)
+    expect(stepUpdates.length).toBeGreaterThanOrEqual(5);
+
+    // onPartialUpdate should fire fewer times due to rAF coalescing
+    // (exact count depends on timing, but should be less than stepUpdates)
+    expect(partialUpdates.length).toBeLessThan(stepUpdates.length);
+
+    // Final state should still arrive with all steps completed
+    const finalState = partialUpdates[partialUpdates.length - 1];
+    expect(finalState).toBeDefined();
+    expect(finalState.steps.length).toBeGreaterThanOrEqual(5);
+    expect(finalState.finishedAt).toBeDefined();
   });
 });
 });

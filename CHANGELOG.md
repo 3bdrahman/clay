@@ -2,6 +2,39 @@
 
 All notable changes to **Clay** are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version follows [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Single-model architecture.** One user-chosen chat model now drives every LLM step — routing, code generation, answering, evaluation, and self-correction. Automatic per-role chat selection is gone: with BYOK you pay per token, so the cost decision stays with you. Only the embedding model is auto-picked (best pattern score in the live catalog, via `pickBestEmbedding`).
+- **Typed provider API-key fields.** New `ProviderApiKeyField` union (`openrouterApiKey` / `groqApiKey` / `togetherApiKey`) replaces index-signature access; all `as any` / `as unknown as` escape hatches removed from `providers.ts`, `Header.tsx`, and `SettingsPanel.tsx`.
+- **Embedding pattern config trimmed and validated.** `modelPatterns.config.json` now carries only embedding + size-tier rules (chat/code/safety/vision heuristics removed); `parseConfig` validates every consumed field.
+
+### Removed
+
+- **NVIDIA NIM provider remnants and Netlify deployment.** Deleted the Netlify Function proxy (`web/netlify/`), root `netlify.toml`, and the Netlify `deploy.yml` workflow; dropped the stale `integrate.api.nvidia.com` entry from the CSP `connect-src`.
+- **Dead code.** `useErrorHandler` hook, `getProviderDisplayName`, `getProvidersWithFreeTier`, unused `ProviderConfig` fields (`apiKeyEnvVar`, `description`), and the four-role chat picker (`pickBestModels` + per-class scorers).
+
+### Fixed
+
+- DataAnalysisResult.question carried the generated code instead of the user's question.
+- An invalid router datasource silently ran no path — now validated with a vectorstore fallback.
+- Typed analysis errors (budget exceeded) keep their user-facing messages through the retry layer instead of a generic generation-failure message.
+- Analysis with no datasets loaded returns a helpful guide instead of a poor LLM response.
+- **Zero skipped tests.** The two `useClay` persistence tests now run: the unavailable-IDB case and the happy path, backed by `fake-indexeddb`'s spec-accurate `IDBFactory`; the happy path now asserts `persistenceAvailable === true` instead of a weak type check.
+- Unbalanced `(` in the SettingsPanel API-key hint label.
+- Misindented analyzer construction in `eval/runner.ts`.
+- `vite.config.ts`: invalid `VITE_DEPLOY_URL` values now log a build-time warning instead of being silently swallowed.
+- OpenRouter `Referer` fallback now points at the GitHub Pages origin and is overridable via `VITE_OPENROUTER_REFERER`.
+- README/doc drift: GitHub Pages deploy story, current dependency badges, provider list, and model-selection docs now match the code.
+
+### Added
+
+- **Agentic analysis tools.** The data-analysis path is now a tool-calling loop: the model inspects real data via deterministic tools (list_datasets, profile_column with full statistics, aggregate, filter_sample, correlate, run_code) before answering, and returns structured insights (finding, evidence, confidence, implication) plus a deliberately-chosen chart. Tool calls appear as live sub-steps in the workflow graph; models without tool support fall back to the previous single-shot path, clearly labeled.
+- From-scratch statistics helpers (quantile, Pearson, Spearman) powering the analysis tools — no new dependencies.
+- `fake-indexeddb` dev dependency for spec-accurate IndexedDB tests.
+- Documented build-time env overrides: `DEPLOY_TARGET`, `BASE_PATH`, `VITE_DEPLOY_URL`, `VITE_CSP_EXTRA_CONNECT_SRC`, `VITE_OPENROUTER_REFERER`.
+
 ## [0.3.0] — 2026-08-06
 
 ### Accessibility

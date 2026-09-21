@@ -7,10 +7,11 @@ import {
   PROVIDER_REGISTRY,
   getProviderConfig,
   getProviderApiKeyField,
+  type ProviderApiKeyField,
   type ProviderKind,
 } from '../lib/providers';
 import { modelClass } from '../lib/models';
-import type { LocalModelPicks } from '../lib/types';
+import type { LocalModelPicks, Settings } from '../lib/types';
 import { useConfirm } from '../hooks/useConfirm';
 import { useModalFocus } from '../hooks/useModalFocus';
 
@@ -34,21 +35,12 @@ function validateLocalServerUrl(url: string): string | null {
 
 type LocalModelKey = keyof LocalModelPicks;
 
-interface NimTaskDisplay {
-  key: 'routing' | 'codeGen' | 'answer' | 'eval' | 'embedding';
-  label: string;
-  hint: string;
-}
-
 interface Props {
   open: boolean;
   onClose: () => void;
   refreshModels: () => Promise<void>;
   pickedModels: {
-    routing: string | undefined;
-    codeGen: string | undefined;
-    answer: string | undefined;
-    eval: string | undefined;
+    chat: string | undefined;
     embedding: string | undefined;
   };
   resetAll: () => void;
@@ -96,15 +88,12 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
   if (!open) return null;
 
   const tasks: Array<{ key: LocalModelKey; label: string; hint: string }> = [
-    { key: 'chat', label: 'Chat', hint: 'Routing, code gen, answer, evaluation' },
+    { key: 'chat', label: 'Chat model', hint: 'Used for routing, code generation, answer, and evaluation' },
     { key: 'embeddings', label: 'Embeddings', hint: 'Document + query vectors' },
   ];
 
-  const apiProviderTaskDisplay: NimTaskDisplay[] = [
-    { key: 'routing', label: 'Routing', hint: 'Decides source (docs/data/web)' },
-    { key: 'codeGen', label: 'Code generation', hint: 'Writes Arquero code' },
-    { key: 'answer', label: 'Answer', hint: 'Final RAG answer' },
-    { key: 'eval', label: 'Evaluation', hint: 'Doc relevance + answer grading' },
+  const apiProviderTaskDisplay: Array<{ key: 'chatModel' | 'embedding'; label: string; hint: string }> = [
+    { key: 'chatModel', label: 'Chat model', hint: 'Used for routing, code generation, answer, and evaluation' },
     { key: 'embedding', label: 'Embedding', hint: 'Document + query vectors' },
   ];
 
@@ -117,15 +106,14 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
     : 'not loaded';
   const providerHintLine = isLocal
     ? `All LLM calls go to ${settings.localServerUrl || '(unset)'}. No API key required.`
-    : `All LLM calls go to ${config.baseUrl}. One API key — Clay picks the best model per task from the live catalog.`;
+    : `All LLM calls go to ${config.baseUrl}. One API key — one chat model for all tasks (routing, code gen, answer, eval), separate embedding model.`;
 
   function setLocalModel(key: LocalModelKey, value: string) {
     updateSettings({ localModels: { ...settings.localModels, [key]: value } });
   }
 
-  // Get API key field name for current provider
   const apiKeyField = getProviderApiKeyField(settings.provider);
-  const currentApiKey = apiKeyField ? (settings as unknown as Record<string, string>)[apiKeyField] : '';
+  const currentApiKey = apiKeyField !== undefined ? settings[apiKeyField] : '';
 
   return (
     <div className="fixed inset-0 z-50 flex" onClick={onClose}>
@@ -356,16 +344,16 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
             <>
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
-                  {config.displayName} API Key <span className="text-ink-400 normal-case">({config.apiKeyHint}</span>
+                  {config.displayName} API Key <span className="text-ink-400 normal-case">({config.apiKeyHint})</span>
                </label>
                 <div className="relative">
                   <input
                     type={showKey ? 'text' : 'password'}
                     value={currentApiKey}
                     onChange={e => {
-                      const patch: Record<string, string> = {};
-                      patch[apiKeyField] = e.target.value;
-                      updateSettings(patch as any);
+                      const patch: Partial<Pick<Settings, ProviderApiKeyField>> = {};
+                      if (apiKeyField !== undefined) patch[apiKeyField] = e.target.value;
+                      updateSettings(patch);
                     }}
                     placeholder={config.apiKeyHint}
                     className="w-full px-3 py-2 pr-10 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none font-mono"
@@ -425,10 +413,10 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400">
-                      Auto-picked task models
+                      Model selection
                    </div>
                     <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-0.5">
-                      Picked from {config.displayName}'s live catalog by size + family. Refresh after catalog updates.
+                      Choose one chat model from {config.displayName}, or enter its model ID.
                    </p>
                   </div>
                   <button
@@ -475,20 +463,21 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                         <span className="ml-1 normal-case text-ink-400">— {t.hint}</span>
                      </label>
                       <div className="flex items-center gap-2">
-                        <select
+                        <input
+                          aria-label={t.label}
+                          list={`provider-models-${t.key}`}
+                          placeholder={t.key === 'chatModel' ? 'Choose or enter a chat model' : 'Choose or enter an embedding model'}
                           value={settings.pickedModelsOverride[t.key] || ''}
                           onChange={e => updateSettings({
                             pickedModelsOverride: { ...settings.pickedModelsOverride, [t.key]: e.target.value }
                           })}
                           className="flex-1 px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none font-mono"
-                        >
-                          <option value="">Auto-pick</option>
+                        />
+                        <datalist id={`provider-models-${t.key}`}>
                           {availableModels.map(m => (
-                            <option key={m.id} value={m.id}>
-                              {m.id}
-                            </option>
+                            <option key={m.id} value={m.id} />
                           ))}
-                        </select>
+                        </datalist>
                         {settings.pickedModelsOverride[t.key] && (
                           <button
                             onClick={() => updateSettings({
@@ -496,7 +485,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                             })}
                             className="px-2 py-1 text-[10px] text-ink-500 hover:text-ink-700 dark:hover:text-ink-300"
                             type="button"
-                            title="Reset to auto-pick"
+                            title="Clear selection"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -506,16 +495,16 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                       </div>
                       <p className="text-[10px] text-ink-500 dark:text-ink-400 mt-0.5">
                         Current: <span className="font-mono text-ink-700 dark:text-ink-200">
-                          {settings.pickedModelsOverride[t.key] ? `Manual: ${settings.pickedModelsOverride[t.key]}` : `Auto: ${pickedModels[t.key] ?? '—'}`}
+                          {t.key === 'chatModel' ? pickedModels.chat || 'Choose a chat model' : pickedModels.embedding || 'No embedding model available'}
                         </span>
                       </p>
                     </div>
                   ))}
                 </div>
 
-                {pickedModels.answer && (
+                {pickedModels.chat && (
                   <div className="pt-2 mt-1 border-t border-ink-200 dark:border-ink-700 text-[10px] text-ink-500 dark:text-ink-400 flex items-center justify-between">
-                    <span>Class: {modelClass(pickedModels.answer)}</span>
+                    <span>Class: {modelClass(pickedModels.chat)}</span>
                     {pickedModels.embedding && (
                       <span>Embed class: {modelClass(pickedModels.embedding)}</span>
                     )}

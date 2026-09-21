@@ -9,14 +9,8 @@ import {
   classifyError,
 } from './errors';
 import {
-  CHAT_PATTERNS,
-  CODE_PATTERNS,
   EMBEDDING_PATTERNS,
   EMBEDDING_DETECT,
-  CODE_DETECT,
-  SAFETY_DETECT,
-  VISION_DETECT,
-  CHAT_DETECT,
   SIZE_PATTERNS,
   scoreByRules,
 } from './modelPatterns';
@@ -25,13 +19,8 @@ export type { ModelInfo };
 
 export type ModelClass = 'tiny' | 'small' | 'medium' | 'large' | 'huge';
 
-export type TaskRole = 'routing' | 'codeGen' | 'answer' | 'eval';
-
 export interface PickedModels {
-  routing: string | undefined;
-  codeGen: string | undefined;
-  answer: string | undefined;
-  eval: string | undefined;
+  chat: string | undefined;
   embedding: string | undefined;
 }
 
@@ -108,15 +97,14 @@ export async function listModels(
   }));
 }
 
-// Legacy exports for backward compatibility
 export async function listLocalCatalog(baseUrl: string, apiKey: string): Promise<ModelInfo[]> {
   return listModels('local', apiKey, baseUrl);
 }
 
 /**
  * Normalize user-provided local model picks into PickedModels.
- * The user-facing LocalModelPicks has only 2 slots (chat, embeddings) — the
- * single chat model fans out into all 4 chat-style roles (routing, codeGen,
+ * The user-facing LocalModelPicks has 2 slots (chat, embeddings) — the
+ * single chat model is used for all chat-style roles (routing, codeGen,
  * answer, eval) that the orchestrator/analyzer/eval consume. Empty strings
  * become undefined.
  */
@@ -125,10 +113,7 @@ export function pickLocalModels(picks: LocalModelPicks): PickedModels {
   const chat = def(picks.chat);
   const embedding = def(picks.embeddings);
   return {
-    routing: chat,
-    codeGen: chat,
-    answer: chat,
-    eval: chat,
+    chat,
     embedding,
   };
 }
@@ -141,7 +126,7 @@ export interface ResolvedModels {
 
 /**
  * Resolve the final model set for the current session.
- * For API providers with catalogs (NIM, OpenRouter, Groq, Together, OpenAI, Anthropic): auto-picks best models.
+ * For API providers, use the explicit chat selection; only embeddings retain catalog defaults.
  * For local/Ollama: validates user picks against catalog.
  * @throws ModelNotFoundError if picked model not in catalog
  */
@@ -162,7 +147,7 @@ export function resolveModels(
     } else {
       const catalogIds = new Set(settings.localCatalog.map(m => m.id));
       const userSlots = [
-        { key: 'chat', model: picked.routing },
+        { key: 'chat', model: picked.chat },
         { key: 'embeddings', model: picked.embedding },
       ] as const;
       for (const { model } of userSlots) {
@@ -174,37 +159,19 @@ export function resolveModels(
     return { catalog: settings.localCatalog, picked, warnings };
   }
 
-  // All other providers use auto-pick from their catalog
-  return { catalog, picked: pickBestModels(catalog), warnings: [] };
+  return {
+    catalog,
+    picked: {
+      chat: settings.pickedModelsOverride.chatModel?.trim() || undefined,
+      embedding: settings.pickedModelsOverride.embedding?.trim() || pickBestEmbedding(catalog),
+    },
+    warnings: [],
+  };
 }
 
 function isEmbedding(id: string): boolean {
   const lower = id.toLowerCase();
   return EMBEDDING_DETECT.some((re) => re.test(lower));
-}
-
-function isCodeSpecialist(id: string): boolean {
-  const lower = id.toLowerCase();
-  return CODE_DETECT.some((re) => re.test(lower));
-}
-
-function isSafetyOrGuard(id: string): boolean {
-  const lower = id.toLowerCase();
-  return SAFETY_DETECT.some((re) => re.test(lower));
-}
-
-function isVision(id: string): boolean {
-  const lower = id.toLowerCase();
-  return VISION_DETECT.some((re) => re.test(lower));
-}
-
-function isGeneralChat(id: string): boolean {
-  if (isEmbedding(id)) return false;
-  if (isCodeSpecialist(id)) return false;
-  if (isSafetyOrGuard(id)) return false;
-  if (isVision(id)) return false;
-  const lower = id.toLowerCase();
-  return CHAT_DETECT.some((re) => re.test(lower));
 }
 
 function inferClass(id: string): ModelClass {
@@ -215,132 +182,34 @@ function inferClass(id: string): ModelClass {
   return 'medium';
 }
 
-function scoreGeneralChat(model: ModelInfo): number {
-  return scoreByRules(model.id.toLowerCase(), CHAT_PATTERNS);
-}
-
-function scoreCodeSpecialist(model: ModelInfo): number {
-  return scoreByRules(model.id.toLowerCase(), CODE_PATTERNS);
-}
-
 function scoreEmbedding(model: ModelInfo): number {
   return scoreByRules(model.id.toLowerCase(), EMBEDDING_PATTERNS);
 }
 
-function pickHighest(
-  models: ModelInfo[],
-  score: (m: ModelInfo) => number,
-  classes: ModelClass[],
-): ModelInfo | undefined {
-  const candidates = models.filter(m => classes.includes(inferClass(m.id)));
-  if (candidates.length === 0) return undefined;
-  let bestId: string | undefined;
+/**
+ * Auto-pick the best embedding model from the catalog by pattern score.
+ * The embedding slot is the only auto-picked model — the chat model is always
+ * an explicit user choice (BYOK cost control: never silently bill a premium
+ * chat model the user never selected).
+ * @returns the best-scoring embedding id, or undefined when the catalog has none
+ */
+export function pickBestEmbedding(models: ModelInfo[]): string | undefined {
+  let best: ModelInfo | undefined;
   let bestScore = -Infinity;
-  for (const m of candidates) {
-    const s = score(m);
+  for (const m of models) {
+    if (!isEmbedding(m.id)) continue;
+    const s = scoreEmbedding(m);
     if (s > bestScore) {
       bestScore = s;
-      bestId = m.id;
+      best = m;
     }
   }
-  return candidates.find(m => m.id === bestId);
+  if (best === undefined && models.length > 0 && import.meta.env.DEV) {
+    console.warn(`[models] No embedding model found among ${models.length} catalog models`);
+  }
+  return best?.id;
 }
 
-/**
- * Heuristically pick the best model for each task from the NIM catalog.
- * @param models - Full model catalog from NIM
- * @returns PickedModels with routing, codeGen, answer, eval, embedding
- * Returns undefined for all roles if catalog is empty.
- */
-export function pickBestModels(models: ModelInfo[]): PickedModels {
-  // Handle empty catalog gracefully
-  if (models.length === 0) {
-    return {
-      routing: undefined,
-      codeGen: undefined,
-      answer: undefined,
-      eval: undefined,
-      embedding: undefined,
-    };
-  }
-
-  const chats = models.filter(m => isGeneralChat(m.id));
-  const codes = models.filter(m => isCodeSpecialist(m.id));
-  const embeddings = models.filter(m => isEmbedding(m.id));
-
-  const small = chats.filter(m => inferClass(m.id) === 'small');
-  const tiny = chats.filter(m => inferClass(m.id) === 'tiny');
-  const large = chats.filter(m => inferClass(m.id) === 'large');
-  const huge = chats.filter(m => inferClass(m.id) === 'huge');
-
-  const routing = pickHighest(small, scoreGeneralChat, ['small', 'tiny'])
-    ?? pickHighest(tiny, scoreGeneralChat, ['tiny', 'small'])
-    ?? small[0]
-    ?? tiny[0]
-    ?? chats[0];
-
-  const evalCandidates = small.filter(m => m.id !== routing?.id);
-  const evalModel = pickHighest(evalCandidates, scoreGeneralChat, ['small', 'tiny'])
-    ?? pickHighest(small, scoreGeneralChat, ['small', 'tiny'])
-    ?? evalCandidates[0]
-    ?? small[0]
-    ?? chats[0];
-
-  const codeGen = pickHighest(codes, scoreCodeSpecialist, ['medium', 'large', 'huge', 'small'])
-    ?? codes[0];
-
-  const answer = pickHighest(huge, scoreGeneralChat, ['huge', 'large'])
-    ?? pickHighest(large, scoreGeneralChat, ['large', 'huge'])
-    ?? huge[0]
-    ?? large[0]
-    ?? chats[0];
-
-  let embedding: ModelInfo | undefined;
-  let bestEmbScore = -Infinity;
-  for (const m of embeddings) {
-    const s = scoreEmbedding(m);
-    if (s > bestEmbScore) {
-      bestEmbScore = s;
-      embedding = m;
-    }
-  }
-
-  // Validate all required models were found - warn but don't throw for incomplete catalogs
-  const warnings: string[] = [];
-  if (!routing) warnings.push('routing model not found');
-  if (!evalModel) warnings.push('eval model not found');
-  if (!codeGen) warnings.push('codeGen model not found');
-  if (!answer) warnings.push('answer model not found');
-  if (!embedding) warnings.push('embedding model not found');
-  if (warnings.length > 0) {
-    if (import.meta.env.DEV) console.warn('[models] Incomplete model catalog:', warnings.join(', '));
-  }
-
-  return {
-    routing: routing?.id,
-    codeGen: codeGen?.id,
-    answer: answer?.id,
-    eval: evalModel?.id,
-    embedding: embedding?.id,
-  };
-}
-
-/**
- * Get human-readable description of a model class.
- */
-export function describeModelClass(cls: ModelClass): string {
-  switch (cls) {
-    case 'tiny': return 'tiny';
-    case 'small': return 'small';
-    case 'medium': return 'medium';
-    case 'large': return 'large';
-    case 'huge': return 'huge';
-  }
-}
-
-/**
- * Infer the model class (size tier) from a model ID string.
- */
 export function modelClass(id: string): ModelClass {
   return inferClass(id);
 }

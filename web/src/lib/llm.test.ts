@@ -283,4 +283,87 @@ describe('createLLMClient', () => {
     const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(GenerationFailedError);
   });
+
+  // --- Tool calling tests ---
+
+  it('invoke parses tool_calls from a 200 response', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [{
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'profile_column', arguments: '{"dataset":"employees"}' }
+            }],
+            finish_reason: 'tool_calls'
+          }
+        }]
+      }),
+    });
+
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const resp = await client.invoke({
+      model: 'm',
+      messages: [{ role: 'user', content: 'q' }],
+      tools: [{ type: 'function', function: { name: 'profile_column', description: 'd', parameters: {} } }],
+      toolChoice: 'auto'
+    });
+
+    expect(resp.toolCalls?.[0].function.name).toBe('profile_column');
+    expect(resp.toolCalls?.[0].id).toBe('call_1');
+    expect(resp.finishReason).toBe('tool_calls');
+  });
+
+  it('invoke serializes tools and tool_choice into the request body', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
+    });
+
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    await client.invoke({
+      model: 'm',
+      messages: [{ role: 'user', content: 'q' }],
+      tools: [{ type: 'function', function: { name: 'profile_column', description: 'd', parameters: {} } }],
+      toolChoice: 'auto'
+    });
+
+    const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
+    expect(body.tools[0].function.name).toBe('profile_column');
+    expect(body.tool_choice).toBe('auto');
+  });
+
+  it('invoke serializes tool-result messages with tool_call_id', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
+    });
+
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    await client.invoke({
+      model: 'm',
+      messages: [
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'profile_column', arguments: '{}' } }] },
+        { role: 'tool', content: '{"result": 1}', toolCallId: 'call_1' }
+      ],
+    });
+
+    const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
+    expect(body.messages[0].tool_calls).toBeDefined();
+    expect(body.messages[0].tool_calls[0].id).toBe('call_1');
+    expect(body.messages[1].role).toBe('tool');
+    expect(body.messages[1].tool_call_id).toBe('call_1');
+  });
+
+  it('invoke honors an external abort signal', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    await expect(client.invoke({ messages: [{ role: 'user', content: 'hi' }] }, controller.signal)).rejects.toThrow();
+  });
 });

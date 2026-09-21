@@ -2,7 +2,7 @@
   "name": "clay-web",
   "private": true,
   "version": "0.1.0",
-  "description": "Clay — AI Internal Assistant (web app)",
+  "description": "Clay — browser-based RAG assistant (web app)",
   "type": "module",
   "scripts": {
     "dev": "vite",

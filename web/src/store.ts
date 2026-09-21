@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ChatMessage, Settings, ModelInfo } from './lib/types';
-import { LOCAL_DEFAULT_BASE_URL } from './lib/providers';
-import { migrateLegacyLocalModels, type LegacyLocalModelPicks } from './lib/localModelsMigrate';
+import { PROVIDER_REGISTRY, LOCAL_DEFAULT_BASE_URL } from './lib/providers';
+import { migrateChatSelection, migrateLegacyLocalModels, type LegacyLocalModelPicks } from './lib/localModelsMigrate';
 import type { ProviderKind } from './lib/types';
 
 export interface SandboxDataset {
@@ -94,10 +94,7 @@ const DEFAULT_SETTINGS: Settings = {
   localCatalog: [],
   localCatalogFetchedAt: 0,
   pickedModelsOverride: {
-    routing: '',
-    codeGen: '',
-    answer: '',
-    eval: '',
+    chatModel: '',
     embedding: '',
   },
 };
@@ -124,6 +121,11 @@ function deriveTitle(msg: ChatMessage): string {
   const text = msg.content.trim();
   if (!text) return '';
   return text.length > 40 ? text.slice(0, 37) + '…' : text;
+}
+
+export function sanitizeProvider(provider: unknown): ProviderKind {
+  const candidate = typeof provider === 'string' ? provider : 'openrouter';
+  return candidate in PROVIDER_REGISTRY ? (candidate as ProviderKind) : 'openrouter';
 }
 
 export const useAppStore = create<AppState>()(
@@ -292,6 +294,21 @@ export const useAppStore = create<AppState>()(
     {
       name: 'clay-settings-v1',
       version: 5,
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState ?? {}) as Partial<{
+          settings: Partial<Settings>;
+        }>;
+        return {
+          ...currentState,
+          ...persisted,
+          settings: {
+            ...currentState.settings,
+            ...persisted.settings,
+            provider: sanitizeProvider(persisted.settings?.provider),
+            pickedModelsOverride: migrateChatSelection(persisted.settings?.pickedModelsOverride),
+          },
+        };
+      },
       migrate: (persistedState, _version) => {
         const state = (persistedState ?? {}) as Partial<{
           settings: Partial<Settings>;
@@ -308,20 +325,18 @@ export const useAppStore = create<AppState>()(
 
         // Migrate legacy single apiKey to provider-specific key
         const legacyApiKey = persistedSettings.apiKey as string | undefined;
-        const provider = (persistedSettings.provider as ProviderKind) ?? 'openrouter';
-        const providerApiKeyField = {
-          openrouter: 'openrouterApiKey',
-          groq: 'groqApiKey',
-          together: 'togetherApiKey',
-          local: '',
-        }[provider];
+        const provider = sanitizeProvider(persistedSettings.provider);
 
         const mergedSettings: Settings = {
           ...DEFAULT_SETTINGS,
+          // Explicitly set the provider-specific API key from legacy apiKey
+          openrouterApiKey: provider === 'openrouter' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.openrouterApiKey,
+          groqApiKey: provider === 'groq' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.groqApiKey,
+          togetherApiKey: provider === 'together' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.togetherApiKey,
           ...((persistedSettings as Omit<Partial<Settings>, 'localModels'> | undefined) ?? {}),
           localModels: migrateLegacyLocalModels(persistedLocalModels),
-          pickedModelsOverride: persistedSettings.pickedModelsOverride ?? DEFAULT_SETTINGS.pickedModelsOverride,
-          [providerApiKeyField]: legacyApiKey ?? '',
+          pickedModelsOverride: migrateChatSelection(persistedSettings.pickedModelsOverride),
+          provider,
         };
 
         let conversations: Conversation[] = [];

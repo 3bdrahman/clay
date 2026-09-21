@@ -377,11 +377,12 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
       chosen = filtered.slice(0, topK).map((c) => c.id);
     }
 
+    const scoreLookup = new Map(merged.map((m) => [m.id, m.score]));
     const results: Document[] = [];
     for (const id of chosen) {
       const e = memory.get(id);
       if (!e) continue;
-      const score = merged.find((m) => m.id === id)?.score ?? 0;
+      const score = scoreLookup.get(id) ?? 0;
       const doc: Document = {
         id: e.id,
         content: e.text,

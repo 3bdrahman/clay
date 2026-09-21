@@ -48,13 +48,13 @@ export function WorkflowGraph({ steps, routing }: Props) {
   return (
     <ol className="space-y-1" aria-label="Workflow steps" role="list">
       {nodeIds.map((nodeId, i) => {
+        const step = statusMap.get(nodeId);
         const node = NODE_DEFS[nodeId] ?? {
           id: nodeId,
-          label: nodeId,
+          label: step?.label ?? nodeId,
           description: '',
           icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
         };
-        const step = statusMap.get(nodeId);
         const isActive = activeNodes.has(nodeId);
         const isComplete = step?.status === 'done';
         const isError = step?.status === 'error';

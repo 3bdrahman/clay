@@ -69,7 +69,7 @@ export default function App() {
         <div className="flex-1 flex min-h-0">
           <ConversationSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
           <div className="flex-1 flex min-h-0">
-            <ChatPanel onOpenData={openData} />
+            <ChatPanel onOpenData={openData} onOpenSettings={openSettings} />
           </div>
         </div>
         <SettingsPanelSuspense

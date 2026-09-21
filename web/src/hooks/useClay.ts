@@ -134,10 +134,11 @@ export function useClay(): {
     if (settings.provider === 'local') {
       const url = settings.localServerUrl.trim();
       if (url) await fetchLocalModels(url, true);
-    } else if (settings.apiKey) {
-      await fetchNimModels(settings.apiKey, true);
+    } else {
+      const endpoint = resolveProviderEndpoint(settings);
+      if (endpoint.apiKey) await fetchNimModels(endpoint.apiKey, true);
     }
-  }, [settings.provider, settings.apiKey, settings.localServerUrl, fetchNimModels, fetchLocalModels]);
+  }, [settings, fetchNimModels, fetchLocalModels]);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,10 +149,11 @@ export function useClay(): {
         setError(null);
         setNeedsConfiguration(false);
 
+        const endpoint = resolveProviderEndpoint(settings);
         const isLocal = settings.provider === 'local';
         const hasValidConfig = isLocal
-          ? settings.localServerUrl.trim().length > 0
-          : settings.apiKey.trim().length > 0;
+          ? endpoint.baseUrl.length > 0
+          : endpoint.apiKey.trim().length > 0;
 
         if (!hasValidConfig) {
           setNeedsConfiguration(true);
@@ -159,8 +161,6 @@ export function useClay(): {
           setLoading(false);
           return;
         }
-
-        const endpoint = resolveProviderEndpoint(settings);
 
         const llm = createLLMClient({
           baseUrl: endpoint.baseUrl,
@@ -176,8 +176,8 @@ export function useClay(): {
             const local = await fetchLocalModels(url);
             if (local.length > 0) catalog = local;
           }
-        } else if (settings.apiKey) {
-          const fresh = await fetchNimModels(settings.apiKey);
+        } else if (endpoint.apiKey) {
+          const fresh = await fetchNimModels(endpoint.apiKey);
           if (fresh.length > 0) catalog = fresh;
         }
         
@@ -221,10 +221,10 @@ export function useClay(): {
 
         const analyzer = createDataAnalyzer({
           llm,
-          embeddings,
           datasets: tables,
           metadata,
-          codeGenModel: picked.codeGen,
+          codeGenModel: picked.chat,
+          maxToolLoopTokens: settings.maxToolLoopTokens,
         });
 
         vectorstore
@@ -441,15 +441,7 @@ export function useClay(): {
     if (settings.provider === 'local') {
       return pickLocalModels(settings.localModels);
     }
-    const autoPicked = resolveModels(settings, availableModels).picked;
-    const override = settings.pickedModelsOverride || {};
-    return {
-      routing: override.routing || autoPicked.routing,
-      codeGen: override.codeGen || autoPicked.codeGen,
-      answer: override.answer || autoPicked.answer,
-      eval: override.eval || autoPicked.eval,
-      embedding: override.embedding || autoPicked.embedding,
-    };
+    return resolveModels(settings, availableModels).picked;
   }, [settings, availableModels]);
 
   return {

@@ -5,10 +5,9 @@ import type { ReactNode } from 'react';
 import { useClay, type ClayServices } from './useClay';
 import { useAppStore } from '../store';
 import { listSandboxTableNames } from '../services/sandboxTables';
+import { IDBFactory } from 'fake-indexeddb';
 
 const originalFetch = globalThis.fetch;
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type HookValue = ReturnType<typeof useClay>;
 type HookResult = { current: HookValue };
@@ -65,10 +64,7 @@ const baseSettings = {
   localCatalog: [],
   localCatalogFetchedAt: 0,
   pickedModelsOverride: {
-    routing: '',
-    codeGen: '',
-    answer: '',
-    eval: '',
+    chatModel: '',
     embedding: '',
   },
 };
@@ -118,7 +114,7 @@ describe('useClay', () => {
     const r = render();
     await flush(6);
     expect(r.current.pickedModels).toBeDefined();
-    expect(r.current.pickedModels.answer).toBeUndefined();
+    expect(r.current.pickedModels.chat).toBeUndefined();
   });
 
   it('fetches NIM catalog when apiKey is set', async () => {
@@ -141,7 +137,7 @@ describe('useClay', () => {
     expect(r.current.services?.ready).toBe(true);
     expect(useAppStore.getState().availableModels.length).toBe(3);
     expect(useAppStore.getState().modelsLoading).toBe(false);
-    expect(r.current.pickedModels.answer).toBeTruthy();
+    expect(r.current.pickedModels.chat).toBeUndefined();
   });
 
   it('handles NIM fetch failure gracefully (initializes, sets modelsError)', async () => {
@@ -482,7 +478,7 @@ describe('useClay', () => {
     expect(useAppStore.getState().settings.localCatalog.length).toBe(1);
   });
 
-  it('pickedModels in local mode fans chat into all 4 chat roles (empty trimmed to undefined)', async () => {
+  it('pickedModels in local mode uses single chat model for all chat roles (empty trimmed to undefined)', async () => {
     useAppStore.setState({
       settings: {
         ...baseSettings,
@@ -498,20 +494,17 @@ describe('useClay', () => {
     await flush(6);
 
     expect(r.current.pickedModels).toEqual({
-      routing: 'm1',
-      codeGen: 'm1',
-      answer: 'm1',
-      eval: 'm1',
+      chat: 'm1',
       embedding: 'm3',
     });
   });
 
   describe('IDB persistence unavailable (issue #2)', () => {
-    it.skip('exposes persistenceAvailable=false when IndexedDB is unavailable', async () => {
+    it('exposes persistenceAvailable=false when IndexedDB is unavailable', async () => {
       const originalIDB = (globalThis as { indexedDB?: unknown }).indexedDB;
       Object.defineProperty(globalThis, 'indexedDB', { value: undefined, configurable: true });
 
-try {
+      try {
         const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
           data: [
             { id: 'openrouter/mistral-7b-instruct', created: 1, owned_by: 'mistralai' },
@@ -536,24 +529,34 @@ try {
     });
   });
 
-  it.skip('exposes persistenceAvailable=true on the happy path', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
-      data: [
-        { id: 'openrouter/mistral-7b-instruct', created: 1, owned_by: 'mistralai' },
-        { id: 'openrouter/codestral-22b', created: 2, owned_by: 'mistralai' },
-        { id: 'openrouter/nv-embedqa-e5', created: 3, owned_by: 'nvidia' },
-        { id: 'openrouter/nemotron-3-ultra', created: 4, owned_by: 'nvidia' },
-      ],
-    }));
-    globalThis.fetch = fetchMock as never;
-
-    useAppStore.setState({
-      settings: { ...baseSettings, openrouterApiKey: 'sk-or-test' } as never,
+  it('exposes persistenceAvailable=true on the happy path', async () => {
+    const originalIDB = (globalThis as { indexedDB?: unknown }).indexedDB;
+    Object.defineProperty(globalThis, 'indexedDB', {
+      value: new IDBFactory(),
+      configurable: true,
     });
-    const r = render();
-    await flush(8);
 
-    expect(r.current.services?.ready).toBe(true);
-    expect(typeof r.current.persistenceAvailable).toBe('boolean');
+    try {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
+        data: [
+          { id: 'openrouter/mistral-7b-instruct', created: 1, owned_by: 'mistralai' },
+          { id: 'openrouter/codestral-22b', created: 2, owned_by: 'mistralai' },
+          { id: 'openrouter/nv-embedqa-e5', created: 3, owned_by: 'nvidia' },
+          { id: 'openrouter/nemotron-3-ultra', created: 4, owned_by: 'nvidia' },
+        ],
+      }));
+      globalThis.fetch = fetchMock as never;
+
+      useAppStore.setState({
+        settings: { ...baseSettings, openrouterApiKey: 'sk-or-test' } as never,
+      });
+      const r = render();
+      await flush(8);
+
+      expect(r.current.services?.ready).toBe(true);
+      expect(r.current.persistenceAvailable).toBe(true);
+    } finally {
+      Object.defineProperty(globalThis, 'indexedDB', { value: originalIDB, configurable: true });
+    }
   });
 });

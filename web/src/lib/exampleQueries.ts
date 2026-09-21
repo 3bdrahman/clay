@@ -4,14 +4,8 @@
  * of bundled sample-CSV column names.
  */
 
-export interface DatasetSummary {
-  name: string;
-  fileName: string;
-  columns: string[];
-  rowCount: number;
-  /** Optional sample rows for intelligent type detection (first 5 rows) */
-  sampleRows?: Array<Record<string, unknown>>;
-}
+import type { DatasetSummary } from './types';
+export type { DatasetSummary } from './types';
 
 export interface DocumentSummary {
   fileName: string;

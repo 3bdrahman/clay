@@ -1,14 +1,14 @@
 /**
- * Model classification patterns used by the dynamic model picker.
+ * Model classification patterns used by the embedding auto-picker and the
+ * model size-tier display.
  *
  * Patterns are loaded from `modelPatterns.config.json` at build time (via Vite import)
  * with hardcoded defaults as fallback. This allows updating model preferences without
  * code changes by replacing the JSON config file.
  *
  * Each pattern set is a list of `{ pattern, points }` entries that contribute
- * to a model's score when picked for a task. The pattern matcher is intentionally
- * regex-based so we can match model identifiers the catalog hasn't seen yet
- * (e.g. new NIM releases) by family suffix or size class.
+ * to a model's score. The pattern matcher is intentionally regex-based so we
+ * can match model identifiers the catalog hasn't seen yet by family suffix.
  */
 
 import modelPatternsConfig from './modelPatterns.config.json?raw';
@@ -24,57 +24,12 @@ export interface ScoreRule {
 
 export interface ModelPatternsConfig {
   version: number;
-  chatPatterns: Array<{ family: string; pattern: string; points: number }>;
-  codePatterns: Array<{ family: string; pattern: string; points: number }>;
   embeddingPatterns: Array<{ family: string; pattern: string; points: number }>;
   embeddingDetect: string[];
-  codeDetect: string[];
-  safetyDetect: string[];
-  visionDetect: string[];
-  chatDetect: string[];
   sizePatterns: Array<{ class: 'huge' | 'large' | 'medium' | 'small' | 'tiny'; patterns: string[] }>;
 }
 
 // Hardcoded defaults matching the config file - used as fallback if config fails to load
-const DEFAULT_CHAT_PATTERNS: readonly ScoreRule[] = [
-  { family: 'meta-llama-3.3',          pattern: /^meta\/llama-3\.3-/,                     points: 30 },
-  { family: 'meta-llama-3.1-70b-8b',   pattern: /^meta\/llama-3\.1-(70b|8b)/,              points: 25 },
-  { family: 'mistral-large-2',         pattern: /^mistralai\/mistral-large-2/,             points: 28 },
-  { family: 'mistral-7b',              pattern: /^mistralai\/mistral-7b/,                  points: 22 },
-  { family: 'nemotron-3-super-ultra',  pattern: /^nvidia\/nemotron-3-(super|ultra)/,       points: 40 },
-  { family: 'nemotron-4',              pattern: /^nvidia\/nemotron-4-/,                    points: 35 },
-  { family: 'llama-3.1-nemotron-70b',  pattern: /^nvidia\/llama-3\.1-nemotron-(70b|ultra|super)/, points: 30 },
-  { family: 'llama-3.1-nemotron-nano', pattern: /^nvidia\/llama-3\.1-nemotron-nano/,       points: 22 },
-  { family: 'gpt-oss',                 pattern: /^openai\/gpt-oss-/,                       points: 30 },
-  { family: 'palmyra',                 pattern: /^writer\/palmyra/,                        points: 20 },
-  { family: 'stepfun',                 pattern: /^stepfun-ai\/step-/,                      points: 18 },
-  { family: 'kimi',                    pattern: /^moonshotai\/kimi-/,                      points: 25 },
-  { family: 'glm',                     pattern: /^z-ai\/glm-/,                             points: 22 },
-  { family: 'deepseek-v',              pattern: /^deepseek-ai\/deepseek-v/,                points: 28 },
-  { family: 'gemma-3',                 pattern: /^google\/gemma-3-(12b|4b)/,               points: 18 },
-  { family: 'gemma-4',                 pattern: /^google\/gemma-4-/,                       points: 22 },
-  { family: 'granite-3.0',             pattern: /^ibm\/granite-3\.0-/,                     points: 15 },
-  { family: 'laguna',                  pattern: /^poolside\/laguna/,                       points: 18 },
-  { family: 'zamba',                   pattern: /^zyphra\/zamba/,                          points: 12 },
-] as const;
-
-const DEFAULT_CODE_PATTERNS: readonly ScoreRule[] = [
-  { family: 'codestral-22b',           pattern: /codestral-22b/,                           points: 50 },
-  { family: 'codestral',               pattern: /codestral/,                               points: 45 },
-  { family: 'codellama-70b',           pattern: /codellama-70b/,                           points: 35 },
-  { family: 'codellama',               pattern: /codellama/,                               points: 30 },
-  { family: 'codegemma',               pattern: /codegemma/,                               points: 25 },
-  { family: 'deepseek-coder',          pattern: /deepseek-coder/,                          points: 28 },
-  { family: 'granite-code',            pattern: /granite.*code/,                           points: 25 },
-  { family: 'starcoder2',              pattern: /starcoder2/,                              points: 20 },
-  { family: 'nemotron-code',           pattern: /nemotron.*code/,                          points: 22 },
-  { family: 'size-8b',                 pattern: /8b/,                                      points: 3  },
-  { family: 'size-15b',                pattern: /15b/,                                     points: 5  },
-  { family: 'size-22b',                pattern: /22b/,                                     points: 8  },
-  { family: 'size-34b',                pattern: /34b/,                                     points: 10 },
-  { family: 'size-70b',                pattern: /70b/,                                     points: 12 },
-] as const;
-
 const DEFAULT_EMBEDDING_PATTERNS: readonly ScoreRule[] = [
   { family: 'nv-embedqa-e5',           pattern: /nv-embedqa-e5/,                           points: 50 },
   { family: 'nv-embedqa-mistral',      pattern: /nv-embedqa-mistral/,                      points: 35 },
@@ -90,18 +45,6 @@ const DEFAULT_EMBEDDING_PATTERNS: readonly ScoreRule[] = [
 ] as const;
 
 const DEFAULT_EMBEDDING_DETECT: readonly RegExp[] = [/embed|embedqa/i];
-const DEFAULT_CODE_DETECT: readonly RegExp[] = [
-  /codestral|codellama|codegemma|granite.*code|deepseek-coder|nemotron.*code|starcoder|embedcode/,
-];
-const DEFAULT_SAFETY_DETECT: readonly RegExp[] = [
-  /guard|safety|content-safety|topic-control|reward|parse|translate|detector|calibration|neva|vila|ai-synthetic|cosmo/,
-];
-const DEFAULT_VISION_DETECT: readonly RegExp[] = [
-  /vision|vl$|clip|video|diffusion|deplot|recurrent|cosmos/,
-];
-const DEFAULT_CHAT_DETECT: readonly RegExp[] = [
-  /instruct|chat|^.*\/gpt-|it$|nemotron|moe|reasoning|creative|magistral|laguna|kimi|step-|glm|inkling|palmyra|sea-lion|yi-|zamba|granite|gemma/,
-];
 
 const DEFAULT_SIZE_PATTERNS: ReadonlyArray<{ class: 'huge' | 'large' | 'medium' | 'small' | 'tiny'; patterns: RegExp[] }> = [
   { class: 'huge',   patterns: [/ultra|550b|340b|253b|122b/] },
@@ -114,8 +57,14 @@ const DEFAULT_SIZE_PATTERNS: ReadonlyArray<{ class: 'huge' | 'large' | 'medium' 
 function parseConfig(json: string): ModelPatternsConfig | null {
   try {
     const parsed = JSON.parse(json);
-    // Validate required fields
-    if (!parsed.version || !parsed.chatPatterns || !parsed.codePatterns || !parsed.embeddingPatterns) {
+    // Validate every field buildPatterns consumes - a config missing any of
+    // them must fall back to the hardcoded defaults above.
+    if (
+      !parsed.version ||
+      !Array.isArray(parsed.embeddingPatterns) ||
+      !Array.isArray(parsed.embeddingDetect) ||
+      !Array.isArray(parsed.sizePatterns)
+    ) {
       return null;
     }
     return parsed as ModelPatternsConfig;
@@ -127,14 +76,6 @@ function parseConfig(json: string): ModelPatternsConfig | null {
 function buildPatterns(config: ModelPatternsConfig | null) {
   const useDefaults = !config;
 
-  const chatRules: readonly ScoreRule[] = useDefaults
-    ? DEFAULT_CHAT_PATTERNS
-    : config.chatPatterns.map(r => ({ family: r.family, pattern: new RegExp(r.pattern), points: r.points }));
-
-  const codeRules: readonly ScoreRule[] = useDefaults
-    ? DEFAULT_CODE_PATTERNS
-    : config.codePatterns.map(r => ({ family: r.family, pattern: new RegExp(r.pattern), points: r.points }));
-
   const embeddingRules: readonly ScoreRule[] = useDefaults
     ? DEFAULT_EMBEDDING_PATTERNS
     : config.embeddingPatterns.map(r => ({ family: r.family, pattern: new RegExp(r.pattern), points: r.points }));
@@ -143,35 +84,13 @@ function buildPatterns(config: ModelPatternsConfig | null) {
     ? DEFAULT_EMBEDDING_DETECT
     : config.embeddingDetect.map(p => new RegExp(p, 'i'));
 
-  const codeDetect: readonly RegExp[] = useDefaults
-    ? DEFAULT_CODE_DETECT
-    : config.codeDetect.map(p => new RegExp(p));
-
-  const safetyDetect: readonly RegExp[] = useDefaults
-    ? DEFAULT_SAFETY_DETECT
-    : config.safetyDetect.map(p => new RegExp(p));
-
-  const visionDetect: readonly RegExp[] = useDefaults
-    ? DEFAULT_VISION_DETECT
-    : config.visionDetect.map(p => new RegExp(p));
-
-  const chatDetect: readonly RegExp[] = useDefaults
-    ? DEFAULT_CHAT_DETECT
-    : config.chatDetect.map(p => new RegExp(p));
-
   const sizePatterns: ReadonlyArray<{ class: 'huge' | 'large' | 'medium' | 'small' | 'tiny'; patterns: RegExp[] }> = useDefaults
     ? DEFAULT_SIZE_PATTERNS
     : config.sizePatterns.map(s => ({ class: s.class, patterns: s.patterns.map(p => new RegExp(p)) }));
 
   return {
-    chatRules,
-    codeRules,
     embeddingRules,
     embeddingDetect,
-    codeDetect,
-    safetyDetect,
-    visionDetect,
-    chatDetect,
     sizePatterns,
   };
 }
@@ -180,16 +99,8 @@ function buildPatterns(config: ModelPatternsConfig | null) {
 const config = parseConfig(modelPatternsConfig);
 const patterns = buildPatterns(config);
 
-export const CHAT_PATTERNS: readonly ScoreRule[] = patterns.chatRules;
-export const CODE_PATTERNS: readonly ScoreRule[] = patterns.codeRules;
 export const EMBEDDING_PATTERNS: readonly ScoreRule[] = patterns.embeddingRules;
-
 export const EMBEDDING_DETECT: readonly RegExp[] = patterns.embeddingDetect;
-export const CODE_DETECT: readonly RegExp[] = patterns.codeDetect;
-export const SAFETY_DETECT: readonly RegExp[] = patterns.safetyDetect;
-export const VISION_DETECT: readonly RegExp[] = patterns.visionDetect;
-export const CHAT_DETECT: readonly RegExp[] = patterns.chatDetect;
-
 export const SIZE_PATTERNS: ReadonlyArray<{ class: 'huge' | 'large' | 'medium' | 'small' | 'tiny'; patterns: RegExp[] }> = patterns.sizePatterns;
 
 /** Apply every rule in `rules` to a lowercased model id and sum the points. */

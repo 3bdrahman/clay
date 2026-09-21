@@ -1,5 +1,3 @@
-// Workflow orchestrator — proper state machine for the Clay assistant
-
 import type {
   Citation,
   Document,
@@ -12,7 +10,7 @@ import type { LLMClient } from '../lib/llm';
 import type { PickedModels } from '../lib/models';
 import type { VectorStore } from '../lib/vectorstore';
 import type { WebSearchClient } from '../lib/websearch';
-import type { DataAnalyzer } from './analyzer';
+import type { DataAnalyzer, AnalyzerHooks } from './analyzer';
 import {
   expandHyDE,
   parallelFanOut,
@@ -53,6 +51,8 @@ const NODE_LABELS: Record<string, string> = {
   evaluate: 'Evaluating Quality',
   end: 'Done',
 };
+
+const VALID_SOURCE_TYPES: SourceType[] = ['vectorstore', 'python', 'websearch'];
 
 const MAX_STEP_RETRIES = 2;
 const BASE_RETRY_DELAY_MS = 1000;
@@ -135,10 +135,17 @@ export function createWorkflowOrchestrator(
     emitSteps();
   }
 
+  let emitScheduled = false;
   function emitSteps(): void {
     state.steps = [...steps];
     callbacks.onStepUpdate?.(state.steps);
-    callbacks.onPartialUpdate?.({ ...state });
+    if (!emitScheduled) {
+      emitScheduled = true;
+      requestAnimationFrame(() => {
+        emitScheduled = false;
+        callbacks.onPartialUpdate?.({ ...state });
+      });
+    }
   }
 
   async function withRetry<T>(
@@ -158,6 +165,9 @@ export function createWorkflowOrchestrator(
 
         // Don't retry on abort or non-retryable errors
         if (signal?.aborted || !isRetryable(lastError)) {
+          if (lastError instanceof RagError) {
+            throw lastError.withStep(stepName);
+          }
           throw new GenerationFailedError('orchestrator', lastError, {
             retryable: false,
           }).withStep(stepName);
@@ -172,6 +182,9 @@ export function createWorkflowOrchestrator(
           }
         }
       }
+    }
+    if (lastError instanceof RagError) {
+      throw lastError.withStep(stepName);
     }
     throw new GenerationFailedError('orchestrator', lastError!, { retryable: false }).withStep(stepName);
   }
@@ -218,7 +231,7 @@ export function createWorkflowOrchestrator(
         ],
         jsonMode: true,
         temperature: EVAL_TEMPERATURE,
-        model: deps.pickedModels.eval,
+        model: deps.pickedModels.chat,
       });
       try {
         const parsed = JSON.parse(resp.content || '{}');
@@ -242,7 +255,7 @@ export function createWorkflowOrchestrator(
     beginStep('retrieve', NODE_LABELS.retrieve);
 
     try {
-      const hypothetical = await expandHyDE(question, { llm: deps.llm, model: deps.pickedModels.eval });
+      const hypothetical = await expandHyDE(question, { llm: deps.llm, model: deps.pickedModels.chat });
       const initialK = deps.settings.vectorstoreInitialK ?? DEFAULT_VECTORSTORE_INITIAL_K;
       const rerankK = RERANK_K;
 
@@ -277,11 +290,46 @@ export function createWorkflowOrchestrator(
     if (signal?.aborted) return;
     beginStep('analyze', NODE_LABELS.analyze);
     try {
-      const result = await withRetry('analyzer-analyze', () => deps.analyzer.analyze(question, signal), signal);
+      const hooks: AnalyzerHooks = {
+        onToolStart: (info) => {
+          steps.push({
+            id: `analyze:${info.tool}-${crypto.randomUUID()}`,
+            node: `analyze:${info.tool}`,
+            label: info.tool,
+            status: 'running',
+            startedAt: info.startedAt,
+          });
+          emitSteps();
+        },
+        onToolEnd: (info) => {
+          for (let i = steps.length - 1; i >= 0; i--) {
+            const step = steps[i]!;
+            if (step.node === `analyze:${info.tool}` && step.status === 'running') {
+              step.status = info.error ? 'error' : 'done';
+              step.finishedAt = Date.now();
+              step.durationMs = info.durationMs;
+              if (info.error) step.detail = info.error;
+              break;
+            }
+          }
+          emitSteps();
+        },
+      };
+      const result = await withRetry('analyzer-analyze', () => deps.analyzer.analyze(question, signal, hooks), signal);
       state.dataAnalysis = result;
       endStep('analyze', {
-        detail: result.resultType === 'error' ? 'error' : 'complete',
-        meta: { attempts: result.attempts, durationMs: Math.round(result.durationMs) },
+        detail: result.fallbackReason
+          ? `fallback: ${result.fallbackReason}`
+          : result.resultType === 'error'
+          ? 'error'
+          : 'complete',
+        meta: {
+          mode: result.mode,
+          fallbackReason: result.fallbackReason,
+          toolCount: result.toolTrace?.length ?? 0,
+          iterations: result.attempts,
+          durationMs: Math.round(result.durationMs),
+        },
       });
     } catch (e) {
       endStep('analyze', { detail: 'error' });
@@ -335,13 +383,30 @@ export function createWorkflowOrchestrator(
     }
     if (state.dataAnalysis && state.dataAnalysis.resultType !== 'error') {
       const da = state.dataAnalysis;
-      sections.push(
-        `DATA ANALYSIS:\n` +
-          `Question: ${question}\n` +
-          `Code:\n\`\`\`js\n${da.code}\n\`\`\`\n` +
-          `Result: ${JSON.stringify(da.result, null, 2)}\n` +
-          `Explanation: ${da.explanation}`
-      );
+      let dataAnalysisSection = `DATA ANALYSIS:\n` +
+        `Question: ${question}\n` +
+        `Code:\n\`\`\`js\n${da.code}\n\`\`\`\n` +
+        `Result: ${JSON.stringify(da.result, null, 2)}\n` +
+        `Explanation: ${da.explanation}`;
+
+      if (da.insights && da.insights.length > 0) {
+        const insightsText = da.insights
+          .map(
+            (insight) =>
+              `- ${insight.finding} — ${insight.evidence} (confidence: ${insight.confidence})${insight.implication ? ` — ${insight.implication}` : ''}`
+          )
+          .join('\n');
+        dataAnalysisSection += `\nInsights:\n${insightsText}`;
+      }
+
+      if (da.toolTrace && da.toolTrace.length > 0) {
+        const toolsText = da.toolTrace
+          .map((t) => `${t.tool} x${t.calls} (${Math.round(t.durationMs)}ms)`)
+          .join(', ');
+        dataAnalysisSection += `\nTools used: ${toolsText}`;
+      }
+
+      sections.push(dataAnalysisSection);
     }
     if (state.webResults.length > 0) {
       const webText = state.webResults
@@ -365,7 +430,7 @@ export function createWorkflowOrchestrator(
             system: 'You are a helpful assistant that answers questions based solely on the provided context. Cite sources inline using [1], [2], etc., and include a References: section at the end.',
             messages: [{ role: 'user', content: prompt }],
             temperature: deps.settings.temperature ?? 0,
-            model: deps.pickedModels.answer,
+            model: deps.pickedModels.chat,
           },
           callbacks.onToken ?? (() => {}),
         ),
@@ -401,7 +466,7 @@ export function createWorkflowOrchestrator(
           ],
           jsonMode: true,
           temperature: EVAL_TEMPERATURE,
-          model: deps.pickedModels.eval,
+          model: deps.pickedModels.chat,
         }),
       );
       const hallucParsed = JSON.parse(halluc.content || '{}');
@@ -421,7 +486,7 @@ export function createWorkflowOrchestrator(
           ],
           jsonMode: true,
           temperature: EVAL_TEMPERATURE,
-          model: deps.pickedModels.eval,
+          model: deps.pickedModels.chat,
         }),
       );
       const ansParsed = JSON.parse(ansResp.content || '{}');
@@ -449,14 +514,15 @@ export function createWorkflowOrchestrator(
           messages: [{ role: 'user', content: question }],
           jsonMode: true,
           temperature: EVAL_TEMPERATURE,
-          model: deps.pickedModels.routing,
+          model: deps.pickedModels.chat,
         }),
         signal
       );
       let source: SourceType;
       try {
         const parsed = JSON.parse(routeResp.content || '{}');
-        source = (parsed.datasource as SourceType) || 'vectorstore';
+        const raw = (parsed.datasource as SourceType) || 'vectorstore';
+        source = VALID_SOURCE_TYPES.includes(raw) ? raw : 'vectorstore';
       } catch (e) {
         if (import.meta.env.DEV) {
           console.warn('[orchestrator] route JSON parse failed (defaulting to vectorstore):', e);

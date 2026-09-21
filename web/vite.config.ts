@@ -37,7 +37,6 @@ function cspPlugin() {
         'https://openrouter.ai',
         'https://api.groq.com',
         'https://api.together.xyz',
-        'https://integrate.api.nvidia.com',
         'https://duckduckgo.com',
         'https://*.duckduckgo.com',
         'https://google.serper.dev',
@@ -47,7 +46,11 @@ function cspPlugin() {
         try {
           const url = new URL(deployUrl);
           connectSrc.push(url.origin);
-        } catch {
+        } catch (e) {
+          console.warn(
+            `[vite] Ignoring invalid VITE_DEPLOY_URL "${deployUrl}":`,
+            e instanceof Error ? e.message : e,
+          );
         }
       }
 

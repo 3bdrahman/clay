@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useAppStore } from './store';
+import { useAppStore, sanitizeProvider } from './store';
 import { LOCAL_DEFAULT_BASE_URL } from './lib/providers';
 import type { LocalModelPicks } from './lib/types';
 
@@ -7,7 +7,10 @@ describe('useAppStore.updateSettings', () => {
   beforeEach(() => {
     useAppStore.setState({
       settings: {
-        provider: 'nim',
+        provider: 'openrouter',
+        openrouterApiKey: '',
+        groqApiKey: '',
+        togetherApiKey: '',
         apiKey: '',
         embeddingApiKey: '',
         webSearchProvider: 'duckduckgo',
@@ -19,11 +22,12 @@ describe('useAppStore.updateSettings', () => {
         localModels: { chat: '', embeddings: '' },
         localCatalog: [],
         localCatalogFetchedAt: 0,
+        pickedModelsOverride: { chatModel: '', embedding: '' },
       },
     });
   });
 
-  it('clears localCatalog when switching from local to nim', () => {
+  it('clears localCatalog when switching from local to openrouter', () => {
     useAppStore.setState({
       settings: {
         ...useAppStore.getState().settings,
@@ -32,9 +36,9 @@ describe('useAppStore.updateSettings', () => {
         localCatalogFetchedAt: 12345,
       },
     });
-    useAppStore.getState().updateSettings({ provider: 'nim' });
+    useAppStore.getState().updateSettings({ provider: 'openrouter' });
     const after = useAppStore.getState().settings;
-    expect(after.provider).toBe('nim');
+    expect(after.provider).toBe('openrouter');
     expect(after.localCatalog).toEqual([]);
     expect(after.localCatalogFetchedAt).toBe(0);
   });
@@ -48,7 +52,7 @@ describe('useAppStore.updateSettings', () => {
         localCatalogFetchedAt: 12345,
       },
     });
-    useAppStore.getState().updateSettings({ apiKey: '' });
+    useAppStore.getState().updateSettings({ openrouterApiKey: '' });
     const after = useAppStore.getState().settings;
     expect(after.provider).toBe('local');
     expect(after.localCatalog.length).toBe(1);
@@ -132,5 +136,75 @@ describe('store persist migrate — LocalModelPicks 5-field → 2-field', () => 
     ) as { settings: { localModels: LocalModelPicks } };
     expect(out.settings.localModels.embeddings).toBe('nomic');
     expect(out.settings.localModels.chat).toBe('r');
+  });
+
+  it('falls back to openrouter when persisted provider is no longer registered', () => {
+    const out = migrate()?.(
+      { settings: { provider: 'nim' as never, openrouterApiKey: 'legacy-key' } },
+      5,
+    ) as { settings: { provider: string; openrouterApiKey: string } };
+    expect(out.settings.provider).toBe('openrouter');
+    expect(out.settings.openrouterApiKey).toBe('legacy-key');
+  });
+
+  it('falls back to openrouter when persisted provider is garbage', () => {
+    const out = migrate()?.(
+      { settings: { provider: 'does-not-exist' as never } },
+      5,
+    ) as { settings: { provider: string } };
+    expect(out.settings.provider).toBe('openrouter');
+  });
+});
+
+describe('persisted chat selection', () => {
+  it('migrates an old answer selection on same-version rehydration', async () => {
+    const current = useAppStore.getState();
+    const saved = localStorage.getItem('clay-settings-v1');
+    try {
+      localStorage.setItem('clay-settings-v1', JSON.stringify({
+        version: 5,
+        state: {
+          settings: {
+            ...current.settings,
+            pickedModelsOverride: { answer: 'chosen-answer', routing: 'old-router', embedding: 'embed' },
+          },
+        },
+      }));
+      await useAppStore.persist.rehydrate();
+      expect(useAppStore.getState().settings.pickedModelsOverride).toEqual({
+        chatModel: 'chosen-answer', embedding: 'embed',
+      });
+    } finally {
+      useAppStore.setState(current);
+      if (saved === null) localStorage.removeItem('clay-settings-v1');
+      else localStorage.setItem('clay-settings-v1', saved);
+    }
+  });
+
+  it('preserves an explicitly cleared chat selection instead of restoring legacy picks', () => {
+    const merge = useAppStore.persist.getOptions().merge;
+    const result = merge?.({
+      settings: { pickedModelsOverride: { chatModel: '', answer: 'legacy', embedding: 'embed' } },
+    }, useAppStore.getState());
+    expect(result?.settings.pickedModelsOverride).toEqual({ chatModel: '', embedding: 'embed' });
+  });
+});
+
+describe('sanitizeProvider', () => {
+  it('returns openrouter for unknown provider', () => {
+    expect(sanitizeProvider('unknown')).toBe('openrouter');
+  });
+
+  it('returns openrouter for non-string input', () => {
+    expect(sanitizeProvider(null)).toBe('openrouter');
+    expect(sanitizeProvider(undefined)).toBe('openrouter');
+    expect(sanitizeProvider(123)).toBe('openrouter');
+  });
+
+  it('returns the provider when it is registered', () => {
+    expect(sanitizeProvider('openrouter')).toBe('openrouter');
+    expect(sanitizeProvider('groq')).toBe('groq');
+    expect(sanitizeProvider('together')).toBe('together');
+    expect(sanitizeProvider('local')).toBe('local');
   });
 });

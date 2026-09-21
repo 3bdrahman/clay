@@ -18,6 +18,7 @@ import {
   WebSearchProviderError,
   CodeExecutionError,
   CorsBlockedError,
+  AnalysisBudgetExceededError,
   isLikelyCorsBlock,
   isRetryable,
   getUserMessage,
@@ -25,12 +26,12 @@ import {
 
 describe('RagError subclasses', () => {
   describe('NoProviderError', () => {
-    it('creates error for NIM provider', () => {
-      const err = new NoProviderError('nim');
+    it('creates error for openrouter provider', () => {
+      const err = new NoProviderError('openrouter');
       expect(err.code).toBe(RagErrorCode.NO_PROVIDER_CONFIGURED);
-      expect(err.message).toContain('NVIDIA NIM API key');
+      expect(err.message).toContain('No openrouter API key configured');
       expect(err.retryable).toBe(false);
-      expect(err.provider).toBe('nim');
+      expect(err.provider).toBe('openrouter');
     });
 
     it('creates error for local provider', () => {
@@ -43,7 +44,7 @@ describe('RagError subclasses', () => {
 
     it('includes cause', () => {
       const cause = new Error('root cause');
-      const err = new NoProviderError('nim', cause);
+      const err = new NoProviderError('openrouter', cause);
       expect(err.cause).toBe(cause);
     });
   });
@@ -332,8 +333,8 @@ describe('RagError subclasses', () => {
 
     it('includes short message in context', () => {
       const err = new CorsBlockedError('NVIDIA NIM');
-      expect(err.context?.shortMessage).toContain('CORS');
-      expect(err.context?.shortMessage).toContain('build.nvidia.com');
+      expect(err.context?.shortMessage).toContain('does not allow requests from this origin');
+      expect(err.context?.shortMessage).not.toContain('build.nvidia.com');
     });
 
     it('toUserMessage returns short message', () => {
@@ -350,6 +351,15 @@ describe('RagError subclasses', () => {
       const cause = new TypeError('Failed to fetch');
       const err = new CorsBlockedError('NVIDIA NIM', cause);
       expect(err.cause).toBe(cause);
+    });
+
+    it('default message references CSP and local-server solutions, not NIM-era proxies', () => {
+      const err = new CorsBlockedError('OpenRouter');
+      expect(err.message).not.toContain('build.nvidia.com');
+      expect(err.message).not.toContain('VITE_NIM_BASE_URL');
+      expect(err.message).not.toContain('Netlify');
+      expect(err.message).toContain('VITE_CSP_EXTRA_CONNECT_SRC');
+      expect(err.message).toContain('Switch to Local server in Settings');
     });
   });
 
@@ -370,6 +380,48 @@ describe('RagError subclasses', () => {
     it('returns false for non-NIM provider', () => {
       const error = new TypeError('Failed to fetch');
       expect(isLikelyCorsBlock(error, 'local')).toBe(false);
+    });
+  });
+
+  describe('AnalysisBudgetExceededError', () => {
+    const baseContext = {
+      iterations: 3,
+      elapsedMs: 12000,
+      tokensUsed: 45000,
+      tripped: 'tokens' as const,
+      limit: 40000,
+    };
+
+    it('constructs with code, retryable false, and recorded context', () => {
+      const err = new AnalysisBudgetExceededError(baseContext);
+      expect(err.code).toBe(RagErrorCode.ANALYSIS_BUDGET_EXCEEDED);
+      expect(err.retryable).toBe(false);
+      expect(err.context?.iterations).toBe(3);
+      expect(err.context?.elapsedMs).toBe(12000);
+      expect(err.context?.tokensUsed).toBe(45000);
+      expect(err.context?.tripped).toBe('tokens');
+      expect(err.context?.limit).toBe(40000);
+    });
+
+    it('names the token budget when tokens trip', () => {
+      const err = new AnalysisBudgetExceededError(baseContext);
+      expect(err.message).toContain('token budget (limit 40000) tripped');
+    });
+
+    it('names the time budget when time trips', () => {
+      const err = new AnalysisBudgetExceededError({ ...baseContext, tripped: 'time', limit: 60000 });
+      expect(err.message).toContain('time budget (limit 60000) tripped');
+    });
+
+    it('names the iteration budget when iterations trip', () => {
+      const err = new AnalysisBudgetExceededError({ ...baseContext, tripped: 'iterations', limit: 10 });
+      expect(err.message).toContain('iteration budget (limit 10) tripped');
+    });
+
+    it('includes cause when provided', () => {
+      const cause = new Error('loop aborted');
+      const err = new AnalysisBudgetExceededError(baseContext, cause);
+      expect(err.cause).toBe(cause);
     });
   });
 });

@@ -273,6 +273,39 @@ function AnalysisTab({
         <p className="text-xs text-ink-700 dark:text-ink-300 leading-relaxed">{analysis.explanation}</p>
       </div>
 
+      {analysis.insights?.length && (
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-ink-500 uppercase tracking-wide mb-2">Insights</div>
+          {analysis.insights.map((insight, i) => (
+            <div
+              key={i}
+              className="border border-ink-200 dark:border-ink-700 rounded-lg p-3 bg-white dark:bg-ink-800"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-ink-900 dark:text-ink-100">{insight.finding}</p>
+                  <p className="text-xs text-ink-500 dark:text-ink-400 mt-1">{insight.evidence}</p>
+                  {insight.implication && (
+                    <p className="text-xs text-ink-500 dark:text-ink-400 italic mt-1">{insight.implication}</p>
+                  )}
+                </div>
+                <span
+                  className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded whitespace-nowrap shrink-0 ${
+                    insight.confidence === 'high'
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                      : insight.confidence === 'medium'
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                      : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
+                  }`}
+                >
+                  {insight.confidence.toUpperCase()}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {analysis.resultType !== 'error' && (
         <div className="border border-ink-200 dark:border-ink-700 rounded-lg p-3 bg-white dark:bg-ink-800">
           <div className="text-xs font-semibold text-ink-500 uppercase tracking-wide mb-2">Result</div>

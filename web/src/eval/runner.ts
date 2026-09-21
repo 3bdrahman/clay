@@ -96,10 +96,10 @@ async function createServices(settings: Settings): Promise<{
   const { tables, metadata } = await loadSampleDatasets();
   const analyzer = createDataAnalyzer({
     llm,
-    embeddings,
     datasets: tables,
     metadata,
-    codeGenModel: picked.codeGen,
+    codeGenModel: picked.chat,
+    maxToolLoopTokens: settings.maxToolLoopTokens,
   });
 
   await vectorstore.load();

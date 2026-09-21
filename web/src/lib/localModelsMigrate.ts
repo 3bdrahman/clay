@@ -1,4 +1,20 @@
-import type { LocalModelPicks } from './types';
+import type { LocalModelPicks, PickedModelsOverride } from './types';
+
+export function migrateChatSelection(raw: unknown): PickedModelsOverride {
+  if (typeof raw !== 'object' || raw === null) return { chatModel: '', embedding: '' };
+  const chatModel = 'chatModel' in raw && typeof raw.chatModel === 'string'
+    ? raw.chatModel
+    : [
+      'answer' in raw ? raw.answer : undefined,
+      'routing' in raw ? raw.routing : undefined,
+      'codeGen' in raw ? raw.codeGen : undefined,
+      'eval' in raw ? raw.eval : undefined,
+    ].find(value => typeof value === 'string' && value.trim());
+  return {
+    chatModel: typeof chatModel === 'string' ? chatModel : '',
+    embedding: 'embedding' in raw && typeof raw.embedding === 'string' ? raw.embedding : '',
+  };
+}
 
 export interface LegacyLocalModelPicks {
   routing?: string;

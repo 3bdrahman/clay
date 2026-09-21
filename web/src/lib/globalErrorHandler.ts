@@ -45,15 +45,17 @@ export function initGlobalErrorHandler(): void {
 }
 
 function logError(error: RagError): void {
-  console.error('[GlobalErrorHandler]', {
-    code: error.code,
-    message: error.message,
-    provider: error.provider,
-    step: error.step,
-    retryable: error.retryable,
-    context: error.context,
-    stack: error.stack,
-  });
+  if (import.meta.env.DEV) {
+    console.error('[GlobalErrorHandler]', {
+      code: error.code,
+      message: error.message,
+      provider: error.provider,
+      step: error.step,
+      retryable: error.retryable,
+      context: error.context,
+      stack: error.stack,
+    });
+  }
 }
 
 export function reportError(

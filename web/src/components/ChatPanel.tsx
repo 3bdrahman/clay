@@ -22,13 +22,14 @@ function useActiveMessages(): ChatMessage[] {
   return messages;
 }
 
-export function ChatPanel({ onOpenData }: { onOpenData: () => void }) {
+export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => void; onOpenSettings: () => void }) {
   const messages = useActiveMessages();
   const addMessage = useAppStore(s => s.addMessage);
   const updateMessage = useAppStore(s => s.updateMessage);
   const isRunning = useAppStore(s => s.isRunning);
   const setRunning = useAppStore(s => s.setRunning);
-  const { services, loading, error, needsConfiguration, loadSampleData } = useClay();
+  const { services, loading, error, needsConfiguration, loadSampleData, pickedModels } = useClay();
+  const canSubmit = !!services && !!pickedModels.chat && !loading;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [streamingContent, setStreamingContent] = useState('');
@@ -48,7 +49,11 @@ export function ChatPanel({ onOpenData }: { onOpenData: () => void }) {
   }, [messages, isRunning, streamingContent]);
 
   const handleSubmit = async (text: string) => {
-    if (!services) return;
+    if (!services || !canSubmit) {
+      onOpenSettings();
+      return;
+    }
+    if (isRunning) return;
 
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -233,7 +238,9 @@ const showExamples = messages.length === 0 && !isRunning;
       <ChatInput
         onSubmit={handleSubmit}
         onCancel={cancel}
-        disabled={isRunning || !services}
+        disabled={!canSubmit}
+        isRunning={isRunning}
+        onConfigure={canSubmit ? undefined : onOpenSettings}
       />
    </div>
   );

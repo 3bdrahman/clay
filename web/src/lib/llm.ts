@@ -78,10 +78,30 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     throw new GenerationFailedError(providerLabel, new Error(`${status} ${resp.statusText}: ${text}`));
   }
 
-  async function callOpenAICompatible(req: LLMRequest): Promise<LLMResponse> {
-    const messages: Array<{ role: string; content: string }> = [];
+  async function callOpenAICompatible(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
+    const messages: Array<Record<string, unknown>> = [];
     if (req.system) messages.push({ role: 'system', content: req.system });
-    for (const m of req.messages) messages.push({ role: m.role, content: m.content });
+    for (const m of req.messages) {
+      if (m.role === 'assistant' && m.toolCalls) {
+        messages.push({
+          role: 'assistant',
+          content: m.content,
+          tool_calls: m.toolCalls.map(c => ({
+            id: c.id,
+            type: 'function',
+            function: { name: c.function.name, arguments: c.function.arguments },
+          })),
+        });
+      } else if (m.role === 'tool') {
+        messages.push({
+          role: 'tool',
+          content: m.content,
+          tool_call_id: m.toolCallId,
+        });
+      } else {
+        messages.push({ role: m.role, content: m.content });
+      }
+    }
 
     const body: Record<string, unknown> = {
       model: req.model,
@@ -90,24 +110,45 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     };
     if (req.maxTokens) body.max_tokens = req.maxTokens;
     if (req.jsonMode) body.response_format = { type: 'json_object' };
+    if (req.tools) body.tools = req.tools;
+    if (req.toolChoice) body.tool_choice = req.toolChoice;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
+    // Combine external signal with timeout signal (same pattern as streamOpenAICompatible)
     const { controller, cleanup } = createAbortControllerWithTimeout();
+    const combinedSignal = signal
+      ? (() => {
+          const combined = new AbortController();
+          signal.addEventListener('abort', () => combined.abort());
+          controller.signal.addEventListener('abort', () => combined.abort());
+          return combined.signal;
+        })()
+      : controller.signal;
+
+    // If external signal is already aborted, throw immediately (matches stream behavior)
+    if (signal?.aborted) {
+      cleanup();
+      throw new StreamInterruptedError(providerLabel, '', new Error('Aborted'));
+    }
+
     let resp: Response;
     try {
       resp = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: combinedSignal,
       });
     } catch (e) {
       cleanup();
-      // Network error (DNS, connection refused, CORS, etc.)
+      // Network error or abort
+      if (signal?.aborted || e instanceof DOMException) {
+        throw new StreamInterruptedError(providerLabel, '', e instanceof Error ? e : new Error(String(e)));
+      }
       throw classifyError(e, providerLabel, 'invoke');
     }
     cleanup();
@@ -135,11 +176,22 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     const choice = choices[0];
     const message = choice.message as Record<string, unknown> | undefined;
     const content = (message?.content as string) ?? '';
+    const finishReason = (choice.finish_reason as string | undefined) ?? (message?.finish_reason as string | undefined);
 
     // Check for token budget exceeded in response
     if (content.includes('token') && content.includes('budget') && content.includes('exceed')) {
       throw new TokenBudgetExceededError(0, 0, new Error(content));
     }
+
+    const toolCalls = message?.tool_calls as Array<Record<string, unknown>> | undefined;
+    const parsedToolCalls = toolCalls?.map(c => ({
+      id: c.id as string,
+      type: 'function' as const,
+      function: {
+        name: (c.function as Record<string, unknown>)?.name as string,
+        arguments: (c.function as Record<string, unknown>)?.arguments as string,
+      },
+    }));
 
     return {
       content,
@@ -151,6 +203,8 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
           }
         : undefined,
       model: d.model as string | undefined,
+      toolCalls: parsedToolCalls,
+      finishReason,
     };
   }
 
@@ -286,8 +340,8 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
   }
 
   return {
-    async invoke(req: LLMRequest): Promise<LLMResponse> {
-      return callOpenAICompatible(req);
+    async invoke(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
+      return callOpenAICompatible(req, signal);
     },
     async stream(req: LLMRequest, onToken: (token: string) => void, signal?: AbortSignal): Promise<LLMResponse> {
       return streamOpenAICompatible(req, onToken, signal);
@@ -296,6 +350,6 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
 }
 
 export interface LLMClient {
-  invoke(req: LLMRequest): Promise<LLMResponse>;
+  invoke(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse>;
   stream(req: LLMRequest, onToken: (token: string) => void, signal?: AbortSignal): Promise<LLMResponse>;
 }

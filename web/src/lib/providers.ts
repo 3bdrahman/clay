@@ -2,30 +2,37 @@
 // OpenRouter is default - works everywhere with generous free tier
 
 import type { ProviderKind } from './types';
+import type { Settings } from './types';
 
 export type { ProviderKind };
+
+/** Settings field holding the API key for a cloud provider. Undefined for 'local'. */
+export type ProviderApiKeyField = 'openrouterApiKey' | 'groqApiKey' | 'togetherApiKey';
 
 export interface ProviderConfig {
   kind: ProviderKind;
   displayName: string;
   baseUrl: string;
   modelsEndpoint: string;
-  apiKeyEnvVar: string;
   apiKeyHint: string;
   freeTier: boolean;
   requiresApiKey: boolean;
   defaultHeaders?: Record<string, string>;
   apiKeyUrl: string;
-  description: string;
 }
 
-// Dynamic referer for OpenRouter - can be overridden via VITE_OPENROUTER_REFERER
-// Defaults to the current window origin at runtime
+// Attribution referer sent to OpenRouter. Can be overridden at build time with
+// VITE_OPENROUTER_REFERER; defaults to the current origin at runtime, and to the
+// GitHub Pages deployment when no window exists (SSR/build).
+const OPENROUTER_REFERER_FALLBACK = 'https://3bdrahman.github.io/clay/';
+
 function getOpenRouterReferer(): string {
+  const override = import.meta.env.VITE_OPENROUTER_REFERER?.trim();
+  if (override) return override;
   if (typeof window !== 'undefined') {
     return window.location.origin;
   }
-  return 'https://clay-rag.netlify.app'; // fallback for SSR/build
+  return OPENROUTER_REFERER_FALLBACK;
 }
 
 export const LOCAL_DEFAULT_BASE_URL = 'http://localhost:11434/v1';
@@ -55,7 +62,6 @@ export const PROVIDER_REGISTRY: Record<ProviderKind, ProviderConfig> = {
     displayName: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     modelsEndpoint: '/models',
-    apiKeyEnvVar: 'VITE_OPENROUTER_API_KEY',
     apiKeyHint: 'sk-or-v1-...',
     freeTier: true,
     requiresApiKey: true,
@@ -63,43 +69,36 @@ export const PROVIDER_REGISTRY: Record<ProviderKind, ProviderConfig> = {
       'X-Title': 'Clay RAG',
     },
     apiKeyUrl: 'https://openrouter.ai/keys',
-    description: '300+ models from all providers. Generous free tier. Best all-around choice.',
   },
   groq: {
     kind: 'groq',
     displayName: 'Groq',
     baseUrl: 'https://api.groq.com/openai/v1',
     modelsEndpoint: '/models',
-    apiKeyEnvVar: 'VITE_GROQ_API_KEY',
     apiKeyHint: 'gsk_...',
     freeTier: true,
     requiresApiKey: true,
     apiKeyUrl: 'https://console.groq.com/keys',
-    description: 'Ultra-fast inference on Llama, Mixtral, Gemma. Generous free tier. Best for speed.',
   },
   together: {
     kind: 'together',
     displayName: 'Together AI',
     baseUrl: 'https://api.together.xyz/v1',
     modelsEndpoint: '/models',
-    apiKeyEnvVar: 'VITE_TOGETHER_API_KEY',
     apiKeyHint: '...',
     freeTier: true,
     requiresApiKey: true,
     apiKeyUrl: 'https://api.together.xyz/settings/api-keys',
-    description: 'Open models with fast inference. Free credits on signup. Good model variety.',
   },
   local: {
     kind: 'local',
     displayName: 'Local (OpenAI-compatible)',
     baseUrl: LOCAL_DEFAULT_BASE_URL,
     modelsEndpoint: '/models',
-    apiKeyEnvVar: '',
     apiKeyHint: 'optional',
     freeTier: true,
     requiresApiKey: false,
     apiKeyUrl: '',
-    description: 'Any OpenAI-compatible server (LM Studio, vLLM, llama.cpp, Jan, GPT4All).',
   },
 } as const;
 
@@ -107,27 +106,14 @@ export function getProviderConfig(kind: ProviderKind): ProviderConfig {
   return PROVIDER_REGISTRY[kind];
 }
 
-export function getProviderDisplayName(kind: ProviderKind): string {
-  return PROVIDER_REGISTRY[kind].displayName;
+export function getProviderApiKeyField(kind: ProviderKind): ProviderApiKeyField | undefined {
+  switch (kind) {
+    case 'openrouter': return 'openrouterApiKey';
+    case 'groq': return 'groqApiKey';
+    case 'together': return 'togetherApiKey';
+    case 'local': return undefined;
+  }
 }
-
-export function getProvidersWithFreeTier(): ProviderKind[] {
-  return Object.entries(PROVIDER_REGISTRY)
-    .filter(([, config]) => config.freeTier)
-    .map(([kind]) => kind as ProviderKind);
-}
-
-export function getProviderApiKeyField(kind: ProviderKind): string {
-  const fieldMap: Record<ProviderKind, string> = {
-    openrouter: 'openrouterApiKey',
-    groq: 'groqApiKey',
-    together: 'togetherApiKey',
-    local: '',
-  };
-  return fieldMap[kind];
-}
-
-import type { Settings } from './types';
 
 export interface ProviderEndpoint {
   baseUrl: string;
@@ -148,7 +134,7 @@ export function resolveProviderEndpoint(settings: Settings): ProviderEndpoint {
     };
   }
 
-  const apiKey = (settings as unknown as Record<string, string>)[apiKeyField] || settings.apiKey || '';
+  const apiKey = (apiKeyField !== undefined ? settings[apiKeyField] : '') || settings.apiKey || '';
 
   const defaultHeaders = { ...config.defaultHeaders };
   if (settings.provider === 'openrouter') {

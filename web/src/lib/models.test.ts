@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterAll } from 'vitest';
 import {
   modelClass,
-  pickBestModels,
+  pickBestEmbedding,
   pickLocalModels,
   listModels,
   listLocalCatalog,
@@ -65,76 +65,27 @@ describe('modelClass', () => {
   });
 });
 
-describe('pickBestModels', () => {
-  it('returns one model for every role', () => {
-    const picked = pickBestModels(fakeModels);
-    expect(picked.routing).toBeTypeOf('string');
-    expect(picked.codeGen).toBeTypeOf('string');
-    expect(picked.answer).toBeTypeOf('string');
-    expect(picked.eval).toBeTypeOf('string');
-    expect(picked.embedding).toBeTypeOf('string');
-  });
-
+describe('pickBestEmbedding', () => {
   it('picks the highest-scoring embedding model', () => {
-    const picked = pickBestModels(fakeModels);
-    expect(picked.embedding).toBe('nvidia/nv-embedqa-e5-v5');
+    expect(pickBestEmbedding(fakeModels)).toBe('nvidia/nv-embedqa-e5-v5');
   });
 
-  it('picks Codestral 22B for code generation', () => {
-    const picked = pickBestModels(fakeModels);
-    expect(picked.codeGen).toBe('mistralai/codestral-22b-instruct-v0.1');
+  it('ignores non-embedding models when scoring', () => {
+    expect(pickBestEmbedding([
+      { id: 'meta/llama-3.1-8b-instruct', ownedBy: 'meta', created: 0 },
+      { id: 'snowflake/arctic-embed-l', ownedBy: 'snowflake', created: 0 },
+    ])).toBe('snowflake/arctic-embed-l');
   });
 
-  it('picks Nemotron-3 Ultra for answer', () => {
-    const picked = pickBestModels(fakeModels);
-    expect(picked.answer).toBe('nvidia/nemotron-3-ultra-550b-a55b');
+  it('returns undefined when the catalog has no embeddings', () => {
+    expect(pickBestEmbedding([
+      { id: 'meta/llama-3.1-8b-instruct', ownedBy: 'meta', created: 0 },
+      { id: 'meta/llama-guard-3-8b', ownedBy: 'meta', created: 0 },
+    ])).toBeUndefined();
   });
 
-  it('picks a small chat model for routing', () => {
-    const picked = pickBestModels(fakeModels);
-    expect(['meta/llama-3.1-8b-instruct', 'mistralai/mistral-7b-instruct-v0.3'])
-      .toContain(picked.routing);
-  });
-
-  it('picks a different small chat model for eval', () => {
-    const picked = pickBestModels(fakeModels);
-    expect(picked.eval).toBeDefined();
-    expect(picked.eval).not.toBe(picked.routing);
-  });
-
-  it('excludes vision models from chat picks', () => {
-    const picked = pickBestModels(fakeModels);
-    expect(picked.routing).not.toContain('vision');
-    expect(picked.answer).not.toContain('vision');
-    expect(picked.eval).not.toContain('vision');
-  });
-
-  it('excludes safety/guard models from chat picks', () => {
-    const picked = pickBestModels(fakeModels);
-    expect(picked.routing).not.toContain('guard');
-    expect(picked.answer).not.toContain('guard');
-    expect(picked.eval).not.toContain('guard');
-  });
-
-  it('handles empty model list gracefully', () => {
-    const picked = pickBestModels([]);
-    expect(picked.routing).toBeUndefined();
-    expect(picked.codeGen).toBeUndefined();
-    expect(picked.answer).toBeUndefined();
-    expect(picked.eval).toBeUndefined();
-    expect(picked.embedding).toBeUndefined();
-  });
-
-  it('falls back to first chat model when no small models exist', () => {
-    const noSmall: ModelInfo[] = [
-      { id: 'mistralai/codestral-22b-instruct-v0.1', ownedBy: 'mistralai', created: 0 },
-      { id: 'nvidia/nemotron-3-ultra-550b-a55b', ownedBy: 'nvidia', created: 0 },
-      { id: 'nvidia/nv-embedqa-e5-v5', ownedBy: 'nvidia', created: 0 },
-    ];
-    const picked = pickBestModels(noSmall);
-    expect(picked.codeGen).toBe('mistralai/codestral-22b-instruct-v0.1');
-    expect(picked.answer).toBe('nvidia/nemotron-3-ultra-550b-a55b');
-    expect(picked.embedding).toBe('nvidia/nv-embedqa-e5-v5');
+  it('returns undefined for an empty catalog', () => {
+    expect(pickBestEmbedding([])).toBeUndefined();
   });
 });
 
@@ -330,16 +281,13 @@ describe('listLocalCatalog', () => {
 });
 
 describe('pickLocalModels', () => {
-  it('fans the single chat field into all 4 chat roles and keeps embeddings separate', () => {
+  it('returns single chat model and embeddings separate', () => {
     const picks: LocalModelPicks = {
       chat: 'llama3.1:8b',
       embeddings: 'nomic-embed-text',
     };
     expect(pickLocalModels(picks)).toEqual({
-      routing: 'llama3.1:8b',
-      codeGen: 'llama3.1:8b',
-      answer: 'llama3.1:8b',
-      eval: 'llama3.1:8b',
+      chat: 'llama3.1:8b',
       embedding: 'nomic-embed-text',
     });
   });
@@ -350,10 +298,7 @@ describe('pickLocalModels', () => {
       embeddings: '',
     };
     const out = pickLocalModels(picks);
-    expect(out.routing).toBeUndefined();
-    expect(out.codeGen).toBeUndefined();
-    expect(out.answer).toBeUndefined();
-    expect(out.eval).toBeUndefined();
+    expect(out.chat).toBeUndefined();
     expect(out.embedding).toBeUndefined();
   });
 });
@@ -376,17 +321,29 @@ describe('resolveModels', () => {
     localCatalog: [],
     localCatalogFetchedAt: 0,
     pickedModelsOverride: {
-      routing: '',
-      codeGen: '',
-      answer: '',
-      eval: '',
+      chatModel: '',
       embedding: '',
     },
   };
 
-  it('uses pickBestModels for the OpenRouter provider', () => {
+  it('preserves an explicit chat model and leaves chat unset when that choice is cleared', () => {
+    const selectedSettings: Settings = {
+      ...baseSettings,
+      pickedModelsOverride: { chatModel: 'user/chosen-model', embedding: '' },
+    };
+    expect(resolveModels(selectedSettings, fakeModels).picked.chat).toBe('user/chosen-model');
+
+    const clearedSettings: Settings = {
+      ...selectedSettings,
+      pickedModelsOverride: { ...selectedSettings.pickedModelsOverride, chatModel: '' },
+    };
+    expect(resolveModels(clearedSettings, fakeModels).picked.chat).toBeUndefined();
+  });
+
+  it('keeps the embedding catalog default without automatically choosing a chat model', () => {
     const out = resolveModels(baseSettings, fakeModels);
-    expect(out.picked.answer).toBe('nvidia/nemotron-3-ultra-550b-a55b');
+    expect(out.picked.chat).toBeUndefined();
+    expect(out.picked.embedding).toBe('nvidia/nv-embedqa-e5-v5');
     expect(out.catalog).toBe(fakeModels);
   });
 
@@ -407,10 +364,7 @@ describe('resolveModels', () => {
       },
       fakeModels,
     );
-    expect(out.picked.routing).toBe('llama3.1:8b');
-    expect(out.picked.codeGen).toBe('llama3.1:8b');
-    expect(out.picked.answer).toBe('llama3.1:8b');
-    expect(out.picked.eval).toBe('llama3.1:8b');
+    expect(out.picked.chat).toBe('llama3.1:8b');
     expect(out.picked.embedding).toBe('nomic-embed-text');
     expect(out.catalog).toBe(localCatalog);
     expect(out.warnings).toEqual([]);
