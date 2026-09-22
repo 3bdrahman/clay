@@ -158,6 +158,30 @@ describe('createLLMClient', () => {
     expect(body.max_tokens).toBe(100);
   });
 
+  it('includes maxTokens in stream request when provided', async () => {
+    const mockStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"H"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"i"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      body: mockStream,
+    });
+
+    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    await client.stream({
+      messages: [{ role: 'user', content: 'Hi' }],
+      maxTokens: 50,
+    }, () => {});
+
+    const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
+    expect(body.max_tokens).toBe(50);
+  });
+
   // --- Error classification tests ---
 
   it('throws InvalidApiKeyError on 401 response', async () => {

@@ -1,5 +1,6 @@
 import type {
   Citation,
+  DataAnalysisResult,
   Document,
   Settings,
   SourceType,
@@ -16,6 +17,7 @@ import {
   parallelFanOut,
   parallelGrade,
   formatHeadingCitation,
+  type HyDEResult,
 } from './orchestratorHelpers';
 import { RagError, RagErrorCode, isRetryable, getUserMessage, GenerationFailedError } from '../lib/errors';
 
@@ -37,6 +39,7 @@ export interface OrchestratorDeps {
   analyzer: DataAnalyzer;
   settings: Settings;
   pickedModels: PickedModels;
+  previousAnalysis?: DataAnalysisResult;
 }
 
 const NODE_LABELS: Record<string, string> = {
@@ -61,6 +64,27 @@ const RERANK_K = 4;
 const GRADE_EARLY_EXIT_AT = 4;
 const WEB_SEARCH_RESULT_COUNT = 4;
 const EVAL_TEMPERATURE = 0;
+const MAX_REFLECTIONS = 8;
+
+function formatPreviousContext(analysis: DataAnalysisResult): string {
+  const parts: string[] = [];
+  if (analysis.insights && analysis.insights.length > 0) {
+    parts.push('Insights:');
+    for (const insight of analysis.insights) {
+      parts.push(`- ${insight.finding} (${insight.confidence}): ${insight.evidence}`);
+    }
+  }
+  if (analysis.toolTrace && analysis.toolTrace.length > 0) {
+    parts.push('Tools used:');
+    for (const tool of analysis.toolTrace) {
+      parts.push(`- ${tool.tool} (${tool.calls} calls, ${Math.round(tool.durationMs)}ms)`);
+    }
+  }
+  if (analysis.explanation) {
+    parts.push(`Summary: ${analysis.explanation.slice(0, 500)}`);
+  }
+  return parts.join('\n');
+}
 
 export function createWorkflowOrchestrator(
   question: string,
@@ -176,6 +200,16 @@ export function createWorkflowOrchestrator(
         // Retry with exponential backoff
         if (attempt < MAX_STEP_RETRIES) {
           const delay = BASE_RETRY_DELAY_MS * Math.pow(2, attempt);
+          // Record retry event in the currently-running step (last step with status 'running')
+          for (let i = steps.length - 1; i >= 0; i--) {
+            const step = steps[i];
+            if (step.status === 'running') {
+              if (!step.retries) step.retries = [];
+              step.retries.push({ attempt: attempt + 1, error: lastError.message, delayMs: delay });
+              emitSteps();
+              break;
+            }
+          }
           await new Promise(r => setTimeout(r, delay));
           if (import.meta.env.DEV) {
             console.warn(`[orchestrator] Retrying ${stepName} (attempt ${attempt + 1}/${MAX_STEP_RETRIES}):`, lastError.message);
@@ -255,7 +289,7 @@ export function createWorkflowOrchestrator(
     beginStep('retrieve', NODE_LABELS.retrieve);
 
     try {
-      const hypothetical = await expandHyDE(question, { llm: deps.llm, model: deps.pickedModels.chat });
+      const hydeResult: HyDEResult = await expandHyDE(question, { llm: deps.llm, model: deps.pickedModels.chat });
       const initialK = deps.settings.vectorstoreInitialK ?? DEFAULT_VECTORSTORE_INITIAL_K;
       const rerankK = RERANK_K;
 
@@ -263,14 +297,14 @@ export function createWorkflowOrchestrator(
         parallelFanOut(
           (q, k) => deps.vectorstore.similaritySearch(q, k),
           question,
-          hypothetical,
+          hydeResult.hypothetical,
           initialK,
           rerankK,
         ),
         signal
       );
       state.documents = docs;
-      endStep('retrieve', { detail: `${docs.length} docs`, meta: { count: docs.length } });
+      endStep('retrieve', { detail: `${docs.length} docs`, meta: { count: docs.length, tokensUsed: hydeResult.tokensUsed } });
 
       beginStep('grade_docs', NODE_LABELS.grade_docs);
       const filtered = await parallelGrade(docs, gradeDocRelevance, {
@@ -290,6 +324,7 @@ export function createWorkflowOrchestrator(
     if (signal?.aborted) return;
     beginStep('analyze', NODE_LABELS.analyze);
     try {
+      const reflections: string[] = [];
       const hooks: AnalyzerHooks = {
         onToolStart: (info) => {
           steps.push({
@@ -314,8 +349,16 @@ export function createWorkflowOrchestrator(
           }
           emitSteps();
         },
+        onIteration: (info) => {
+          if (reflections.length < MAX_REFLECTIONS) {
+            reflections.push(info.reflection);
+          }
+        },
       };
-      const result = await withRetry('analyzer-analyze', () => deps.analyzer.analyze(question, signal, hooks), signal);
+      const previousContext = deps.previousAnalysis
+        ? formatPreviousContext(deps.previousAnalysis)
+        : undefined;
+      const result = await withRetry('analyzer-analyze', () => deps.analyzer.analyze(question, signal, hooks, previousContext), signal);
       state.dataAnalysis = result;
       endStep('analyze', {
         detail: result.fallbackReason
@@ -329,6 +372,8 @@ export function createWorkflowOrchestrator(
           toolCount: result.toolTrace?.length ?? 0,
           iterations: result.attempts,
           durationMs: Math.round(result.durationMs),
+          reflections: reflections.length > 0 ? reflections : undefined,
+          partial: result.partial,
         },
       });
     } catch (e) {
@@ -437,7 +482,7 @@ export function createWorkflowOrchestrator(
       );
       state.answer = resp.content;
       buildCitations();
-      endStep('generate', { detail: 'complete' });
+      endStep('generate', { detail: 'complete', meta: { tokensUsed: resp.usage?.totalTokens ?? 0 } });
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       state.answer = `Error generating answer: ${getUserMessage(err)}`;
@@ -454,6 +499,7 @@ export function createWorkflowOrchestrator(
       return false;
     }
 
+    let totalTokensUsed = 0;
     try {
       const halluc = await withRetry('llm-invoke-hallucination', () =>
         deps.llm.invoke({
@@ -469,9 +515,10 @@ export function createWorkflowOrchestrator(
           model: deps.pickedModels.chat,
         }),
       );
+      totalTokensUsed += halluc.usage?.totalTokens ?? 0;
       const hallucParsed = JSON.parse(halluc.content || '{}');
       if ((hallucParsed.binary_score || '').toLowerCase() !== 'yes') {
-        endStep('evaluate', { detail: 'hallucination' });
+        endStep('evaluate', { detail: 'hallucination', meta: { tokensUsed: totalTokensUsed } });
         return false;
       }
 
@@ -489,15 +536,16 @@ export function createWorkflowOrchestrator(
           model: deps.pickedModels.chat,
         }),
       );
+      totalTokensUsed += ansResp.usage?.totalTokens ?? 0;
       const ansParsed = JSON.parse(ansResp.content || '{}');
       const useful = (ansParsed.binary_score || '').toLowerCase() === 'yes';
-      endStep('evaluate', { detail: useful ? 'useful' : 'not useful' });
+      endStep('evaluate', { detail: useful ? 'useful' : 'not useful', meta: { tokensUsed: totalTokensUsed } });
       return useful;
     } catch (e) {
       if (import.meta.env.DEV) {
         console.warn('[orchestrator] evaluate failed (treating as useful to avoid infinite retry):', e);
       }
-      endStep('evaluate', { detail: 'eval-error' });
+      endStep('evaluate', { detail: 'eval-error', meta: { tokensUsed: totalTokensUsed } });
       return true;
     }
   }
@@ -530,7 +578,7 @@ export function createWorkflowOrchestrator(
         source = 'vectorstore';
       }
       state.routing = source;
-      endStep('route', { detail: `-> ${source}` });
+      endStep('route', { detail: `-> ${source}`, meta: { tokensUsed: routeResp.usage?.totalTokens ?? 0 } });
 
       await runPath(source, signal);
 

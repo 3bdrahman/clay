@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { runEval, formatReport, gradeQuestionSet, type EvalQuestion } from './runner';
+import { describe, it, expect, vi } from 'vitest';
+import { runEval, formatReport, gradeQuestionSet, type EvalQuestion, computeLexicalOverlap, scoreWithJudge } from './runner';
 import { generateEvalQuestions } from './dynamicQuestions';
 import type { Settings } from '../lib/types';
 
@@ -199,3 +199,89 @@ describe('E2E Eval (requires VITE_NIM_API_KEY)', () => {
     expect(report).toContain('# Clay Eval Report');
   }, 300000);
 });
+
+describe('computeLexicalOverlap', () => {
+  it('returns 1.0 for identical texts', () => {
+    const text = 'The average salary is 100000';
+    const score = computeLexicalOverlap(text, text);
+    expect(score).toBe(1.0);
+  });
+
+  it('returns ~0 for completely disjoint texts', () => {
+    const score = computeLexicalOverlap('apple banana', 'cherry date');
+    expect(score).toBeLessThan(0.1);
+  });
+
+  it('returns intermediate score for partial overlap', () => {
+    const score = computeLexicalOverlap('The average salary is 100000', 'The average salary is 120000');
+    expect(score).toBeGreaterThan(0.3);
+    expect(score).toBeLessThan(1.0);
+  });
+
+  it('handles empty strings', () => {
+    expect(computeLexicalOverlap('', '')).toBe(1.0);
+    expect(computeLexicalOverlap('hello', '')).toBe(0);
+    expect(computeLexicalOverlap('', 'world')).toBe(0);
+  });
+
+  it('is case-insensitive', () => {
+    const score = computeLexicalOverlap('HELLO WORLD', 'hello world');
+    expect(score).toBe(1.0);
+  });
+
+  it('ignores punctuation', () => {
+    const score = computeLexicalOverlap('Hello, world!', 'Hello world');
+    expect(score).toBe(1.0);
+  });
+});
+
+describe('scoreWithJudge', () => {
+  it('returns score and rationale from mocked LLM', async () => {
+    const mockLLM = {
+      invoke: vi.fn().mockResolvedValue({
+        content: JSON.stringify({ score: 0.8, rationale: 'Good coverage' }),
+        usage: { totalTokens: 50 },
+      }),
+    };
+
+    const result = await scoreWithJudge(mockLLM, 'test-model', 'What is X?', 'Answer A', 'Answer B');
+    expect(result.score).toBe(0.8);
+    expect(result.rationale).toBe('Good coverage');
+  });
+
+  it('clamps score to 0-1 range', async () => {
+    const mockLLM = {
+      invoke: vi.fn().mockResolvedValue({
+        content: JSON.stringify({ score: 1.5, rationale: 'Too high' }),
+        usage: { totalTokens: 50 },
+      }),
+    };
+
+    const result = await scoreWithJudge(mockLLM, 'test-model', 'Q', 'A', 'B');
+    expect(result.score).toBe(1.0);
+  });
+
+  it('handles LLM errors gracefully', async () => {
+    const mockLLM = {
+      invoke: vi.fn().mockRejectedValue(new Error('LLM down')),
+    };
+
+    const result = await scoreWithJudge(mockLLM, 'test-model', 'Q', 'A', 'B');
+    expect(result.score).toBe(0);
+    expect(result.rationale).toBe('Judge scoring failed');
+  });
+
+  it('handles invalid JSON from LLM', async () => {
+    const mockLLM = {
+      invoke: vi.fn().mockResolvedValue({
+        content: 'not json',
+        usage: { totalTokens: 50 },
+      }),
+    };
+
+    const result = await scoreWithJudge(mockLLM, 'test-model', 'Q', 'A', 'B');
+    expect(result.score).toBe(0);
+    expect(result.rationale).toBe('Judge scoring failed');
+  });
+});
+

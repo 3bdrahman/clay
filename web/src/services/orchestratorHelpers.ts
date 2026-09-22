@@ -6,8 +6,13 @@
 import type { Citation, Document } from '../lib/types';
 
 export interface HyDEOptions {
-  llm: { invoke: (req: { system?: string; messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>; jsonMode?: boolean; temperature?: number; model?: string }) => Promise<{ content: string }> };
+  llm: { invoke: (req: { system?: string; messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>; jsonMode?: boolean; temperature?: number; model?: string }) => Promise<{ content: string; usage?: { totalTokens?: number } }> };
   model?: string;
+}
+
+export interface HyDEResult {
+  hypothetical: string;
+  tokensUsed: number;
 }
 
 const HYDE_INSTRUCTIONS =
@@ -24,7 +29,7 @@ const HYDE_PROMPT =
  * that would answer the question, then use it for dense retrieval.
  * Falls back to the original question if generation fails.
  */
-export async function expandHyDE(question: string, opts: HyDEOptions): Promise<string> {
+export async function expandHyDE(question: string, opts: HyDEOptions): Promise<HyDEResult> {
   try {
     const resp = await opts.llm.invoke({
       system: HYDE_INSTRUCTIONS,
@@ -33,13 +38,14 @@ export async function expandHyDE(question: string, opts: HyDEOptions): Promise<s
       ...(opts.model !== undefined ? { model: opts.model } : {}),
     });
     const text = (resp.content || '').trim();
-    if (text.length > 0) return `${question}\n\n${text}`;
+    const tokensUsed = resp.usage?.totalTokens ?? 0;
+    if (text.length > 0) return { hypothetical: `${question}\n\n${text}`, tokensUsed };
   } catch (e) {
     if (import.meta.env.DEV) {
       console.warn('[orchestratorHelpers] expandHyDE failed (falling back to original question):', e);
     }
   }
-  return question;
+  return { hypothetical: question, tokensUsed: 0 };
 }
 
 /**

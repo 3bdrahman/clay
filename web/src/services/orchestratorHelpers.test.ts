@@ -31,8 +31,9 @@ describe('expandHyDE', () => {
   it('returns a hypothetical passage prefixed to the original question', async () => {
     const llm = makeLLM('Hypothetical answer paragraph.');
     const out = await expandHyDE('What is X?', { llm });
-    expect(out).toContain('What is X?');
-    expect(out).toContain('Hypothetical answer paragraph');
+    expect(out.hypothetical).toContain('What is X?');
+    expect(out.hypothetical).toContain('Hypothetical answer paragraph');
+    expect(out.tokensUsed).toBe(0); // makeLLM doesn't return usage
   });
 
   it('falls back to original question when LLM throws', async () => {
@@ -41,13 +42,15 @@ describe('expandHyDE', () => {
       stream: vi.fn(),
     };
     const out = await expandHyDE('What is X?', { llm });
-    expect(out).toBe('What is X?');
+    expect(out.hypothetical).toBe('What is X?');
+    expect(out.tokensUsed).toBe(0);
   });
 
   it('falls back when LLM returns empty content', async () => {
     const llm = makeLLM('');
     const out = await expandHyDE('What is X?', { llm });
-    expect(out).toBe('What is X?');
+    expect(out.hypothetical).toBe('What is X?');
+    expect(out.tokensUsed).toBe(0);
   });
 
   it('passes through the model override when provided', async () => {
@@ -212,6 +215,7 @@ describe('expandHyDE', () => {
       stream: vi.fn(),
     };
     const out = await expandHyDE('What is X?', { llm });
-    expect(out).toBe('What is X?');
+    expect(out.hypothetical).toBe('What is X?');
+    expect(out.tokensUsed).toBe(0);
   });
 });

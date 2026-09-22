@@ -43,6 +43,8 @@ export interface EvalResult {
   answer: string;
   latencyMs: number;
   error?: string;
+  answerScore?: number; // Lexical overlap score 0-1
+  judgeScore?: number; // LLM-as-judge score 0-1
 }
 
 export interface EvalSummary {
@@ -52,6 +54,8 @@ export interface EvalSummary {
   routingAccuracy: number;
   avgRecallAtK: number;
   avgLatencyMs: number;
+  avgAnswerScore: number;
+  avgJudgeScore: number;
   byCategory: Record<string, { total: number; passed: number; routingAccuracy: number }>;
   results: EvalResult[];
 }
@@ -114,6 +118,95 @@ function gradeRouting(result: EvalResult): boolean {
 function computeRecallAtK(relevant: number, total: number): number {
   if (total === 0) return 1;
   return Math.min(1, relevant / total);
+}
+
+/**
+ * Tokenize text into lowercase alphanumeric tokens.
+ */
+function tokenize(text: string): string[] {
+  return text.toLowerCase().split(/\W+/).filter(t => t.length > 0);
+}
+
+/**
+ * Compute lexical overlap score between two texts.
+ * Uses weighted Jaccard similarity: intersection weight / union weight.
+ * Weight of each token is 1 / (1 + log(total_frequency)) to downweight common tokens.
+ * Returns a score between 0 and 1.
+ */
+export function computeLexicalOverlap(generated: string, golden: string): number {
+  const genTokens = tokenize(generated);
+  const goldTokens = tokenize(golden);
+
+  if (genTokens.length === 0 && goldTokens.length === 0) return 1;
+  if (genTokens.length === 0 || goldTokens.length === 0) return 0;
+
+  // Count frequencies
+  const genFreq = new Map<string, number>();
+  const goldFreq = new Map<string, number>();
+
+  for (const t of genTokens) genFreq.set(t, (genFreq.get(t) ?? 0) + 1);
+  for (const t of goldTokens) goldFreq.set(t, (goldFreq.get(t) ?? 0) + 1);
+
+  // Compute weighted intersection and union
+  let intersectionWeight = 0;
+  let unionWeight = 0;
+
+  const allTokens = new Set([...genFreq.keys(), ...goldFreq.keys()]);
+  for (const token of allTokens) {
+    const genCount = genFreq.get(token) ?? 0;
+    const goldCount = goldFreq.get(token) ?? 0;
+    const totalCount = genCount + goldCount;
+    const weight = 1 / (1 + Math.log(totalCount));
+
+    if (genCount > 0 && goldCount > 0) {
+      intersectionWeight += weight * Math.min(genCount, goldCount);
+    }
+    unionWeight += weight * Math.max(genCount, goldCount);
+  }
+
+  return unionWeight === 0 ? 0 : intersectionWeight / unionWeight;
+}
+
+/**
+ * Score an answer against a golden answer using LLM-as-judge.
+ * Returns a score 0-1 and a one-line rationale.
+ */
+export async function scoreWithJudge(
+  llm: { invoke: (req: { system?: string; messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>; jsonMode?: boolean; temperature?: number; model?: string }) => Promise<{ content: string; usage?: { totalTokens?: number } }> },
+  model: string,
+  question: string,
+  generated: string,
+  golden: string
+): Promise<{ score: number; rationale: string }> {
+  const prompt = `Question: ${question}
+
+Golden Answer: ${golden}
+
+Generated Answer: ${generated}
+
+Score the generated answer on factual coverage of the golden answer (0.0 to 1.0).
+Consider: Does the generated answer contain the key facts from the golden answer? Are there hallucinations or missing critical information?
+Return JSON: {"score": 0.0-1.0, "rationale": "one-line explanation"}`;
+
+  try {
+    const resp = await llm.invoke({
+      system: 'You are an expert evaluator. Score factual coverage accurately and concisely.',
+      messages: [{ role: 'user', content: prompt }],
+      jsonMode: true,
+      temperature: 0,
+      model,
+    });
+
+    const parsed = JSON.parse(resp.content || '{}');
+    const score = Math.max(0, Math.min(1, Number.isFinite(parsed.score) ? parsed.score : 0));
+    const rationale = String(parsed.rationale ?? '').slice(0, 200);
+    return { score, rationale };
+  } catch (e) {
+    if (import.meta.env.DEV) {
+      console.warn('[eval] Judge scoring failed:', e);
+    }
+    return { score: 0, rationale: 'Judge scoring failed' };
+  }
 }
 
 /**
@@ -191,6 +284,17 @@ export async function runEval(
     const routingCorrect = gradeRouting({ actualSource, expectedSource: q.expectedSource } as EvalResult);
     const recallAtK = computeRecallAtK(relevantChunks, q.minRelevantChunks);
 
+    // Compute lexical overlap score
+    const answerScore = computeLexicalOverlap(answer, q.goldenAnswer);
+
+    // Compute LLM-as-judge score if LLM is available
+    let judgeScore: number | undefined;
+    const judgeModel = services.pickedModels.chat;
+    if (!error && answer.trim() && judgeModel) {
+      const judgeResult = await scoreWithJudge(services.llm, judgeModel, q.question, answer, q.goldenAnswer);
+      judgeScore = judgeResult.score;
+    }
+
     results.push({
       questionId: q.id,
       question: q.question,
@@ -204,6 +308,8 @@ export async function runEval(
       answer,
       latencyMs,
       error,
+      answerScore,
+      judgeScore,
     });
   }
 
@@ -213,6 +319,8 @@ export async function runEval(
   const routingAccuracy = results.filter(r => r.routingCorrect).length / total;
   const avgRecallAtK = results.reduce((sum, r) => sum + r.recallAtK, 0) / total;
   const avgLatencyMs = results.reduce((sum, r) => sum + r.latencyMs, 0) / total;
+  const avgAnswerScore = results.reduce((sum, r) => sum + (r.answerScore ?? 0), 0) / total;
+  const avgJudgeScore = results.reduce((sum, r) => sum + (r.judgeScore ?? 0), 0) / total;
 
   const byCategory: Record<string, { total: number; passed: number; routingAccuracy: number }> = {};
   for (const r of results) {
@@ -232,6 +340,8 @@ export async function runEval(
     routingAccuracy,
     avgRecallAtK,
     avgLatencyMs,
+    avgAnswerScore,
+    avgJudgeScore,
     byCategory,
     results,
   };
@@ -252,6 +362,10 @@ export function gradeQuestionSet(
     results.reduce((sum, r) => sum + r.recallAtK, 0) / (total || 1);
   const avgLatencyMs =
     results.reduce((sum, r) => sum + r.latencyMs, 0) / (total || 1);
+  const avgAnswerScore =
+    results.reduce((sum, r) => sum + (r.answerScore ?? 0), 0) / (total || 1);
+  const avgJudgeScore =
+    results.reduce((sum, r) => sum + (r.judgeScore ?? 0), 0) / (total || 1);
 
   const byCategory: Record<
     string,
@@ -283,6 +397,8 @@ export function gradeQuestionSet(
     routingAccuracy,
     avgRecallAtK,
     avgLatencyMs,
+    avgAnswerScore,
+    avgJudgeScore,
     byCategory,
     results,
   };
@@ -296,6 +412,8 @@ export function formatReport(summary: EvalSummary): string {
   lines.push(`**Passed:** ${summary.passed} / ${summary.total} (${((summary.passed / summary.total) * 100).toFixed(1)}%)`);
   lines.push(`**Routing Accuracy:** ${(summary.routingAccuracy * 100).toFixed(1)}%`);
   lines.push(`**Avg Recall@K:** ${(summary.avgRecallAtK * 100).toFixed(1)}%`);
+  lines.push(`**Avg Answer Score:** ${(summary.avgAnswerScore * 100).toFixed(1)}%`);
+  lines.push(`**Avg Judge Score:** ${(summary.avgJudgeScore * 100).toFixed(1)}%`);
   lines.push(`**Avg Latency:** ${summary.avgLatencyMs.toFixed(0)}ms`);
   lines.push('');
 
@@ -319,6 +437,8 @@ export function formatReport(summary: EvalSummary): string {
     lines.push(`- **Retrieved Chunks**: ${r.retrievedChunks}`);
     lines.push(`- **Relevant Chunks**: ${r.relevantChunks}`);
     lines.push(`- **Recall@K**: ${(r.recallAtK * 100).toFixed(1)}%`);
+    lines.push(`- **Answer Score**: ${((r.answerScore ?? 0) * 100).toFixed(1)}%`);
+    if (r.judgeScore !== undefined) lines.push(`- **Judge Score**: ${(r.judgeScore * 100).toFixed(1)}%`);
     lines.push(`- **Latency**: ${r.latencyMs}ms`);
     if (r.error) lines.push(`- **Error**: ${r.error}`);
     lines.push(`- **Answer Preview**: ${r.answer.slice(0, 200)}...`);

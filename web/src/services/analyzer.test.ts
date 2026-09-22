@@ -4,7 +4,7 @@ import type { LLMClient } from '../lib/llm';
 import type { EmbeddingsClient } from '../lib/embeddings';
 import * as aq from 'arquero';
 import type { ColumnTable } from 'arquero';
-import { AnalysisBudgetExceededError, RateLimitError } from '../lib/errors';
+import { RateLimitError } from '../lib/errors';
 
 const mockLLM: LLMClient = {
   invoke: vi.fn(),
@@ -212,27 +212,35 @@ describe('createDataAnalyzer', () => {
     expect(result.explanation).toBe('Fixed count');
   });
 
-  it('throws AnalysisBudgetExceededError after max tool iterations', async () => {
-    // Always return tool calls that fail
-    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
-      content: '',
-      toolCalls: [
-        { id: 'c1', type: 'function', function: { name: 'run_code', arguments: JSON.stringify({ code: 'result = employees.invalid()' }) } },
-      ],
-      finishReason: 'tool_calls',
-      usage: { totalTokens: 100 },
+  it('max tool iterations triggers salvage synthesis after prior iterations', async () => {
+    let callCount = 0;
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      callCount++;
+      if (callCount <= 8) {
+        // First 8 iterations: return tool_calls that fail
+        return Promise.resolve({
+          content: '',
+          toolCalls: [
+            { id: `c${callCount}`, type: 'function', function: { name: 'run_code', arguments: JSON.stringify({ code: 'result = employees.invalid()' }) } },
+          ],
+          finishReason: 'tool_calls',
+          usage: { totalTokens: 100 },
+        });
+      }
+      // 9th call (salvage synthesis): return salvaged answer
+      return Promise.resolve({
+        content: 'Salvaged answer after max iterations.',
+        finishReason: 'stop',
+        usage: { totalTokens: 50 },
+      });
     });
 
-    await expect(analyzer.analyze('impossible query')).rejects.toThrow(AnalysisBudgetExceededError);
+    const result = await analyzer.analyze('impossible query');
 
-    try {
-      await analyzer.analyze('impossible query');
-    } catch (e) {
-      expect(e).toBeInstanceOf(AnalysisBudgetExceededError);
-      const err = e as AnalysisBudgetExceededError;
-      expect(err.context?.tripped).toBe('iterations');
-      expect(err.context?.limit).toBe(8);
-    }
+    expect(result.mode).toBe('fallback');
+    expect(result.fallbackReason).toBe('salvaged-iterations');
+    expect(result.partial).toBe(true);
+    expect(result.explanation).toContain('Salvaged answer');
   });
 
   it('detects chart config from synthesis', async () => {
@@ -324,48 +332,58 @@ describe('createDataAnalyzer', () => {
     expect(hasToolMessage).toBe(true);
   });
 
-  it('budget exceeded throws AnalysisBudgetExceededError', async () => {
-    // Always return tool_calls (9+ turns) to exceed MAX_TOOL_ITERATIONS (8)
-    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
-      content: '',
-      toolCalls: [{ id: 'c1', type: 'function', function: { name: 'list_datasets', arguments: '{}' } }],
-      finishReason: 'tool_calls',
-      usage: { totalTokens: 100 },
+  it('budget exceeded triggers salvage synthesis after prior iterations', async () => {
+    let callCount = 0;
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      callCount++;
+      if (callCount <= 8) {
+        // First 8 iterations: return tool_calls
+        return Promise.resolve({
+          content: '',
+          toolCalls: [{ id: `c${callCount}`, type: 'function', function: { name: 'list_datasets', arguments: '{}' } }],
+          finishReason: 'tool_calls',
+          usage: { totalTokens: 100 },
+        });
+      }
+      // 9th call (salvage synthesis): return salvaged answer
+      return Promise.resolve({
+        content: 'Salvaged answer after iteration limit.',
+        finishReason: 'stop',
+        usage: { totalTokens: 50 },
+      });
     });
 
-    await expect(analyzer.analyze('test')).rejects.toThrow(AnalysisBudgetExceededError);
+    const result = await analyzer.analyze('test');
 
-    try {
-      await analyzer.analyze('test');
-    } catch (e) {
-      expect(e).toBeInstanceOf(AnalysisBudgetExceededError);
-      const err = e as AnalysisBudgetExceededError;
-      expect(err.context?.tripped).toBe('iterations');
-      expect(err.context?.limit).toBe(8);
-    }
+    expect(result.mode).toBe('fallback');
+    expect(result.fallbackReason).toBe('salvaged-iterations');
+    expect(result.partial).toBe(true);
+    expect(result.explanation).toContain('Salvaged answer');
   });
 
-  it('token budget exceeded trips the tokens budget', async () => {
+  it('token budget exceeded triggers salvage synthesis after prior iterations', async () => {
     const analyzerWithSmallBudget = createAnalyzer({ maxToolLoopTokens: 100 });
 
     (mockLLM.invoke as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
-        content: '',
+        content: 'Reflection 1: Found datasets',
         toolCalls: [{ id: 'c1', type: 'function', function: { name: 'list_datasets', arguments: '{}' } }],
         finishReason: 'tool_calls',
         usage: { totalTokens: 500 }, // Exceeds 100 budget
+      })
+      // Salvage synthesis invoke
+      .mockResolvedValueOnce({
+        content: 'Salvaged answer after token budget.',
+        finishReason: 'stop',
+        usage: { totalTokens: 50 },
       });
 
-    await expect(analyzerWithSmallBudget.analyze('test')).rejects.toThrow(AnalysisBudgetExceededError);
+    const result = await analyzerWithSmallBudget.analyze('test');
 
-    try {
-      await analyzerWithSmallBudget.analyze('test');
-    } catch (e) {
-      expect(e).toBeInstanceOf(AnalysisBudgetExceededError);
-      const err = e as AnalysisBudgetExceededError;
-      expect(err.context?.tripped).toBe('tokens');
-      expect(err.context?.limit).toBe(100);
-    }
+    expect(result.mode).toBe('fallback');
+    expect(result.fallbackReason).toBe('salvaged-tokens');
+    expect(result.partial).toBe(true);
+    expect(result.explanation).toContain('Salvaged answer');
   });
 
   it('abort signal stops the loop', async () => {
@@ -491,29 +509,37 @@ describe('createDataAnalyzer', () => {
     expect(result.fallbackReason).toBe('provider-rejected-tools');
   });
 
-  it('falls back after 2 consecutive malformed tool calls', async () => {
+it('falls back after 2 consecutive malformed tool calls', async () => {
     (mockLLM.invoke as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
         content: '',
-        toolCalls: [{ id: 'c1', type: 'function', function: { name: 'list_datasets', arguments: 'not-json' } }],
+        toolCalls: [{ id: 'c1', type: 'function', function: { name: 'list_datasets', arguments: '{}' } }],
         finishReason: 'tool_calls',
         usage: { totalTokens: 100 },
       })
       .mockResolvedValueOnce({
         content: '',
-        toolCalls: [{ id: 'c2', type: 'function', function: { name: 'profile_column', arguments: 'also-bad' } }],
+        toolCalls: [{ id: 'c2', type: 'function', function: { name: 'profile_column', arguments: 'not-json' } }],
         finishReason: 'tool_calls',
         usage: { totalTokens: 200 },
       })
       .mockResolvedValueOnce({
-        content: JSON.stringify({ code: 'result = 1', explanation: 'done' }),
+        content: '',
+        toolCalls: [{ id: 'c3', type: 'function', function: { name: 'run_code', arguments: 'also-bad' } }],
+        finishReason: 'tool_calls',
         usage: { totalTokens: 300 },
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ code: 'result = 1', explanation: 'done' }),
+        usage: { totalTokens: 400 },
       });
 
     const result = await analyzer.analyze('test question');
 
-    expect(result.mode).toBe('single-shot');
-    expect(result.fallbackReason).toBe('malformed-tool-calls');
+    // With salvage synthesis, malformed tool calls after prior iterations trigger salvage, not single-shot
+    expect(result.mode).toBe('fallback');
+    expect(result.fallbackReason).toBe('salvaged-malformed');
+    expect(result.partial).toBe(true);
   });
 
   it('tool path records mode and toolTrace', async () => {
@@ -707,5 +733,283 @@ describe('createDataAnalyzer', () => {
     }
     // Loop-level tokensUsed includes both iterations (120 + 200 = 320)
     expect(result.toolTrace!.reduce((sum, e) => sum + e.tokensUsed, 0)).toBe(120);
+  });
+
+  // ============================================================================
+  // Reflection per iteration tests (Unit 2)
+  // ============================================================================
+
+  it('fires onIteration hook per iteration with reflection text and tokensUsed', async () => {
+    const iterationHooks: Array<{ iteration: number; reflection: string; tokensUsed: number }> = [];
+    const hooks = {
+      onIteration: (info: { iteration: number; reflection: string; tokensUsed: number }) => {
+        iterationHooks.push(info);
+      },
+    };
+
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        content: 'Reflection 1: Found datasets, will profile salary column',
+        toolCalls: [{ id: 'c1', type: 'function', function: { name: 'list_datasets', arguments: '{}' } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 100 },
+      })
+      .mockResolvedValueOnce({
+        content: 'Reflection 2: Profiled salary, will compute average by department',
+        toolCalls: [{ id: 'c2', type: 'function', function: { name: 'profile_column', arguments: JSON.stringify({ dataset: 'employees', column: 'salary_usd' }) } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 150 },
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ answer: 'Average salary by department: Engineering 110000', insights: [] }),
+        finishReason: 'stop',
+        usage: { totalTokens: 200 },
+      });
+
+    await analyzer.analyze('average salary by department', undefined, hooks);
+
+    expect(iterationHooks).toHaveLength(3);
+    expect(iterationHooks[0]).toEqual({
+      iteration: 1,
+      reflection: 'Reflection 1: Found datasets, will profile salary column',
+      tokensUsed: 100,
+    });
+    expect(iterationHooks[1]).toEqual({
+      iteration: 2,
+      reflection: 'Reflection 2: Profiled salary, will compute average by department',
+      tokensUsed: 150,
+    });
+    expect(iterationHooks[2]).toEqual({
+      iteration: 3,
+      reflection: '{"answer":"Average salary by department: Engineering 110000","insights":[]}',
+      tokensUsed: 200,
+    });
+  });
+
+  it('onIteration hook errors do not break the loop', async () => {
+    const throwingHooks = {
+      onIteration: () => { throw new Error('hook error'); },
+    };
+
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        content: 'Reflection 1',
+        toolCalls: [{ id: 'c1', type: 'function', function: { name: 'list_datasets', arguments: '{}' } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 100 },
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ answer: 'Success despite hook errors', insights: [] }),
+        finishReason: 'stop',
+        usage: { totalTokens: 200 },
+      });
+
+    const result = await analyzer.analyze('test', undefined, throwingHooks);
+
+    expect(result.explanation).toBe('Success despite hook errors');
+  });
+
+  // ============================================================================
+  // Salvage synthesis tests (Unit 3)
+  // ============================================================================
+
+  it('returns salvage synthesis on mid-loop budget exhaustion with prior iterations', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      // Iteration 1: tool calls
+      .mockResolvedValueOnce({
+        content: 'Reflection 1: Found datasets',
+        toolCalls: [{ id: 'c1', type: 'function', function: { name: 'list_datasets', arguments: '{}' } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 100 },
+      })
+      // Iteration 2: tool calls
+      .mockResolvedValueOnce({
+        content: 'Reflection 2: Profiled salary',
+        toolCalls: [{ id: 'c2', type: 'function', function: { name: 'profile_column', arguments: JSON.stringify({ dataset: 'employees', column: 'salary_usd' }) } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 150 },
+      })
+      // Iteration 3: budget exceeded (tokens)
+      .mockResolvedValueOnce({
+        content: 'Reflection 3: Will compute average',
+        toolCalls: [{ id: 'c3', type: 'function', function: { name: 'run_code', arguments: JSON.stringify({ code: 'result = employees.groupby("department").rollup({avg: d => op.mean(d.salary_usd)})' }) } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 200 },
+      })
+      // Salvage synthesis invoke (no tools, no jsonMode)
+      .mockResolvedValueOnce({
+        content: 'Salvaged answer: Average salary by department computed from available data.',
+        finishReason: 'stop',
+        usage: { totalTokens: 50 },
+      });
+
+    const analyzerWithSmallBudget = createAnalyzer({ maxToolLoopTokens: 300 });
+    const result = await analyzerWithSmallBudget.analyze('average salary by department');
+
+    expect(result.mode).toBe('fallback');
+    expect(result.fallbackReason).toContain('salvaged-tokens');
+    expect(result.partial).toBe(true);
+    expect(result.explanation).toContain('Salvaged answer');
+    expect(result.toolTrace).toBeDefined();
+    expect(result.toolTrace!.length).toBeGreaterThan(0);
+  });
+
+  it('returns salvage synthesis on consecutive malformed tool calls with prior iterations', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      // Iteration 1: valid tool call
+      .mockResolvedValueOnce({
+        content: 'Reflection 1: Found datasets',
+        toolCalls: [{ id: 'c1', type: 'function', function: { name: 'list_datasets', arguments: '{}' } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 100 },
+      })
+      // Iteration 2: malformed tool call
+      .mockResolvedValueOnce({
+        content: 'Reflection 2: Trying to profile',
+        toolCalls: [{ id: 'c2', type: 'function', function: { name: 'profile_column', arguments: 'not-json' } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 150 },
+      })
+      // Iteration 3: another malformed tool call (triggers fallback)
+      .mockResolvedValueOnce({
+        content: 'Reflection 3: Still trying',
+        toolCalls: [{ id: 'c3', type: 'function', function: { name: 'run_code', arguments: 'also-bad' } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 200 },
+      })
+      // Salvage synthesis invoke
+      .mockResolvedValueOnce({
+        content: 'Salvaged answer: Partial analysis completed.',
+        finishReason: 'stop',
+        usage: { totalTokens: 50 },
+      });
+
+    const result = await analyzer.analyze('test question');
+
+    expect(result.mode).toBe('fallback');
+    expect(result.fallbackReason).toBe('salvaged-malformed');
+    expect(result.partial).toBe(true);
+    expect(result.explanation).toContain('Salvaged answer');
+    expect(result.toolTrace).toBeDefined();
+  });
+
+  it('iteration-0 provider rejection still falls back to single-shot (no salvage)', async () => {
+    const { GenerationFailedError } = await import('../lib/errors');
+
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new GenerationFailedError('provider', new Error('400 Bad Request: tools not supported')))
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ code: 'result = 1', explanation: 'Single shot fallback' }),
+        usage: { totalTokens: 200 },
+      });
+
+    const result = await analyzer.analyze('test question');
+
+    expect(result.mode).toBe('single-shot');
+    expect(result.fallbackReason).toBe('provider-rejected-tools');
+  });
+
+  it('iteration-0 no-first-tool-call still falls back to single-shot (no salvage)', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        content: '{"answer":"x"}',
+        finishReason: 'stop',
+        usage: { totalTokens: 100 },
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ code: 'result = 1', explanation: 'done' }),
+        usage: { totalTokens: 200 },
+      });
+
+    const result = await analyzer.analyze('test question');
+
+    expect(result.mode).toBe('single-shot');
+    expect(result.fallbackReason).toBe('no-first-tool-call');
+  });
+
+  it('includes previous analysis context in the initial user message when provided', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [
+          { id: 'c1', type: 'function', function: { name: 'list_datasets', arguments: '{}' } },
+        ],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 100 },
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ answer: 'Done', insights: [] }),
+        finishReason: 'stop',
+        usage: { totalTokens: 200 },
+      });
+
+    await analyzer.analyze(
+      'average salary by department',
+      undefined,
+      undefined,
+      'Insights:\n- Engineering highest (high): avg 110000'
+    );
+
+    const firstCall = (mockLLM.invoke as ReturnType<typeof vi.fn>).mock.calls[0][0] as Parameters<
+      LLMClient['invoke']
+    >[0];
+    expect(firstCall.messages[0].role).toBe('user');
+    expect(firstCall.messages[0].content).toContain(
+      'Previous analysis context (from the last data question)'
+    );
+    expect(firstCall.messages[0].content).toContain('Engineering highest');
+  });
+
+  it('omits previous analysis context when none is provided', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [
+          { id: 'c1', type: 'function', function: { name: 'list_datasets', arguments: '{}' } },
+        ],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 100 },
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ answer: 'Done', insights: [] }),
+        finishReason: 'stop',
+        usage: { totalTokens: 200 },
+      });
+
+    await analyzer.analyze('average salary by department');
+
+    const firstCall = (mockLLM.invoke as ReturnType<typeof vi.fn>).mock.calls[0][0] as Parameters<
+      LLMClient['invoke']
+    >[0];
+    expect(firstCall.messages[0].content).not.toContain('Previous analysis context');
+  });
+
+  it('isolates the aq namespace across concurrent analyses', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockImplementation(
+      async (req: { tools?: unknown; messages?: Array<{ content: string }> }) => {
+        if (req.tools) {
+          return { content: '', finishReason: 'stop', usage: { totalTokens: 10 } };
+        }
+        const question = req.messages?.[0]?.content ?? '';
+        if (question.includes('mutate')) {
+          return {
+            content: JSON.stringify({ code: 'aq.polluted = true; result = "mutated";', explanation: 'mutator' }),
+            usage: { totalTokens: 10 },
+          };
+        }
+        return {
+          content: JSON.stringify({ code: 'result = aq.polluted === undefined ? "clean" : "corrupted";', explanation: 'checker' }),
+          usage: { totalTokens: 10 },
+        };
+      }
+    );
+
+    const [first, second] = await Promise.all([
+      analyzer.analyze('please mutate the aq namespace'),
+      analyzer.analyze('please check the aq namespace'),
+    ]);
+
+    expect(first.result).toBe('mutated');
+    expect(second.result).toBe('clean');
   });
 });

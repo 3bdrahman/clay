@@ -99,8 +99,11 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       updateMessage(assistantId, () => assistantMsg);
     };
 
+    const STREAMING_STORE_THROTTLE_MS = 500;
+
     let pendingToken = '';
     let rafScheduled = false;
+    let lastStoreFlush = 0;
     const flushTokens = () => {
       rafScheduled = false;
       const toFlush = pendingToken;
@@ -109,15 +112,19 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       const id = streamingMessageIdRef.current;
       if (!id) return;
       setStreamingContent(prev => prev + toFlush);
-      useAppStore.setState(state => ({
-        conversations: state.conversations.map(c =>
-          c.id === state.activeConversationId
-            ? { ...c, messages: c.messages.map(m =>
-                m.id === id ? { ...m, content: (m.content || '') + toFlush } : m,
-              ), updatedAt: Date.now() }
-            : c,
-        ),
-      }));
+      const now = Date.now();
+      if (now - lastStoreFlush >= STREAMING_STORE_THROTTLE_MS) {
+        lastStoreFlush = now;
+        useAppStore.setState(state => ({
+          conversations: state.conversations.map(c =>
+            c.id === state.activeConversationId
+              ? { ...c, messages: c.messages.map(m =>
+                  m.id === id ? { ...m, content: (m.content || '') + toFlush } : m,
+                ), updatedAt: Date.now() }
+              : c,
+          ),
+        }));
+      }
     };
 
     const onToken = (token: string) => {
@@ -135,6 +142,14 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
         settings.provider === 'local'
           ? pickLocalModels(settings.localModels)
           : resolveModels(settings, availableModels).picked;
+      
+      // Get the last completed analysis from conversation history for cross-turn memory
+      const state = useAppStore.getState();
+      const conv = state.conversations.find(c => c.id === state.activeConversationId);
+      const lastAnalysis = conv?.messages
+        .filter(m => m.role === 'assistant' && m.workflow?.dataAnalysis)
+        .pop()?.workflow?.dataAnalysis;
+      
       const orchestrator = createWorkflowOrchestrator(
         text,
         {
@@ -144,6 +159,7 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
           analyzer: services.analyzer,
           settings,
           pickedModels,
+          previousAnalysis: lastAnalysis,
         },
         {
           onPartialUpdate: (state: WorkflowState) => updateAssistant(state),

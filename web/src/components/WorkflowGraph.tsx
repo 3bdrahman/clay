@@ -122,6 +122,32 @@ export function WorkflowGraph({ steps, routing }: Props) {
                       : node.description
                     : step?.detail ?? (routing && nodeId === 'route' ? `→ ${routing}` : node.description)}
                 </div>
+                {step?.retries && step.retries.length > 0 && (
+                  <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 font-mono">
+                    retried {step.retries.length}x (last: attempt {step.retries[step.retries.length - 1].attempt}, {step.retries[step.retries.length - 1].delayMs}ms)
+                  </div>
+                )}
+                {step?.meta?.tokensUsed !== undefined && (
+                  <div className="text-[10px] text-brand-600 dark:text-brand-400 mt-0.5 font-mono">
+                    tokens: {Number(step.meta.tokensUsed)}
+                  </div>
+                )}
+                {(() => {
+                  const reflections = step?.meta?.reflections;
+                  if (reflections && Array.isArray(reflections) && reflections.length > 0) {
+                    return (
+                      <div className="mt-1.5 space-y-1">
+                        <div className="text-[10px] text-ink-500 dark:text-ink-400 font-medium">Reflections:</div>
+                        {reflections.map((r: string, idx: number) => (
+                          <div key={idx} className="text-[10px] text-ink-600 dark:text-ink-300 font-mono border-l-2 border-brand-200 dark:border-brand-700 pl-1.5">
+                            {idx + 1}. {r.slice(0, 200)}{r.length > 200 ? '…' : ''}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </div>
           </li>

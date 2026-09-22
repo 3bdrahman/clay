@@ -83,9 +83,10 @@ export interface DataAnalysisResult {
   durationMs: number;
   timestamp: number;
   insights?: Insight[];
-  mode?: 'tools' | 'single-shot';
+  mode?: 'tools' | 'single-shot' | 'fallback';
   fallbackReason?: string;
   toolTrace?: Array<{ tool: string; calls: number; durationMs: number; tokensUsed: number }>;
+  partial?: boolean;
 }
 
 export interface ChartConfig {
@@ -116,6 +117,8 @@ export interface StepTrace {
   durationMs?: number;
   detail?: string;
   meta?: Record<string, unknown>;
+  retries?: Array<{ attempt: number; error: string; delayMs: number }>;
+  tokensUsed?: number;
 }
 
 export interface WorkflowState {
