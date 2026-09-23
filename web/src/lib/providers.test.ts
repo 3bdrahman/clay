@@ -85,4 +85,16 @@ describe('resolveProviderEndpoint', () => {
     expect(out.apiKey).toBe('nvapi-x');
     expect(out.providerLabel).toBe('NVIDIA NIM');
   });
+
+  it('routes NIM through the proxy URL when nimProxyUrl is set', () => {
+    const out = resolveProviderEndpoint({
+      ...baseSettings,
+      provider: 'nim',
+      nimApiKey: 'nvapi-x',
+      nimProxyUrl: 'https://my-proxy.workers.dev/',
+    });
+    expect(out.baseUrl).toBe('https://my-proxy.workers.dev/nim-api/v1');
+    expect(out.apiKey).toBe('nvapi-x');
+    expect(out.providerLabel).toBe('NVIDIA NIM');
+  });
 });

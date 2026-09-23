@@ -409,6 +409,26 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                 )}
               </div>
 
+              {settings.provider === 'nim' && (
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
+                    NIM proxy URL <span className="text-ink-400 normal-case">(optional — for browser CORS)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.nimProxyUrl ?? ''}
+                    onChange={e => updateSettings({ nimProxyUrl: e.target.value })}
+                    placeholder="https://your-proxy.workers.dev"
+                    className="w-full px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none font-mono"
+                  />
+                  <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5">
+                    NVIDIA NIM blocks browser CORS. Deploy the bundled relay (free tier): run{' '}
+                    <span className="font-mono">npx wrangler deploy</span> from the repo root, then paste your
+                    worker's URL here.
+                  </p>
+                </div>
+              )}
+
               <div className="rounded-lg border border-ink-200 dark:border-ink-700 p-3 space-y-2 bg-ink-50/50 dark:bg-ink-800/30">
                 <div className="flex items-center justify-between gap-2">
                   <div>

@@ -38,6 +38,7 @@ function cspPlugin() {
         'https://api.groq.com',
         'https://api.together.xyz',
         'https://integrate.api.nvidia.com',
+        'https://*.workers.dev',
         'https://duckduckgo.com',
         'https://*.duckduckgo.com',
         'https://google.serper.dev',

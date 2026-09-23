@@ -79,6 +79,7 @@ const DEFAULT_SETTINGS: Settings = {
   groqApiKey: '',
   togetherApiKey: '',
   nimApiKey: '',
+  nimProxyUrl: '',
   apiKey: '', // legacy field for migration
   embeddingApiKey: '',
   webSearchProvider: 'duckduckgo',

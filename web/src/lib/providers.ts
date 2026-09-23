@@ -147,6 +147,14 @@ export function resolveProviderEndpoint(settings: Settings): ProviderEndpoint {
 
   const apiKey = (apiKeyField !== undefined ? settings[apiKeyField] : '') || settings.apiKey || '';
 
+  if (settings.provider === 'nim' && settings.nimProxyUrl?.trim()) {
+    return {
+      baseUrl: `${settings.nimProxyUrl.trim().replace(/\/+$/, '')}/nim-api/v1`,
+      apiKey,
+      providerLabel: config.displayName,
+    };
+  }
+
   const defaultHeaders = { ...config.defaultHeaders };
   if (settings.provider === 'openrouter') {
     defaultHeaders['HTTP-Referer'] = getOpenRouterReferer();

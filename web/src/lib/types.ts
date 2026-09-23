@@ -34,6 +34,9 @@ export interface Settings {
   groqApiKey: string;
   togetherApiKey: string;
   nimApiKey: string;
+  // NVIDIA NIM blocks browser CORS — optional proxy relay URL (e.g. a deployed
+  // Cloudflare Worker forwarding /nim-api/* to integrate.api.nvidia.com)
+  nimProxyUrl?: string;
   embeddingApiKey: string;
   // Legacy field for backward compat (migration)
   apiKey: string;

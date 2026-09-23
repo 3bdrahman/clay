@@ -166,7 +166,9 @@ Open **Settings** and pick a provider. API keys are stored in browser `localStor
 | OpenRouter | [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) | `https://openrouter.ai/api/v1` |
 | Groq | [console.groq.com/keys](https://console.groq.com/keys) | `https://api.groq.com/openai/v1` |
 | Together | [api.together.ai/settings/api-keys](https://api.together.ai/settings/api-keys) | `https://api.together.xyz/v1` |
-| NVIDIA NIM | [build.nvidia.com](https://build.nvidia.com) | `https://integrate.api.nvidia.com/v1` |
+| NVIDIA NIM | [build.nvidia.com](https://build.nvidia.com) | `https://integrate.api.nvidia.com/v1` — browser CORS blocked, use the bundled relay (see below) |
+
+**NVIDIA NIM from the browser:** NIM's API doesn't send CORS headers, so browser requests are blocked. Clay ships a one-click relay: run `npx wrangler deploy` from the repo root (deploys `workers/nim-proxy.ts` to Cloudflare Workers, free tier), then paste your worker's URL (e.g. `https://clay-nim-proxy.your-subdomain.workers.dev`) as the **NIM proxy URL** in Settings. Requests are relayed with your own key; nothing is stored server-side.
 
 ### Local server (private)
 
