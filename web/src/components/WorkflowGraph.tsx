@@ -132,6 +132,14 @@ export function WorkflowGraph({ steps, routing }: Props) {
                     tokens: {Number(step.meta.tokensUsed)}
                   </div>
                 )}
+                {typeof step?.meta?.plan === 'string' && step.meta.plan.length > 0 && (
+                  <div className="mt-1.5 space-y-1">
+                    <div className="text-[10px] text-ink-500 dark:text-ink-400 font-medium">Plan:</div>
+                    <div className="text-[10px] text-ink-600 dark:text-ink-300 font-mono border-l-2 border-brand-200 dark:border-brand-700 pl-1.5">
+                      {step.meta.plan.slice(0, 200)}{step.meta.plan.length > 200 ? '…' : ''}
+                    </div>
+                  </div>
+                )}
                 {(() => {
                   const reflections = step?.meta?.reflections;
                   if (reflections && Array.isArray(reflections) && reflections.length > 0) {

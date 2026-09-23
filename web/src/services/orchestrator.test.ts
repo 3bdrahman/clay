@@ -1386,4 +1386,598 @@ describe('createWorkflowOrchestrator — step-level observability (retries + tok
     );
   });
 });
+
+describe('createWorkflowOrchestrator — query rewriting on eval failure (Unit 1)', () => {
+  let orchestrator: ReturnType<typeof createWorkflowOrchestrator>;
+  let stepUpdates: StepTrace[][] = [];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.similaritySearch.mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+    stepUpdates = [];
+
+    orchestrator = createWorkflowOrchestrator(
+      'original question about data',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {
+        onStepUpdate: (steps) => stepUpdates.push(steps),
+      }
+    );
+  });
+
+  it('rewrites the question on eval failure and uses rewritten question for retrieval', async () => {
+    let invokeCallCount = 0;
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      invokeCallCount++;
+      if (invokeCallCount === 1) {
+        return { content: JSON.stringify({ datasource: 'vectorstore' }) };
+      }
+      if (invokeCallCount === 2) {
+        return { content: 'Hypothetical passage.' };
+      }
+      if (invokeCallCount === 3) {
+        return { content: JSON.stringify({ binary_score: 'yes' }) };
+      }
+      if (invokeCallCount === 4) {
+        return { content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } };
+      }
+      if (invokeCallCount === 5) {
+        return { content: JSON.stringify({ binary_score: 'no' }), usage: { totalTokens: 10 } };
+      }
+      if (invokeCallCount === 6) {
+        return { content: JSON.stringify({ question: 'rewritten question for web search' }), usage: { totalTokens: 20 } };
+      }
+      if (invokeCallCount === 7) {
+        return { content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } };
+      }
+      if (invokeCallCount === 8) {
+        return { content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } };
+      }
+      return { content: JSON.stringify({ binary_score: 'yes' }) };
+    });
+
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+
+    (mockWebSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { type: 'web_search', title: 'Web Result', content: 'Web content for rewritten question', url: 'http://example.com' },
+    ]);
+
+    const state = await orchestrator.run();
+
+    expect(state.retryCount).toBe(1);
+    expect(state.routing).toBe('websearch');
+    expect(state.webResults).toHaveLength(1);
+    expect(state.webResults[0].content).toBe('Web content for rewritten question');
+
+    const rewriteCall = vi.mocked(mockLLM.invoke).mock.calls.find(
+      (call) => call[0]?.messages?.[0]?.content?.includes('Rewrite this question to maximize retrieval effectiveness for websearch')
+    );
+    expect(rewriteCall).toBeDefined();
+
+    const webSearchCalls = vi.mocked(mockWebSearch.search).mock.calls;
+    expect(webSearchCalls.length).toBe(1);
+    expect(webSearchCalls[0][0]).toBe('rewritten question for web search');
+  });
+
+  it('falls back to original question when rewrite parse fails', async () => {
+    let invokeCallCount = 0;
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      invokeCallCount++;
+      if (invokeCallCount === 1) {
+        return { content: JSON.stringify({ datasource: 'vectorstore' }) };
+      }
+      if (invokeCallCount === 2) {
+        return { content: 'Hypothetical passage.' };
+      }
+      if (invokeCallCount === 3) {
+        return { content: JSON.stringify({ binary_score: 'yes' }) };
+      }
+      if (invokeCallCount === 4) {
+        return { content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } };
+      }
+      if (invokeCallCount === 5) {
+        return { content: JSON.stringify({ binary_score: 'no' }), usage: { totalTokens: 10 } };
+      }
+      if (invokeCallCount === 6) {
+        return { content: 'not valid json', usage: { totalTokens: 20 } };
+      }
+      if (invokeCallCount === 7) {
+        return { content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } };
+      }
+      if (invokeCallCount === 8) {
+        return { content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } };
+      }
+      return { content: JSON.stringify({ binary_score: 'yes' }) };
+    });
+
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+
+    (mockWebSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { type: 'web_search', title: 'Web Result', content: 'Web content for original', url: 'http://example.com' },
+    ]);
+
+    const state = await orchestrator.run();
+
+    expect(state.retryCount).toBe(1);
+    expect(state.routing).toBe('websearch');
+    const webSearchCalls = vi.mocked(mockWebSearch.search).mock.calls;
+    expect(webSearchCalls[0][0]).toBe('original question about data');
+  });
+
+  it('generate step still uses original question in prompt even after rewrite', async () => {
+    let invokeCallCount = 0;
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      invokeCallCount++;
+      if (invokeCallCount === 1) {
+        return { content: JSON.stringify({ datasource: 'vectorstore' }) };
+      }
+      if (invokeCallCount === 2) {
+        return { content: 'Hypothetical passage.' };
+      }
+      if (invokeCallCount === 3) {
+        return { content: JSON.stringify({ binary_score: 'yes' }) };
+      }
+      if (invokeCallCount === 4) {
+        return { content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } };
+      }
+      if (invokeCallCount === 5) {
+        return { content: JSON.stringify({ binary_score: 'no' }), usage: { totalTokens: 10 } };
+      }
+      if (invokeCallCount === 6) {
+        return { content: JSON.stringify({ question: 'rewritten for websearch' }), usage: { totalTokens: 20 } };
+      }
+      if (invokeCallCount === 7) {
+        return { content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } };
+      }
+      if (invokeCallCount === 8) {
+        return { content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } };
+      }
+      return { content: JSON.stringify({ binary_score: 'yes' }) };
+    });
+
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+
+    (mockWebSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { type: 'web_search', title: 'Web', content: 'Web content', url: 'http://example.com' },
+    ]);
+
+    await orchestrator.run();
+
+    const streamCalls = vi.mocked(mockLLM.stream).mock.calls;
+    const retryGenerateCall = streamCalls[1];
+    expect(retryGenerateCall).toBeDefined();
+    const prompt = retryGenerateCall?.[0]?.messages?.[0]?.content || '';
+    expect(prompt).toContain('original question about data');
+    expect(prompt).not.toContain('rewritten for websearch');
+  });
+});
+
+describe('createWorkflowOrchestrator — plan on first iteration (Unit 2)', () => {
+  let orchestrator: ReturnType<typeof createWorkflowOrchestrator>;
+  let stepUpdates: StepTrace[][] = [];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.similaritySearch.mockResolvedValue([]);
+    stepUpdates = [];
+
+    orchestrator = createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {
+        onStepUpdate: (steps) => stepUpdates.push(steps),
+      }
+    );
+  });
+
+  it('analyze step meta carries plan from first iteration and reflections from subsequent ones', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'python' }),
+    });
+
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockImplementation(
+      async (question: string, _signal?: AbortSignal, hooks?: AnalyzerHooks) => {
+        if (hooks?.onIteration) {
+          hooks.onIteration({ iteration: 1, reflection: 'PLAN: Will list datasets then profile salary', tokensUsed: 100 });
+          hooks.onIteration({ iteration: 2, reflection: 'REFLECTION: Found datasets, will profile salary', tokensUsed: 150 });
+          hooks.onIteration({ iteration: 3, reflection: 'REFLECTION: Profiled salary, computing average', tokensUsed: 200 });
+        }
+        return {
+          type: 'data_analysis',
+          question,
+          code: '',
+          explanation: 'Analysis complete',
+          resultType: 'scalar',
+          result: 'Analysis result',
+          attempts: 3,
+          durationMs: 100,
+          timestamp: Date.now(),
+          mode: 'tools',
+          toolTrace: [{ tool: 'profile_column', calls: 1, durationMs: 5 }],
+          insights: [{ finding: 'Revenue is up', evidence: 'sum 5000', confidence: 'high' }],
+        };
+      }
+    );
+
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+
+    await orchestrator.run();
+
+    const allSteps = stepUpdates.flat();
+    const analyzeStep = allSteps.find(s => s.node === 'analyze' && s.status === 'done');
+    expect(analyzeStep).toBeDefined();
+    expect(analyzeStep?.meta?.plan).toBe('Will list datasets then profile salary');
+    expect(analyzeStep?.meta?.reflections).toEqual([
+      'Found datasets, will profile salary',
+      'Profiled salary, computing average',
+    ]);
+  });
+
+  it('handles backward compatibility when reflection has no prefix', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'python' }),
+    });
+
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockImplementation(
+      async (question: string, _signal?: AbortSignal, hooks?: AnalyzerHooks) => {
+        if (hooks?.onIteration) {
+          hooks.onIteration({ iteration: 1, reflection: 'Legacy reflection without prefix', tokensUsed: 100 });
+        }
+        return {
+          type: 'data_analysis',
+          question,
+          code: '',
+          explanation: 'Analysis complete',
+          resultType: 'scalar',
+          result: 'Analysis result',
+          attempts: 1,
+          durationMs: 100,
+          timestamp: Date.now(),
+          mode: 'tools',
+          toolTrace: [],
+          insights: [],
+        };
+      }
+    );
+
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+
+    await orchestrator.run();
+
+    const allSteps = stepUpdates.flat();
+    const analyzeStep = allSteps.find(s => s.node === 'analyze' && s.status === 'done');
+    expect(analyzeStep).toBeDefined();
+    expect(analyzeStep?.meta?.plan).toBeUndefined();
+    expect(analyzeStep?.meta?.reflections).toEqual(['Legacy reflection without prefix']);
+  });
+});
+
+describe('createWorkflowOrchestrator — router confidence + multi-source fallback (Unit 3)', () => {
+  let orchestrator: ReturnType<typeof createWorkflowOrchestrator>;
+  let stepUpdates: StepTrace[][] = [];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.similaritySearch.mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+    stepUpdates = [];
+
+    orchestrator = createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {
+        onStepUpdate: (steps) => stepUpdates.push(steps),
+      }
+    );
+  });
+
+  it('high confidence route runs single path only', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore', confidence: 0.9 }),
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Hypothetical passage.',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } });
+
+    const state = await orchestrator.run();
+
+    expect(state.routing).toBe('vectorstore');
+    expect(state.documents).toHaveLength(1);
+    expect(state.webResults).toHaveLength(0);
+
+    const allSteps = stepUpdates.flat();
+    const routeStep = allSteps.find(s => s.node === 'route');
+    expect(routeStep?.detail).toContain('confidence: 0.90');
+    expect(routeStep?.detail).not.toContain('multi-source');
+    expect(routeStep?.meta?.confidence).toBe(0.9);
+  });
+
+  it('low confidence route runs both vectorstore and websearch concurrently', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore', confidence: 0.4 }),
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Hypothetical passage.',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } });
+
+    (mockWebSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { type: 'web_search', title: 'Web Result', content: 'Web content', url: 'http://example.com' },
+    ]);
+
+    const state = await orchestrator.run();
+
+    expect(state.routing).toBe('vectorstore');
+    expect(state.documents).toHaveLength(1);
+    expect(state.webResults).toHaveLength(1);
+
+    const allSteps = stepUpdates.flat();
+    const routeStep = allSteps.find(s => s.node === 'route');
+    expect(routeStep?.detail).toContain('confidence: 0.40');
+    expect(routeStep?.detail).toContain('multi-source');
+    expect(routeStep?.meta?.confidence).toBe(0.4);
+
+    expect(mockVectorstore.similaritySearch).toHaveBeenCalled();
+    expect(mockWebSearch.search).toHaveBeenCalled();
+  });
+
+  it('missing confidence defaults to high confidence (single path)', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore' }),
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Hypothetical passage.',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } });
+
+    const state = await orchestrator.run();
+
+    expect(state.routing).toBe('vectorstore');
+    expect(state.documents).toHaveLength(1);
+    expect(state.webResults).toHaveLength(0);
+
+    const allSteps = stepUpdates.flat();
+    const routeStep = allSteps.find(s => s.node === 'route');
+    expect(routeStep?.meta?.confidence).toBe(1.0);
+  });
+
+  it('invalid confidence defaults to high confidence (single path)', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore', confidence: 'high' }),
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Hypothetical passage.',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } });
+
+    const state = await orchestrator.run();
+
+    expect(state.routing).toBe('vectorstore');
+    expect(state.webResults).toHaveLength(0);
+
+    const allSteps = stepUpdates.flat();
+    const routeStep = allSteps.find(s => s.node === 'route');
+    expect(routeStep?.meta?.confidence).toBe(1.0);
+  });
+
+  it('confidence out of range defaults to high confidence', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore', confidence: 1.5 }),
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Hypothetical passage.',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } });
+
+    await orchestrator.run();
+
+    const allSteps = stepUpdates.flat();
+    const routeStep = allSteps.find(s => s.node === 'route');
+    expect(routeStep?.meta?.confidence).toBe(1.0);
+  });
+});
+
+describe('createWorkflowOrchestrator — onSynthesisToken wiring (Unit 4)', () => {
+  let _orchestrator: ReturnType<typeof createWorkflowOrchestrator>;
+  let stepUpdates: StepTrace[][] = [];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.similaritySearch.mockResolvedValue([]);
+    stepUpdates = [];
+
+    _orchestrator = createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {
+        onStepUpdate: (steps) => stepUpdates.push(steps),
+      }
+    );
+  });
+
+  it('onSynthesisToken tokens from analyzer salvage reach the onToken callback', async () => {
+    const receivedTokens: string[] = [];
+
+    // Route to python path
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'python' }),
+    });
+
+    // Mock analyzer to throw AnalysisBudgetExceededError so real analyzer salvage path runs
+    // We use the REAL analyzer via createDataAnalyzer with a mocked LLM
+    // But since the orchestrator tests use a mock analyzer, we simulate the salvage by
+    // having the mock analyzer's analyze invoke the hooks.onSynthesisToken it receives
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockImplementation(
+      async (question: string, _signal?: AbortSignal, hooks?: AnalyzerHooks) => {
+        // Simulate salvage synthesis streaming tokens via onSynthesisToken
+        hooks?.onSynthesisToken?.('Salvaged ');
+        hooks?.onSynthesisToken?.('answer ');
+        hooks?.onSynthesisToken?.('streamed.');
+
+        return {
+          type: 'data_analysis',
+          question,
+          code: '',
+          explanation: 'Salvaged answer streamed.',
+          resultType: 'scalar',
+          result: 'Salvaged answer streamed.',
+          attempts: 3,
+          durationMs: 100,
+          timestamp: Date.now(),
+          mode: 'fallback',
+          fallbackReason: 'salvaged-tokens',
+          partial: true,
+          toolTrace: [{ tool: 'list_datasets', calls: 1, durationMs: 5, tokensUsed: 50 }],
+          insights: [],
+        };
+      }
+    );
+
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+
+    // Create orchestrator with onToken callback
+    const tokenOrchestrator = createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {
+        onToken: (token) => receivedTokens.push(token),
+      }
+    );
+
+    await tokenOrchestrator.run();
+
+    // Assert the tokens arrive at the onToken callback
+    expect(receivedTokens).toEqual(['Salvaged ', 'answer ', 'streamed.']);
+  });
+});
 });

@@ -65,6 +65,8 @@ const GRADE_EARLY_EXIT_AT = 4;
 const WEB_SEARCH_RESULT_COUNT = 4;
 const EVAL_TEMPERATURE = 0;
 const MAX_REFLECTIONS = 8;
+const MAX_REWRITE_CHARS = 500;
+const ROUTER_CONFIDENCE_THRESHOLD = 0.6;
 
 function formatPreviousContext(analysis: DataAnalysisResult): string {
   const parts: string[] = [];
@@ -284,19 +286,21 @@ export function createWorkflowOrchestrator(
     }
   }
 
-  async function runVectorstorePath(signal?: AbortSignal): Promise<void> {
+  async function runVectorstorePath(signal?: AbortSignal, questionOverride?: string): Promise<void> {
     if (signal?.aborted) return;
     beginStep('retrieve', NODE_LABELS.retrieve);
 
+    const effectiveQuestion = questionOverride ?? question;
+
     try {
-      const hydeResult: HyDEResult = await expandHyDE(question, { llm: deps.llm, model: deps.pickedModels.chat });
+      const hydeResult: HyDEResult = await expandHyDE(effectiveQuestion, { llm: deps.llm, model: deps.pickedModels.chat });
       const initialK = deps.settings.vectorstoreInitialK ?? DEFAULT_VECTORSTORE_INITIAL_K;
       const rerankK = RERANK_K;
 
       const docs = await withRetry('vectorstore-similaritySearch', () =>
         parallelFanOut(
           (q, k) => deps.vectorstore.similaritySearch(q, k),
-          question,
+          effectiveQuestion,
           hydeResult.hypothetical,
           initialK,
           rerankK,
@@ -320,11 +324,12 @@ export function createWorkflowOrchestrator(
     }
   }
 
-  async function runPythonPath(signal?: AbortSignal): Promise<void> {
+  async function runPythonPath(signal?: AbortSignal, questionOverride?: string): Promise<void> {
     if (signal?.aborted) return;
     beginStep('analyze', NODE_LABELS.analyze);
     try {
       const reflections: string[] = [];
+      let plan: string | undefined;
       const hooks: AnalyzerHooks = {
         onToolStart: (info) => {
           steps.push({
@@ -350,15 +355,28 @@ export function createWorkflowOrchestrator(
           emitSteps();
         },
         onIteration: (info) => {
-          if (reflections.length < MAX_REFLECTIONS) {
-            reflections.push(info.reflection);
+          const text = info.reflection.trim();
+          if (text.startsWith('PLAN:')) {
+            plan = text.slice(5).trim();
+          } else if (text.startsWith('REFLECTION:')) {
+            if (reflections.length < MAX_REFLECTIONS) {
+              reflections.push(text.slice(11).trim());
+            }
+          } else {
+            if (reflections.length < MAX_REFLECTIONS) {
+              reflections.push(text);
+            }
           }
+        },
+        onSynthesisToken: (token) => {
+          callbacks.onToken?.(token);
         },
       };
       const previousContext = deps.previousAnalysis
         ? formatPreviousContext(deps.previousAnalysis)
         : undefined;
-      const result = await withRetry('analyzer-analyze', () => deps.analyzer.analyze(question, signal, hooks, previousContext), signal);
+      const effectiveQuestion = questionOverride ?? question;
+      const result = await withRetry('analyzer-analyze', () => deps.analyzer.analyze(effectiveQuestion, signal, hooks, previousContext), signal);
       state.dataAnalysis = result;
       endStep('analyze', {
         detail: result.fallbackReason
@@ -372,6 +390,7 @@ export function createWorkflowOrchestrator(
           toolCount: result.toolTrace?.length ?? 0,
           iterations: result.attempts,
           durationMs: Math.round(result.durationMs),
+          plan,
           reflections: reflections.length > 0 ? reflections : undefined,
           partial: result.partial,
         },
@@ -382,11 +401,12 @@ export function createWorkflowOrchestrator(
     }
   }
 
-  async function runWebSearchStep(signal?: AbortSignal): Promise<void> {
+  async function runWebSearchStep(signal?: AbortSignal, questionOverride?: string): Promise<void> {
     if (signal?.aborted) return;
     beginStep('web_search', NODE_LABELS.web_search);
     try {
-      const results = await withRetry('webSearch-search', () => deps.webSearch.search(question, WEB_SEARCH_RESULT_COUNT), signal);
+      const effectiveQuestion = questionOverride ?? question;
+      const results = await withRetry('webSearch-search', () => deps.webSearch.search(effectiveQuestion, WEB_SEARCH_RESULT_COUNT), signal);
       state.webResults = results;
       endStep('web_search', { detail: `${results.length} results` });
     } catch (e) {
@@ -401,17 +421,46 @@ export function createWorkflowOrchestrator(
     else if (source === 'websearch') state.webResults = [];
   }
 
-  async function runPath(source: SourceType, signal?: AbortSignal): Promise<void> {
+  async function rewriteQuestionForSource(originalQuestion: string, source: SourceType, signal?: AbortSignal): Promise<string> {
+    const prompt = `Rewrite this question to maximize retrieval effectiveness for ${source} search. Return JSON {question: string}. Keep the same information need.
+
+Original question: ${originalQuestion}`;
+
+    try {
+      const resp = await withRetry('llm-invoke-rewrite', () =>
+        deps.llm.invoke({
+          system: 'You are a query rewriter that optimizes questions for specific retrieval sources. Return only valid JSON.',
+          messages: [{ role: 'user', content: prompt }],
+          jsonMode: true,
+          temperature: 0,
+          model: deps.pickedModels.chat,
+        }),
+        signal
+      );
+      const parsed = JSON.parse(resp.content || '{}');
+      const rewritten = (parsed.question || '').trim();
+      if (rewritten && rewritten.length > 0) {
+        return rewritten.slice(0, MAX_REWRITE_CHARS);
+      }
+    } catch (e) {
+      if (import.meta.env.DEV) {
+        console.warn('[orchestrator] Query rewrite failed, using original question:', e);
+      }
+    }
+    return originalQuestion;
+  }
+
+  async function runPath(source: SourceType, signal?: AbortSignal, questionOverride?: string): Promise<void> {
     if (signal?.aborted) return;
     switch (source) {
       case 'vectorstore':
-        await runVectorstorePath(signal);
+        await runVectorstorePath(signal, questionOverride);
         break;
       case 'python':
-        await runPythonPath(signal);
+        await runPythonPath(signal, questionOverride);
         break;
       case 'websearch':
-        await runWebSearchStep(signal);
+        await runWebSearchStep(signal, questionOverride);
         break;
     }
   }
@@ -567,10 +616,15 @@ export function createWorkflowOrchestrator(
         signal
       );
       let source: SourceType;
+      let confidence = 1.0;
       try {
         const parsed = JSON.parse(routeResp.content || '{}');
         const raw = (parsed.datasource as SourceType) || 'vectorstore';
         source = VALID_SOURCE_TYPES.includes(raw) ? raw : 'vectorstore';
+        const parsedConfidence = Number(parsed.confidence);
+        if (!Number.isNaN(parsedConfidence) && parsedConfidence >= 0 && parsedConfidence <= 1) {
+          confidence = parsedConfidence;
+        }
       } catch (e) {
         if (import.meta.env.DEV) {
           console.warn('[orchestrator] route JSON parse failed (defaulting to vectorstore):', e);
@@ -578,9 +632,21 @@ export function createWorkflowOrchestrator(
         source = 'vectorstore';
       }
       state.routing = source;
-      endStep('route', { detail: `-> ${source}`, meta: { tokensUsed: routeResp.usage?.totalTokens ?? 0 } });
 
-      await runPath(source, signal);
+      const isLowConfidence = confidence < ROUTER_CONFIDENCE_THRESHOLD;
+      const routeDetail = isLowConfidence
+        ? `-> ${source} (confidence: ${confidence.toFixed(2)}, low confidence -> multi-source)`
+        : `-> ${source} (confidence: ${confidence.toFixed(2)})`;
+      endStep('route', { detail: routeDetail, meta: { tokensUsed: routeResp.usage?.totalTokens ?? 0, confidence } });
+
+      if (isLowConfidence) {
+        await Promise.all([
+          runPath('vectorstore', signal),
+          runPath('websearch', signal),
+        ]);
+      } else {
+        await runPath(source, signal);
+      }
 
       let useful = false;
       const maxRetries = deps.settings.maxRetries ?? 3;
@@ -597,9 +663,10 @@ export function createWorkflowOrchestrator(
           const previousSource: SourceType = state.routing ?? 'vectorstore';
           const fallback: SourceType = previousSource === 'vectorstore' ? 'websearch' : 'vectorstore';
           state.routing = fallback;
-          endStep('decide', { detail: `-> ${fallback}` });
+          const rewrittenQuestion = await rewriteQuestionForSource(question, fallback, signal);
+          endStep('decide', { detail: `-> ${fallback} (rewritten: ${rewrittenQuestion.slice(0, 100)}${rewrittenQuestion.length > 100 ? '…' : ''})` });
           clearSourceData(previousSource);
-          await runPath(fallback, signal);
+          await runPath(fallback, signal, rewrittenQuestion);
         }
       }
 
@@ -639,7 +706,7 @@ The Python data API contains user-uploaded CSV datasets as Arquero tables.
 
 Web search is for current/factual general knowledge questions.
 
-Return JSON with a single key "datasource": one of "vectorstore", "python", or "websearch".`;
+Return JSON with keys "datasource" (one of "vectorstore", "python", or "websearch") and "confidence" (number 0-1 indicating confidence in the routing decision).`;
 
 const DOC_GRADER_INSTRUCTIONS = `You assess document relevance to a question. Return JSON with "binary_score": "yes" if relevant, "no" otherwise.`;
 

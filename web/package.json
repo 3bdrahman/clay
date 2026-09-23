@@ -19,9 +19,9 @@
   "dependencies": {
     "arquero": "^8.0.3",
     "autoprefixer": "^10.5.4",
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.15",
     "marked": "^18.0.7",
-    "pdfjs-dist": "^5.7.284",
+    "pdfjs-dist": "^6.3.289",
     "postcss": "^8.5.25",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -36,10 +36,10 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
     "fake-indexeddb": "^6.2.5",
-    "happy-dom": "^15.11.7",
+    "happy-dom": "^20.14.5",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
-    "vitest": "^2.1.9"
+    "vitest": "^5.0.1"
   }
 }

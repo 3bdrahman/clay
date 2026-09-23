@@ -132,6 +132,21 @@ The site deploys to **GitHub Pages** via [`.github/workflows/deploy-github-pages
 
 ---
 
+## Design decisions
+
+| Decision | Rationale | Code |
+|---|---|---|
+| Reflection rides each tool-loop iteration | A separate critique turn would double the token spend per analysis; the model's own per-iteration summary is mandatory and visible at zero extra cost | `analyzer.ts` (`onIteration` hook) |
+| Plan on the first iteration | The model's first tool-call response opens with a `PLAN:` line — a visible strategy without a separate planning phase (another round trip + tokens) | `analyzer.ts` `buildSystemPrompt` |
+| Synchronous in-browser tools | Tools run against immutable Arquero tables in the same thread; parallelizing them would need Workers, breaking the pure-browser boundary. The `aq`/`op` namespaces are isolated per execution | `analyzer.ts` `executeUserCode` |
+| Single user-chosen chat model | With BYOK you pay per token — the cost decision stays with you; the embedding model is auto-picked from the live catalog | `lib/models.ts` |
+| Budgets enforced mid-loop | Each LLM call gets `max_tokens` derived from the remaining budget, so one huge response can't blow the loop's token budget | `analyzer.ts` `runToolLoop`, `lib/llm.ts` |
+| Eval grades answers, not just routing | Lexical overlap + LLM-as-judge scores against the golden set, with aggregates — quality claims are measurable | `eval/runner.ts` |
+| Retrieval-only query rewriting | On eval failure the question is rewritten for the retried source; the answer still answers the original question | `orchestrator.ts` retry loop |
+| Final synthesis rides the loop's last response | A separate streaming synthesis call would add a round trip per analysis; live visibility comes from sub-steps + reflections | `analyzer.ts` `runToolLoop` |
+
+---
+
 ## Data flow
 
 When you drop a CSV, it's parsed by Arquero into a real `ColumnTable` and registered as a variable the LLM-generated code can query. When you drop a PDF/MD/TXT/JSON, it's chunked (~800 chars / ~200 overlap), embedded via the best embedding model in your provider's catalog (or your explicit local pick), and added to the in-memory vector store.

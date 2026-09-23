@@ -18,6 +18,7 @@ export interface AnalyzerHooks {
   onToolStart?: (info: { tool: string; argsSummary: string; startedAt: number }) => void;
   onToolEnd?: (info: { tool: string; durationMs: number; error?: string }) => void;
   onIteration?: (info: { iteration: number; reflection: string; tokensUsed: number }) => void;
+  onSynthesisToken?: (token: string) => void;
 }
 
 export interface DataAnalyzer {
@@ -473,7 +474,7 @@ Return JSON: {"code": "...", "explanation": "..."}`;
 
 The chart field is optional. Include it only when a visualization adds value.
 
-CRITICAL: After EVERY tool call response, you MUST include a one-line reflection in your next message — what the results told you and what you will do next. This reflection is required for every iteration.`;
+CRITICAL: Your FIRST response MUST begin with "PLAN:" followed by one line describing your analysis strategy (what you will inspect and in what order). EVERY SUBSEQUENT response MUST begin with "REFLECTION:" followed by one line on what the results showed and what you will do next. This is required for every iteration.`;
   }
 
   function buildInitialUserMessage(question: string, relevant: string[], previousContext?: string): string {
@@ -526,21 +527,23 @@ Use the tools to explore the data and answer the question.`;
     let consecutiveMalformed = 0;
 
     async function runSalvageSynthesis(fallbackReason: string): Promise<LoopResult> {
-      // Run one salvage synthesis invoke with accumulated messages, no tools, jsonMode false
-      const salvageResp = await llm.invoke({
+      let salvageContent = '';
+      const salvageResp = await llm.stream({
         system: buildSystemPrompt(),
         messages,
         temperature: 0,
         model: deps.codeGenModel,
         maxTokens: SALVAGE_MAX_COMPLETION_TOKENS,
-        // No tools, no jsonMode - free-form text response
+      }, (token: string) => {
+        salvageContent += token;
+        hooks?.onSynthesisToken?.(token);
       }, signal);
 
       const salvageTokens = salvageResp.usage?.totalTokens ?? 0;
       tokensUsed += salvageTokens;
 
       // Parse salvage response tolerantly
-      let answer = salvageResp.content || '';
+      let answer = salvageResp.content || salvageContent || '';
       let insights: Insight[] = [];
       let chart: ChartConfig | undefined = undefined;
 
@@ -825,7 +828,6 @@ Use the tools to explore the data and answer the question.`;
         }
 
         if (finishReason === 'stop' || !toolCalls || toolCalls.length === 0) {
-          // Final synthesis
           let synthesis: { answer: string; insights?: Insight[]; chart?: ChartConfig } = {
             answer: resp.content || '',
             insights: [],
