@@ -37,6 +37,7 @@ function cspPlugin() {
         'https://openrouter.ai',
         'https://api.groq.com',
         'https://api.together.xyz',
+        'https://integrate.api.nvidia.com',
         'https://duckduckgo.com',
         'https://*.duckduckgo.com',
         'https://google.serper.dev',
@@ -58,7 +59,7 @@ function cspPlugin() {
         connectSrc.push(...extraConnectSrc.split(',').map(s => s.trim()).filter(Boolean));
       }
 
-      const csp = `default-src 'self'; connect-src ${connectSrc.join(' ')}; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`;
+      const csp = `default-src 'self'; connect-src ${connectSrc.join(' ')}; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; manifest-src 'self'; base-uri 'self'; form-action 'self'`;
 
       return html.replace(
         '<meta http-equiv="Content-Security-Policy" content="%CSP%" />',

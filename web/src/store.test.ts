@@ -11,6 +11,7 @@ describe('useAppStore.updateSettings', () => {
         openrouterApiKey: '',
         groqApiKey: '',
         togetherApiKey: '',
+        nimApiKey: '',
         apiKey: '',
         embeddingApiKey: '',
         webSearchProvider: 'duckduckgo',
@@ -140,11 +141,20 @@ describe('store persist migrate — LocalModelPicks 5-field → 2-field', () => 
 
   it('falls back to openrouter when persisted provider is no longer registered', () => {
     const out = migrate()?.(
-      { settings: { provider: 'nim' as never, openrouterApiKey: 'legacy-key' } },
+      { settings: { provider: 'removed-provider' as never, openrouterApiKey: 'legacy-key' } },
       5,
     ) as { settings: { provider: string; openrouterApiKey: string } };
     expect(out.settings.provider).toBe('openrouter');
     expect(out.settings.openrouterApiKey).toBe('legacy-key');
+  });
+
+  it('maps the legacy apiKey to nimApiKey when the persisted provider is nim', () => {
+    const out = migrate()?.(
+      { settings: { provider: 'nim', apiKey: 'legacy-nim-key' } },
+      5,
+    ) as { settings: { provider: string; nimApiKey: string } };
+    expect(out.settings.provider).toBe('nim');
+    expect(out.settings.nimApiKey).toBe('legacy-nim-key');
   });
 
   it('falls back to openrouter when persisted provider is garbage', () => {

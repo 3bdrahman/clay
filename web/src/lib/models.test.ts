@@ -309,6 +309,7 @@ describe('resolveModels', () => {
     openrouterApiKey: 'k',
     groqApiKey: '',
     togetherApiKey: '',
+    nimApiKey: '',
     apiKey: '',
     embeddingApiKey: '',
     webSearchProvider: 'duckduckgo',

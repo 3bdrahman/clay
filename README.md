@@ -20,7 +20,7 @@ Clay combines three retrieval paths behind a single chat surface:
 
 The orchestrator routes each question to the right source, runs an LLM-as-judge self-correction loop, and renders the entire pipeline in real time.
 
-All processing runs in the browser. Bring your own key (BYOK) for **OpenRouter**, **Groq**, or **Together**, or point Clay at a **local OpenAI-compatible server** (Ollama, LM Studio, vLLM, llama.cpp). Switch in Settings. Web search is optional and also runs client-side via DuckDuckGo or Serper API.
+All processing runs in the browser. Bring your own key (BYOK) for **OpenRouter**, **Groq**, **Together**, or **NVIDIA NIM**, or point Clay at a **local OpenAI-compatible server** (Ollama, LM Studio, vLLM, llama.cpp). Switch in Settings. Web search is optional and also runs client-side via DuckDuckGo or Serper API.
 
 ---
 
@@ -28,7 +28,7 @@ All processing runs in the browser. Bring your own key (BYOK) for **OpenRouter**
 
 **Try it now:** [https://3bdrahman.github.io/clay/](https://3bdrahman.github.io/clay/)
 
-Add your own API key in **Settings** — OpenRouter ([openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)), Groq ([console.groq.com/keys](https://console.groq.com/keys)), or Together ([api.together.ai/settings/api-keys](https://api.together.ai/settings/api-keys)) — or configure a local OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp) to use the full AI capabilities.
+Add your own API key in **Settings** — OpenRouter ([openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)), Groq ([console.groq.com/keys](https://console.groq.com/keys)), Together ([api.together.ai/settings/api-keys](https://api.together.ai/settings/api-keys)), or NVIDIA NIM ([build.nvidia.com](https://build.nvidia.com)) — or configure a local OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp) to use the full AI capabilities.
 
 ---
 
@@ -113,7 +113,7 @@ The site deploys to **GitHub Pages** via [`.github/workflows/deploy-github-pages
 │                       │                                     │
 │                       ▼  (outbound LLM calls)                │
 │   ┌─────────────────────────────────────────┐               │
-│   │  OpenRouter / Groq / Together / Local  │               │
+│   │  OpenRouter / Groq / Together / NIM / Local  │         │
 │   │  one chat model + one embedding model  │               │
 │   └─────────────────────────────────────────┘               │
 └─────────────────────────────────────────────────────────────┘
@@ -128,7 +128,7 @@ The site deploys to **GitHub Pages** via [`.github/workflows/deploy-github-pages
 - **Recharts** — declarative charts
 - **Marked + DOMPurify** — safe markdown rendering
 - **pdfjs-dist** — client-side PDF text extraction
-- **OpenRouter / Groq / Together / local server** — OpenAI-compatible LLM providers (BYOK)
+- **OpenRouter / Groq / Together / NVIDIA NIM / local server** — OpenAI-compatible LLM providers (BYOK)
 
 ---
 
@@ -166,6 +166,7 @@ Open **Settings** and pick a provider. API keys are stored in browser `localStor
 | OpenRouter | [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) | `https://openrouter.ai/api/v1` |
 | Groq | [console.groq.com/keys](https://console.groq.com/keys) | `https://api.groq.com/openai/v1` |
 | Together | [api.together.ai/settings/api-keys](https://api.together.ai/settings/api-keys) | `https://api.together.xyz/v1` |
+| NVIDIA NIM | [build.nvidia.com](https://build.nvidia.com) | `https://integrate.api.nvidia.com/v1` |
 
 ### Local server (private)
 

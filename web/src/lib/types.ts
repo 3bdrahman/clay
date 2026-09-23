@@ -20,7 +20,7 @@ export interface LocalModelPicks {
   embeddings: string;
 }
 
-export type ProviderKind = 'openrouter' | 'groq' | 'together' | 'local';
+export type ProviderKind = 'openrouter' | 'groq' | 'together' | 'nim' | 'local';
 
 export interface PickedModelsOverride {
   chatModel?: string;
@@ -33,6 +33,7 @@ export interface Settings {
   openrouterApiKey: string;
   groqApiKey: string;
   togetherApiKey: string;
+  nimApiKey: string;
   embeddingApiKey: string;
   // Legacy field for backward compat (migration)
   apiKey: string;

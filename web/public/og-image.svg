@@ -23,27 +23,27 @@
 </g>
 
   <text x="180" y="195" font-family="system-ui, -apple-system, sans-serif" font-size="76" font-weight="800" fill="#fff">Clay</text>
-  <text x="180" y="245" font-family="system-ui, -apple-system, sans-serif" font-size="32" font-weight="500" fill="#94a3b8">AI Internal Assistant</text>
+  <text x="180" y="245" font-family="system-ui, -apple-system, sans-serif" font-size="32" font-weight="500" fill="#94a3b8">RAG Assistant</text>
 
   <g transform="translate(80, 310)">
     <rect width="500" height="64" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1" />
-    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">routing:    meta/llama-3.1-8b-instruct</text>
+    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">chat:       one model you pick (BYOK)</text>
 </g>
   <g transform="translate(80, 386)">
     <rect width="500" height="64" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1" />
-    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">codeGen:    mistralai/codestral-22b</text>
+    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">embedding:  auto-picked from the catalog</text>
 </g>
   <g transform="translate(80, 462)">
     <rect width="500" height="64" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1" />
-    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">answer:     nemotron-3-ultra-550b</text>
+    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">tools:      6 analysis tools + insights</text>
 </g>
   <g transform="translate(80, 538)">
     <rect width="500" height="64" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1" />
-    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">embedding:  nvidia/nv-embedqa-e5-v5</text>
+    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">eval:       LLM-as-judge self-correction</text>
 </g>
 
   <text x="620" y="340" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Runs in your browser</text>
-  <text x="620" y="372" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">One NVIDIA NIM key</text>
+  <text x="620" y="372" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Bring your own key</text>
   <text x="620" y="404" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Drop your own data</text>
   <text x="620" y="436" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Live workflow visualization</text>
   <text x="620" y="468" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Self-correcting with retries</text>

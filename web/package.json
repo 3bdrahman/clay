@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval": "vitest run src/eval/eval.test.ts",
+    "generate:og-image": "node scripts/generate-og-image.mjs",
     "verify": "npm run type-check && npm run lint && npm run test && npm run build"
   },
   "dependencies": {
@@ -38,6 +39,7 @@
     "fake-indexeddb": "^6.2.5",
     "happy-dom": "^20.14.5",
     "oxlint": "^1.75.0",
+    "sharp": "^0.35.4",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
     "vitest": "^5.0.1"

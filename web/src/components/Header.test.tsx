@@ -42,6 +42,11 @@ describe('Header accessibility', () => {
     expect(el.querySelector('[aria-label="Open settings"]')).not.toBeNull();
   });
 
+  it('shows the NVIDIA NIM provider label for the nim provider', () => {
+    const el = renderHeader('nim');
+    expect(el.textContent).toContain('NVIDIA NIM');
+  });
+
   it('hides the clear-chat control when the conversation is empty', () => {
     const el = renderHeader();
     expect(el.querySelector('[aria-label="Clear chat history"]')).toBeNull();

@@ -1,6 +1,6 @@
 import { useAppStore } from '../store';
 import type { PickedModels } from '../lib/models';
-import { getProviderApiKeyField } from '../lib/providers';
+import { getProviderApiKeyField, getProviderConfig } from '../lib/providers';
 import { useConfirm } from '../hooks/useConfirm';
 import type { ProviderKind } from '../lib/types';
 
@@ -48,21 +48,13 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
     settings.theme === 'dark' ? 'Dark theme' :
     'System theme';
 
-  // Provider display mapping for the header
-  const providerDisplayNames: Record<ProviderKind, string> = {
-    openrouter: 'OpenRouter',
-    groq: 'Groq',
-    together: 'Together AI',
-    local: 'Local server',
-  };
-
   const isLocal = provider === 'local';
   const apiKeyField = getProviderApiKeyField(provider);
   const hasKey = apiKeyField !== undefined && settings[apiKeyField].length > 0;
   const hasLocalModel = isLocal && !!pickedModels.chat;
   const connected = hasKey || hasLocalModel;
   const answerModel = pickedModels.chat ?? (isLocal || hasKey ? 'No chat model set' : 'Not configured');
-  const providerLabel = providerDisplayNames[provider];
+  const providerLabel = getProviderConfig(provider).displayName;
 
   return (
     <header className="border-b border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-900 px-4 py-3 flex items-center justify-between">

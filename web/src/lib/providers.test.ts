@@ -7,6 +7,7 @@ const baseSettings: Settings = {
   openrouterApiKey: '',
   groqApiKey: '',
   togetherApiKey: '',
+  nimApiKey: '',
   apiKey: '',
   embeddingApiKey: '',
   webSearchProvider: 'duckduckgo',
@@ -76,5 +77,12 @@ describe('resolveProviderEndpoint', () => {
     expect(out.baseUrl).toBe('https://api.together.xyz/v1');
     expect(out.apiKey).toBe('together_x');
     expect(out.providerLabel).toBe('Together AI');
+  });
+
+  it('returns NVIDIA NIM base URL and nimApiKey', () => {
+    const out = resolveProviderEndpoint({ ...baseSettings, provider: 'nim', nimApiKey: 'nvapi-x' });
+    expect(out.baseUrl).toBe('https://integrate.api.nvidia.com/v1');
+    expect(out.apiKey).toBe('nvapi-x');
+    expect(out.providerLabel).toBe('NVIDIA NIM');
   });
 });

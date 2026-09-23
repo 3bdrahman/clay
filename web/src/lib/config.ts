@@ -4,6 +4,7 @@
  */
 
 import type { Settings } from './types';
+import { getProviderConfig } from './providers';
 import {
   NoProviderError,
   EmbeddingModelMissingError,
@@ -49,11 +50,11 @@ export function validateSettings(
       errors.push({ code: err.code, message: err.message, providerKind: 'local' });
     }
   } else {
-    // API providers (openrouter, groq, together)
     const apiKeyField = {
       openrouter: 'openrouterApiKey',
       groq: 'groqApiKey',
       together: 'togetherApiKey',
+      nim: 'nimApiKey',
     }[settings.provider];
 
     const apiKey = (settings as unknown as Record<string, string>)[apiKeyField];
@@ -151,23 +152,17 @@ export function getSettingsStatus(settings: Settings): {
   const result = validateSettings(settings);
   const issues = [...result.errors.map((e) => e.message), ...result.warnings];
 
-  const providerNames: Record<string, string> = {
-    openrouter: 'OpenRouter',
-    groq: 'Groq',
-    together: 'Together AI',
-    local: 'Local Server',
-  };
-
   const apiKeyField = {
     openrouter: 'openrouterApiKey',
     groq: 'groqApiKey',
     together: 'togetherApiKey',
+    nim: 'nimApiKey',
     local: '',
   }[settings.provider];
 
   return {
     configured: result.valid,
-    provider: providerNames[settings.provider] ?? settings.provider,
+    provider: getProviderConfig(settings.provider).displayName,
     hasApiKey: settings.provider === 'local' ? !!settings.localServerUrl : !!(settings as unknown as Record<string, string>)[apiKeyField],
     hasEmbeddingKey: settings.provider === 'local' ? !!settings.localModels?.embeddings : !!settings.embeddingApiKey,
     modelCount: settings.provider === 'local' ? settings.localCatalog?.length ?? 0 : 0,

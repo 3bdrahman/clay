@@ -78,6 +78,7 @@ const DEFAULT_SETTINGS: Settings = {
   openrouterApiKey: '',
   groqApiKey: '',
   togetherApiKey: '',
+  nimApiKey: '',
   apiKey: '', // legacy field for migration
   embeddingApiKey: '',
   webSearchProvider: 'duckduckgo',
@@ -333,6 +334,7 @@ export const useAppStore = create<AppState>()(
           openrouterApiKey: provider === 'openrouter' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.openrouterApiKey,
           groqApiKey: provider === 'groq' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.groqApiKey,
           togetherApiKey: provider === 'together' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.togetherApiKey,
+          nimApiKey: provider === 'nim' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.nimApiKey,
           ...((persistedSettings as Omit<Partial<Settings>, 'localModels'> | undefined) ?? {}),
           localModels: migrateLegacyLocalModels(persistedLocalModels),
           pickedModelsOverride: migrateChatSelection(persistedSettings.pickedModelsOverride),

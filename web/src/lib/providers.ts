@@ -7,7 +7,7 @@ import type { Settings } from './types';
 export type { ProviderKind };
 
 /** Settings field holding the API key for a cloud provider. Undefined for 'local'. */
-export type ProviderApiKeyField = 'openrouterApiKey' | 'groqApiKey' | 'togetherApiKey';
+export type ProviderApiKeyField = 'openrouterApiKey' | 'groqApiKey' | 'togetherApiKey' | 'nimApiKey';
 
 export interface ProviderConfig {
   kind: ProviderKind;
@@ -90,6 +90,16 @@ export const PROVIDER_REGISTRY: Record<ProviderKind, ProviderConfig> = {
     requiresApiKey: true,
     apiKeyUrl: 'https://api.together.xyz/settings/api-keys',
   },
+  nim: {
+    kind: 'nim',
+    displayName: 'NVIDIA NIM',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    modelsEndpoint: '/models',
+    apiKeyHint: 'nvapi-...',
+    freeTier: true,
+    requiresApiKey: true,
+    apiKeyUrl: 'https://build.nvidia.com',
+  },
   local: {
     kind: 'local',
     displayName: 'Local (OpenAI-compatible)',
@@ -111,6 +121,7 @@ export function getProviderApiKeyField(kind: ProviderKind): ProviderApiKeyField 
     case 'openrouter': return 'openrouterApiKey';
     case 'groq': return 'groqApiKey';
     case 'together': return 'togetherApiKey';
+    case 'nim': return 'nimApiKey';
     case 'local': return undefined;
   }
 }

@@ -49,6 +49,7 @@ const baseSettings = {
   openrouterApiKey: '',
   groqApiKey: '',
   togetherApiKey: '',
+  nimApiKey: '',
   apiKey: '',
   embeddingApiKey: '',
   webSearchProvider: 'duckduckgo' as const,
