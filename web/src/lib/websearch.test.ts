@@ -10,7 +10,7 @@ import { WebSearchProviderError } from './errors';
 
 const baseSettings = (overrides: Partial<Settings> = {}): Settings =>
   ({
-    provider: 'nim',
+    provider: 'openrouter',
     apiKey: '',
     embeddingApiKey: '',
     webSearchProvider: 'duckduckgo',

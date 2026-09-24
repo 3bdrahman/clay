@@ -34,8 +34,8 @@ const FEATURES = [
   },
   {
     icon: 'M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z',
-    title: 'Dynamic Model Picker',
-    description: 'Fetches NIM\'s live catalog (~100 models) and picks the best per task: routing, code generation, answer, evaluation, embeddings.',
+    title: 'Model Selection',
+    description: 'You choose one chat model for every task; the embedding model is auto-picked from your provider\'s live catalog.',
     color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 dark:text-indigo-400',
   },
 ];

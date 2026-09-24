@@ -285,7 +285,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                           <svg className="w-3.5 h-3.5 flex-shrink-0 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                           </svg>
-                          CORS blocked — NVIDIA NIM does not allow requests from this origin
+                          CORS blocked — the provider does not allow requests from this origin
                         </summary>
                         <div className="mt-2 text-[11px] text-ink-600 dark:text-ink-300 bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-800 rounded px-3 py-2 whitespace-pre-line animate-fade-in">
                           {modelsError}
@@ -408,26 +408,6 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                   </a>
                 )}
               </div>
-
-              {settings.provider === 'nim' && (
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
-                    NIM proxy URL <span className="text-ink-400 normal-case">(optional — for browser CORS)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.nimProxyUrl ?? ''}
-                    onChange={e => updateSettings({ nimProxyUrl: e.target.value })}
-                    placeholder="https://your-proxy.workers.dev"
-                    className="w-full px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none font-mono"
-                  />
-                  <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5">
-                    NVIDIA NIM blocks browser CORS. Deploy the bundled relay (free tier): run{' '}
-                    <span className="font-mono">npx wrangler deploy</span> from the repo root, then paste your
-                    worker's URL here.
-                  </p>
-                </div>
-              )}
 
               <div className="rounded-lg border border-ink-200 dark:border-ink-700 p-3 space-y-2 bg-ink-50/50 dark:bg-ink-800/30">
                 <div className="flex items-center justify-between gap-2">

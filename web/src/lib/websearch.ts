@@ -8,8 +8,8 @@ import {
   isRetryable,
 } from './errors';
 
-// DuckDuckGo HTML returns no CORS headers, so we route through the same
-// dev proxy as NIM. In production, VITE_WEBSEARCH_BASE_URL should point at
+// DuckDuckGo HTML returns no CORS headers, so the dev server proxies /ddg
+// to html.duckduckgo.com. In production, VITE_WEBSEARCH_BASE_URL should point at
 // whatever edge proxy the deployment exposes (or stay empty to fall back to
 // direct DuckDuckGo, which only works from origins it whitelists).
 function resolveWebSearchBaseUrl(): string {

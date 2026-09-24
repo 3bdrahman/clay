@@ -48,8 +48,6 @@ const baseSettings = {
   provider: 'openrouter' as const,
   openrouterApiKey: '',
   groqApiKey: '',
-  togetherApiKey: '',
-  nimApiKey: '',
   apiKey: '',
   embeddingApiKey: '',
   webSearchProvider: 'duckduckgo' as const,

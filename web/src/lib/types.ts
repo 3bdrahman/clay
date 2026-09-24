@@ -20,7 +20,7 @@ export interface LocalModelPicks {
   embeddings: string;
 }
 
-export type ProviderKind = 'openrouter' | 'groq' | 'together' | 'nim' | 'local';
+export type ProviderKind = 'openrouter' | 'groq' | 'local';
 
 export interface PickedModelsOverride {
   chatModel?: string;
@@ -32,11 +32,6 @@ export interface Settings {
   // Provider API keys - each provider has its own key
   openrouterApiKey: string;
   groqApiKey: string;
-  togetherApiKey: string;
-  nimApiKey: string;
-  // NVIDIA NIM blocks browser CORS — optional proxy relay URL (e.g. a deployed
-  // Cloudflare Worker forwarding /nim-api/* to integrate.api.nvidia.com)
-  nimProxyUrl?: string;
   embeddingApiKey: string;
   // Legacy field for backward compat (migration)
   apiKey: string;

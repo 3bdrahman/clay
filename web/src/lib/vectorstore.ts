@@ -51,7 +51,7 @@ const STORE_NAME = 'entries';
  * detection (`entry.metadata.modelId !== currentEmbeddingModel`) treats
  * legacy/unknown entries as "needs re-embedding" instead of incorrectly
  * matching whatever string we picked. The literal `'legacy'` is intentionally
- * distinct from any real NIM/local model id (which always contain a vendor
+ * distinct from any real provider model id (which always contain a vendor
  * prefix or namespace separator).
  */
 const LEGACY_EMBEDDING_MODEL_ID = 'legacy';

@@ -4,13 +4,27 @@ import { generateEvalQuestions } from './dynamicQuestions';
 import type { Settings } from '../lib/types';
 
 const TEST_SETTINGS: Settings = {
-  apiKey: import.meta.env.VITE_NIM_API_KEY ?? '',
+  provider: 'openrouter',
+  openrouterApiKey: import.meta.env.VITE_EVAL_API_KEY ?? '',
+  groqApiKey: '',
+  apiKey: '',
   embeddingApiKey: '',
   webSearchProvider: 'duckduckgo',
   serperApiKey: '',
   temperature: 0,
   maxRetries: 3,
   theme: 'system',
+  localServerUrl: '',
+  localModels: { chat: '', embeddings: '' },
+  localCatalog: [],
+  localCatalogFetchedAt: 0,
+  pickedModelsOverride: {
+    routing: '',
+    codeGen: '',
+    answer: '',
+    eval: '',
+    embedding: '',
+  },
 };
 
 // Create test datasets and documents for dynamic question generation
@@ -182,8 +196,8 @@ describe('formatReport', () => {
   });
 });
 
-describe('E2E Eval (requires VITE_NIM_API_KEY)', () => {
-  it('runs full golden test set against live NIM', async () => {
+describe('E2E Eval (requires VITE_EVAL_API_KEY)', () => {
+  it('runs full golden test set against the live provider', async () => {
     if (!TEST_SETTINGS.apiKey) {
       return;
     }

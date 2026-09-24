@@ -59,12 +59,12 @@ describe('RagError subclasses', () => {
   });
 
   describe('ModelCatalogEmptyError', () => {
-    it('creates error for NIM provider', () => {
-      const err = new ModelCatalogEmptyError('nim');
+    it('creates error for a named cloud provider', () => {
+      const err = new ModelCatalogEmptyError('openrouter');
       expect(err.code).toBe(RagErrorCode.MODEL_CATALOG_EMPTY);
-      expect(err.message).toContain('nim model catalog');
+      expect(err.message).toContain('openrouter model catalog');
       expect(err.retryable).toBe(true);
-      expect(err.provider).toBe('nim');
+      expect(err.provider).toBe('openrouter');
     });
 
     it('creates error for local provider', () => {

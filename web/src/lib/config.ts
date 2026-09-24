@@ -53,8 +53,6 @@ export function validateSettings(
     const apiKeyField = {
       openrouter: 'openrouterApiKey',
       groq: 'groqApiKey',
-      together: 'togetherApiKey',
-      nim: 'nimApiKey',
     }[settings.provider];
 
     const apiKey = (settings as unknown as Record<string, string>)[apiKeyField];
@@ -155,8 +153,6 @@ export function getSettingsStatus(settings: Settings): {
   const apiKeyField = {
     openrouter: 'openrouterApiKey',
     groq: 'groqApiKey',
-    together: 'togetherApiKey',
-    nim: 'nimApiKey',
     local: '',
   }[settings.provider];
 

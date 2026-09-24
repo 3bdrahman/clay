@@ -34,7 +34,7 @@ export interface EmbeddingCacheLike {
   set(modelId: string, textHash: string, embedding: number[]): void;
 }
 
-// NVIDIA NIM asymmetric retrieval models (e.g. nv-embedqa-e5-v5,
+// NVIDIA asymmetric retrieval models (e.g. nv-embedqa-e5-v5,
 // nv-embedqa-mistral-7b-v2) reject requests without `input_type`. Symmetric
 // embedding models (e.g. llama-nemotron-embed-v1, nomic-embed-text) accept either.
 const ASYMMETRIC_MODEL_PATTERNS: readonly RegExp[] = [
@@ -59,7 +59,7 @@ const MAX_BACKOFF_MS = 8000;
  * Words-to-tokens multiplier used by `estimateTokens`. Must stay in sync with
  * the heuristic in `lib/tokens.ts` — both code sites use the same factor so
  * cache sizes and rate-limit windows line up. Trained on a sample of English
- * prose + code across NIM's BPE-family tokenizers.
+ * prose + code across the BPE-family tokenizers.
  */
 const TOKEN_ESTIMATE_WORD_FACTOR = 1.3;
 

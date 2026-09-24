@@ -26,7 +26,7 @@ export interface PickedModels {
 
 /**
  * Fetch the model catalog from any supported provider.
- * @param provider - Provider kind (openrouter, groq, together, local)
+ * @param provider - Provider kind (openrouter, groq, local)
  * @param apiKey - API key for providers that require it
  * @param baseUrl - Optional custom base URL (for local)
  * @returns Array of model info objects with id, ownedBy, created

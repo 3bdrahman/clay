@@ -7,7 +7,7 @@ import type { Settings } from './types';
 export type { ProviderKind };
 
 /** Settings field holding the API key for a cloud provider. Undefined for 'local'. */
-export type ProviderApiKeyField = 'openrouterApiKey' | 'groqApiKey' | 'togetherApiKey' | 'nimApiKey';
+export type ProviderApiKeyField = 'openrouterApiKey' | 'groqApiKey';
 
 export interface ProviderConfig {
   kind: ProviderKind;
@@ -80,26 +80,6 @@ export const PROVIDER_REGISTRY: Record<ProviderKind, ProviderConfig> = {
     requiresApiKey: true,
     apiKeyUrl: 'https://console.groq.com/keys',
   },
-  together: {
-    kind: 'together',
-    displayName: 'Together AI',
-    baseUrl: 'https://api.together.xyz/v1',
-    modelsEndpoint: '/models',
-    apiKeyHint: '...',
-    freeTier: true,
-    requiresApiKey: true,
-    apiKeyUrl: 'https://api.together.xyz/settings/api-keys',
-  },
-  nim: {
-    kind: 'nim',
-    displayName: 'NVIDIA NIM',
-    baseUrl: 'https://integrate.api.nvidia.com/v1',
-    modelsEndpoint: '/models',
-    apiKeyHint: 'nvapi-...',
-    freeTier: true,
-    requiresApiKey: true,
-    apiKeyUrl: 'https://build.nvidia.com',
-  },
   local: {
     kind: 'local',
     displayName: 'Local (OpenAI-compatible)',
@@ -120,8 +100,6 @@ export function getProviderApiKeyField(kind: ProviderKind): ProviderApiKeyField 
   switch (kind) {
     case 'openrouter': return 'openrouterApiKey';
     case 'groq': return 'groqApiKey';
-    case 'together': return 'togetherApiKey';
-    case 'nim': return 'nimApiKey';
     case 'local': return undefined;
   }
 }
@@ -146,14 +124,6 @@ export function resolveProviderEndpoint(settings: Settings): ProviderEndpoint {
   }
 
   const apiKey = (apiKeyField !== undefined ? settings[apiKeyField] : '') || settings.apiKey || '';
-
-  if (settings.provider === 'nim' && settings.nimProxyUrl?.trim()) {
-    return {
-      baseUrl: `${settings.nimProxyUrl.trim().replace(/\/+$/, '')}/nim-api/v1`,
-      apiKey,
-      providerLabel: config.displayName,
-    };
-  }
 
   const defaultHeaders = { ...config.defaultHeaders };
   if (settings.provider === 'openrouter') {

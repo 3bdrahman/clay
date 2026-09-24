@@ -470,7 +470,7 @@ function isLikelyCorsBlock(error: unknown, provider: string): boolean {
   if (!(error instanceof TypeError && error.message.includes('fetch'))) return false;
   if (import.meta.env.DEV) return false; // Dev uses Vite proxy, CORS is bypassed
 
-  const corsAwareProviders = ['OpenRouter', 'Groq', 'Together AI'];
+  const corsAwareProviders = ['OpenRouter', 'Groq'];
   if (!corsAwareProviders.includes(provider)) return false;
   return true;
 }

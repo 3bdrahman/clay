@@ -10,8 +10,6 @@ describe('useAppStore.updateSettings', () => {
         provider: 'openrouter',
         openrouterApiKey: '',
         groqApiKey: '',
-        togetherApiKey: '',
-        nimApiKey: '',
         apiKey: '',
         embeddingApiKey: '',
         webSearchProvider: 'duckduckgo',
@@ -148,15 +146,6 @@ describe('store persist migrate — LocalModelPicks 5-field → 2-field', () => 
     expect(out.settings.openrouterApiKey).toBe('legacy-key');
   });
 
-  it('maps the legacy apiKey to nimApiKey when the persisted provider is nim', () => {
-    const out = migrate()?.(
-      { settings: { provider: 'nim', apiKey: 'legacy-nim-key' } },
-      5,
-    ) as { settings: { provider: string; nimApiKey: string } };
-    expect(out.settings.provider).toBe('nim');
-    expect(out.settings.nimApiKey).toBe('legacy-nim-key');
-  });
-
   it('falls back to openrouter when persisted provider is garbage', () => {
     const out = migrate()?.(
       { settings: { provider: 'does-not-exist' as never } },
@@ -214,7 +203,6 @@ describe('sanitizeProvider', () => {
   it('returns the provider when it is registered', () => {
     expect(sanitizeProvider('openrouter')).toBe('openrouter');
     expect(sanitizeProvider('groq')).toBe('groq');
-    expect(sanitizeProvider('together')).toBe('together');
     expect(sanitizeProvider('local')).toBe('local');
   });
 });

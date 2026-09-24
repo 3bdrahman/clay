@@ -6,8 +6,6 @@ const baseSettings: Settings = {
   provider: 'openrouter',
   openrouterApiKey: '',
   groqApiKey: '',
-  togetherApiKey: '',
-  nimApiKey: '',
   apiKey: '',
   embeddingApiKey: '',
   webSearchProvider: 'duckduckgo',
@@ -70,31 +68,5 @@ describe('resolveProviderEndpoint', () => {
     expect(out.baseUrl).toBe('https://api.groq.com/openai/v1');
     expect(out.apiKey).toBe('gsk_x');
     expect(out.providerLabel).toBe('Groq');
-  });
-
-  it('returns Together base URL and togetherApiKey', () => {
-    const out = resolveProviderEndpoint({ ...baseSettings, provider: 'together', togetherApiKey: 'together_x' });
-    expect(out.baseUrl).toBe('https://api.together.xyz/v1');
-    expect(out.apiKey).toBe('together_x');
-    expect(out.providerLabel).toBe('Together AI');
-  });
-
-  it('returns NVIDIA NIM base URL and nimApiKey', () => {
-    const out = resolveProviderEndpoint({ ...baseSettings, provider: 'nim', nimApiKey: 'nvapi-x' });
-    expect(out.baseUrl).toBe('https://integrate.api.nvidia.com/v1');
-    expect(out.apiKey).toBe('nvapi-x');
-    expect(out.providerLabel).toBe('NVIDIA NIM');
-  });
-
-  it('routes NIM through the proxy URL when nimProxyUrl is set', () => {
-    const out = resolveProviderEndpoint({
-      ...baseSettings,
-      provider: 'nim',
-      nimApiKey: 'nvapi-x',
-      nimProxyUrl: 'https://my-proxy.workers.dev/',
-    });
-    expect(out.baseUrl).toBe('https://my-proxy.workers.dev/nim-api/v1');
-    expect(out.apiKey).toBe('nvapi-x');
-    expect(out.providerLabel).toBe('NVIDIA NIM');
   });
 });
