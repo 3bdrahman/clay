@@ -7,7 +7,7 @@ Clay combines three retrieval paths behind a single chat surface:
 - **Data analysis** over uploaded CSV datasets via Arquero (pandas-like, in-browser)
 - **Web search** for current facts and general knowledge
 
-All processing runs in your browser. Bring your own key for **OpenRouter**, **Groq**, or **Together**, or point Clay at a **local OpenAI-compatible server** (Ollama, LM Studio, vLLM, llama.cpp). One user-chosen chat model drives the whole pipeline; the embedding model is auto-picked from the catalog.
+All processing runs in your browser. Bring your own key for **OpenRouter** or **Groq**, or point Clay at a **local OpenAI-compatible server** (Ollama, LM Studio, vLLM, llama.cpp). One user-chosen chat model drives the whole pipeline; the embedding model is auto-picked from the catalog.
 
 Live demo: **https://3bdrahman.github.io/clay/**
 
