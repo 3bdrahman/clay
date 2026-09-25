@@ -2,7 +2,6 @@ import type { Document, ChunkMetadata } from './types';
 import type { EmbeddingsClient } from './embeddings';
 import { estimateTokens } from './tokens';
 import { openIDB, wrapIDBStore, type IDBStore } from './idb';
-import type { BM25Index } from './bm25';
 import {
   VectorStoreCorruptedError,
   VectorStoreQuotaExceededError,
@@ -66,18 +65,13 @@ const LEGACY_EMBEDDING_MODEL_ID = 'legacy';
  *   for orthogonal vectors; filtering at 0 keeps relevant but allows borderline.
  * - DEFAULT_MMR_LAMBDA: 0.5 - equal weight to relevance and diversity.
  *   Standard default for Maximal Marginal Relevance.
- * - DEFAULT_HYBRID_ALPHA: 0.5 - equal weight to dense and BM25 scores.
- *   Works well when both signals are normalized to [0,1].
  * - DENSE_TOP_K_MULTIPLIER: 3 - fetch 3x top-K from dense search before fusion.
- *   Ensures sufficient candidate pool for hybrid/MMR reranking.
- * - BM25_TOP_K_MULTIPLIER: 3 - same rationale as dense multiplier.
+ *   Ensures sufficient candidate pool for MMR reranking.
  */
 const DEFAULT_TOP_K = 8;
 const DEFAULT_SCORE_THRESHOLD = 0;
 const DEFAULT_MMR_LAMBDA = 0.5;
-const DEFAULT_HYBRID_ALPHA = 0.5;
 const DENSE_TOP_K_MULTIPLIER = 3;
-const BM25_TOP_K_MULTIPLIER = 3;
 
 interface VectorEntry {
   id: string;
@@ -91,9 +85,6 @@ export interface VectorStoreConfig {
   scoreThreshold?: number;
   useMMR?: boolean;
   mmrLambda?: number;
-  useHybrid?: boolean;
-  hybridAlpha?: number;
-  bm25Index?: BM25Index;
   embeddingModel?: string;
 }
 
@@ -172,14 +163,6 @@ function cosineUnit(a: number[], b: number[]): number {
   return dot; // both unit-norm
 }
 
-function minMaxNormalize(values: number[]): number[] {
-  if (values.length === 0) return values;
-  let min = values[0] as number, max = values[0] as number;
-  for (const v of values) { if (v < min) min = v; if (v > max) max = v; }
-  if (max === min) return values.map(() => 0);
-  return values.map((v) => (v - min) / (max - min));
-}
-
 interface ScoredCandidate { id: string; score: number; }
 
 function mmrSelect(candidates: ScoredCandidate[], embeddings: Map<string, number[]>, k: number, lambda: number): string[] {
@@ -235,9 +218,6 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     scoreThreshold: config?.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD,
     useMMR: config?.useMMR ?? false,
     mmrLambda: config?.mmrLambda ?? DEFAULT_MMR_LAMBDA,
-    useHybrid: config?.useHybrid ?? false,
-    hybridAlpha: config?.hybridAlpha ?? DEFAULT_HYBRID_ALPHA,
-    bm25Index: config?.bm25Index,
     embeddingModel: config?.embeddingModel ?? '',
   };
   const entryModelId = cfg.embeddingModel || LEGACY_EMBEDDING_MODEL_ID;
@@ -341,29 +321,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     scored.sort((a, b) => b.score - a.score);
     const denseTop = scored.slice(0, Math.max(topK * DENSE_TOP_K_MULTIPLIER, 6));
 
-    let merged: ScoredCandidate[];
-    if (cfg.useHybrid && cfg.bm25Index) {
-      const bm25Hits = cfg.bm25Index.search(query, topK * BM25_TOP_K_MULTIPLIER);
-      const denseNorm = minMaxNormalize(denseTop.map((s) => s.score));
-      const bm25Scores = bm25Hits.map((h) => h.score);
-      const bm25Norm = minMaxNormalize(bm25Scores);
-      merged = [];
-      const allIds = new Set<string>();
-      for (const s of denseTop) allIds.add(s.id);
-      for (const h of bm25Hits) allIds.add(h.docId);
-      const denseLookup = new Map(denseTop.map((s, i) => [s.id, denseNorm[i]!] as const));
-      const bm25Lookup = new Map(bm25Hits.map((h, i) => [h.docId, bm25Norm[i]!] as const));
-      for (const id of allIds) {
-        const d = denseLookup.get(id) ?? 0;
-        const b = bm25Lookup.get(id) ?? 0;
-        merged.push({ id, score: cfg.hybridAlpha * d + (1 - cfg.hybridAlpha) * b });
-      }
-      merged.sort((a, b) => b.score - a.score);
-    } else {
-      merged = denseTop;
-    }
-
-    const filtered = merged.filter((c) => c.score >= cfg.scoreThreshold);
+    const filtered = denseTop.filter((c) => c.score >= cfg.scoreThreshold);
 
     let chosen: string[];
     if (cfg.useMMR) {
@@ -377,7 +335,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
       chosen = filtered.slice(0, topK).map((c) => c.id);
     }
 
-    const scoreLookup = new Map(merged.map((m) => [m.id, m.score]));
+    const scoreLookup = new Map(denseTop.map((m) => [m.id, m.score]));
     const results: Document[] = [];
     for (const id of chosen) {
       const e = memory.get(id);

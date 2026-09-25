@@ -32,7 +32,7 @@ describe('loadSampleDatasets', () => {
 
     const { tables, metadata, rawCsv } = await loadSampleDatasets();
 
-    expect(tables.has('aq')).toBe(true);
+    expect(tables.size).toBe(2);
     expect(tables.has('employees')).toBe(true);
     expect(tables.has('projects')).toBe(true);
     expect(metadata.employees.columns).toEqual(['department', 'salary']);

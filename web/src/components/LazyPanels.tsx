@@ -1,4 +1,4 @@
-/* eslint-disable react-refresh/only-export-components */
+/* eslint-disable react-refresh/only-export-components -- intentional: this module exists to co-locate lazy constants with their Suspense wrappers */
 import { lazy, Suspense } from 'react';
 
 /**
@@ -6,6 +6,8 @@ import { lazy, Suspense } from 'react';
  * (e.g. because a new version was deployed and the old chunk is 404), this will
  * automatically trigger a hard reload of the page to fetch the new index.html.
  */
+// ComponentType<any> mirrors React's own lazy<T extends ComponentType<any>> signature;
+// honest bounds (ComponentType<unknown>/<never>) fail inference under strict mode.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function lazyWithRetry<T extends React.ComponentType<any>>(
   componentImport: () => Promise<{ default: T }>
@@ -15,10 +17,11 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
       const component = await componentImport();
       window.sessionStorage.removeItem('chunk-failed-reload');
       return component;
-    } catch (error: any) {
-      const msg = error?.message || '';
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      const name = error instanceof Error ? error.name : '';
       const isChunkLoadError = 
-        error?.name === 'TypeError' || 
+        name === 'TypeError' || 
         msg.includes('dynamically imported module') || 
         msg.includes('fetch') ||
         msg.includes('load');

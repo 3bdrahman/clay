@@ -1,10 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { _resetWriteQueue } from './vectorstore';
 import { createVectorStore } from './vectorstore';
-import { createBM25Index } from './bm25';
 import type { EmbeddingsClient } from './embeddings';
 import { EmbeddingsConfigError } from './embeddings';
-import type { Document } from './types';
 
 interface FakeStore { _data: Map<string, unknown>; keyPath: string; }
 interface FakeIndexReq { onsuccess: ((cb: () => void) => void) | null; result: unknown; }
@@ -179,22 +177,6 @@ describe('vectorstore IDB-specific features', () => {
     expect(results.length).toBe(2);
     expect(results[0].id).toBe('near');
     expect(results[1].id).toBe('orth');
-  });
-
-  it('hybrid BM25+dense surfaces BM25-only-relevant chunk', async () => {
-    const emb = makeMockEmbeddings(4);
-    const bm25 = createBM25Index();
-    bm25.add('kw1', 'typescript react javascript hooks');
-    const vs = createVectorStore(emb, { useHybrid: true, hybridAlpha: 0.5, bm25Index: bm25, topK: 3 });
-    await vs.load();
-    vs.addEntries([
-      { id: 'kw1', text: 'typescript react javascript hooks', source: 's', embedding: [0, 0, 0, 1] },
-      { id: 'unrelated', text: 'quantum physics', source: 's', embedding: [1, 0, 0, 0] },
-    ]);
-    const embTyped = emb as { embed: ReturnType<typeof vi.fn> };
-    embTyped.embed.mockResolvedValueOnce([[1, 0, 0, 0]]);
-    const results = await vs.similaritySearch('javascript', 2);
-    expect(results.map((r: Document) => r.id)).toContain('kw1');
   });
 
   it('removeBySource returns synchronous count', async () => {

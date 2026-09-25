@@ -10,6 +10,7 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['node_modules', 'dist'],
     testTimeout: 30000,
+    pool: 'vmThreads',
     coverage: {
       enabled: false,
       provider: 'v8',

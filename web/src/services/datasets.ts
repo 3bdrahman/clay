@@ -1,12 +1,16 @@
 import * as aq from 'arquero';
+import type { ColumnTable } from 'arquero';
 import type { DatasetMeta } from '../services/analyzer';
 import { isDatasetExtension } from '../lib/fileExtensions';
 import { RagError, RagErrorCode } from '../lib/errors';
 
 export interface SampleLoadResult {
-  tables: Map<string, unknown>;
+  /** Dataset tables keyed by dataset name — real Arquero ColumnTables. */
+  tables: Map<string, ColumnTable>;
   metadata: DatasetMeta;
   rawCsv: Record<string, string>;
+  /** Arquero module namespace, exposed to LLM-generated code as the 'aq' variable. */
+  arquero: typeof aq;
 }
 
 /**
@@ -56,7 +60,7 @@ const getBasePath = (): string => {
 };
 
 export async function loadSampleDatasets(): Promise<SampleLoadResult> {
-  const tables = new Map<string, unknown>();
+  const tables = new Map<string, ColumnTable>();
   const metadata: DatasetMeta = {};
   const rawCsv: Record<string, string> = {};
 
@@ -90,12 +94,8 @@ export async function loadSampleDatasets(): Promise<SampleLoadResult> {
         const rows = table.objects() as Array<Record<string, unknown>>;
         const normalized = rows.map(normalizeRow);
         const normalizedTable = aq.from(normalized);
-        const columns = typeof normalizedTable.columnNames === 'function'
-          ? normalizedTable.columnNames()
-          : Object.keys(normalized[0] ?? {});
-        const rowCount = typeof normalizedTable.numRows === 'function'
-          ? normalizedTable.numRows()
-          : normalized.length;
+        const columns = normalizedTable.columnNames();
+        const rowCount = normalizedTable.numRows();
         tables.set(name, normalizedTable);
         metadata[name] = { columns, rowCount };
         rawCsv[name] = text;
@@ -112,9 +112,7 @@ export async function loadSampleDatasets(): Promise<SampleLoadResult> {
     throw new SampleDatasetLoadError(failures, successes);
   }
 
-  tables.set('aq', aq);
-
-  return { tables, metadata, rawCsv };
+  return { tables, metadata, rawCsv, arquero: aq };
 }
 
 export function parseUserCsv(csv: string): {

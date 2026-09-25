@@ -216,16 +216,6 @@ export interface ChunkMetadata {
   updatedAt?: number;
 }
 
-/** Tunable parameters for the retrieval phase (top-k, score gate, MMR, hybrid fusion). */
-export interface RetrievalConfig {
-  topK: number;
-  scoreThreshold: number;
-  useMMR: boolean;
-  mmrLambda: number;
-  useHybrid: boolean;
-  hybridAlpha: number;
-}
-
 /** LLM-as-judge relevance verdict for a single retrieved document. */
 export interface GradeResult {
   docId: string;
@@ -265,13 +255,3 @@ export interface Insight {
   confidence: 'high' | 'medium' | 'low';
   implication?: string;
 }
-
-/** Default retrieval configuration: top-k 8, score gate 0.25, hybrid fusion on (alpha 0.5), MMR off. */
-export const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
-  topK: 8,
-  scoreThreshold: 0.25,
-  useMMR: false,
-  mmrLambda: 0.5,
-  useHybrid: true,
-  hybridAlpha: 0.5,
-};

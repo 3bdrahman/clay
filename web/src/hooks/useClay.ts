@@ -12,7 +12,7 @@ import {
   unregisterSandboxTable,
   clearSandboxTables,
 } from '../services/sandboxTables';
-import { useAppStore, type SandboxDataset } from '../store';
+import { useAppStore, type SandboxDataset, type SandboxProcessing } from '../store';
 import {
   listModels,
   listLocalCatalog,
@@ -54,8 +54,6 @@ export function useClay(): {
   const modelsFetchedAt = useAppStore(s => s.modelsFetchedAt);
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const sandboxProcessing = useAppStore(s => s.sandboxProcessing);
   const setModels = useAppStore(s => s.setModels);
   const setModelsLoading = useAppStore(s => s.setModelsLoading);
   const setModelsError = useAppStore(s => s.setModelsError);
@@ -280,11 +278,11 @@ export function useClay(): {
         throw new Error('Services not ready — add an API key first');
       }
 
-      const initial: typeof sandboxProcessing = arr.map(f => ({
+      const initial: SandboxProcessing[] = arr.map(f => ({
         fileName: f.name,
         status: 'processing',
       }));
-      setSandboxProcessing([...sandboxProcessing, ...initial]);
+      setSandboxProcessing([...useAppStore.getState().sandboxProcessing, ...initial]);
 
       for (const file of arr) {
         try {
@@ -361,7 +359,6 @@ export function useClay(): {
       }, 3000);
     },
     [
-      sandboxProcessing,
       setSandboxProcessing,
       updateSandboxProcessingItem,
       addSandboxDataset,
@@ -372,15 +369,12 @@ export function useClay(): {
   const loadSampleData = useCallback(async () => {
     const sample = await loadSampleDatasets();
     sample.tables.forEach((table, name) => {
-      if (name === 'aq') return;
-      registerSandboxTable(name, table as Parameters<typeof registerSandboxTable>[1]);
+      registerSandboxTable(name, table);
     });
     const newDatasets: SandboxDataset[] = [];
     sample.tables.forEach((table, name) => {
-      if (name === 'aq') return;
-      const t = table as { columnNames?: () => string[]; numRows?: () => number };
-      const columns = typeof t.columnNames === 'function' ? t.columnNames() : [];
-      const rowCount = typeof t.numRows === 'function' ? t.numRows() : 0;
+      const columns = table.columnNames();
+      const rowCount = table.numRows();
       const originalCsv = sample.rawCsv[name];
       newDatasets.push({
         name,
@@ -425,10 +419,6 @@ export function useClay(): {
     [sandboxDocuments, removeSandboxDocumentFromStore],
   );
 
-  // BM25 hybrid path is dead today (createVectorStore is called with no
-  // bm25Index). When hybrid is enabled, bm25.remove(chunkId) per
-  // sandboxDocument.chunks[].id belongs inside vectorstore's addEntries
-  // / removeBySource, not here.
   const removeSandboxDataset = useCallback(
     (name: string) => {
       unregisterSandboxTable(name);

@@ -499,6 +499,42 @@ describe('createDataAnalyzer', () => {
     expect(result.fallbackReason).toBe('provider-rejected-tools');
   });
 
+  it('retry prompt lists real dataset names and the actual error (regression: Object.keys on a Map returned [])', async () => {
+    const invoke = mockLLM.invoke as ReturnType<typeof vi.fn>;
+    invoke
+      // Tool loop: no tool calls on the first iteration → fallback to single-shot
+      .mockResolvedValueOnce({
+        content: '{"answer":"x"}',
+        finishReason: 'stop',
+        usage: { totalTokens: 100 },
+      })
+      // Single-shot attempt 0: LLM returns empty code → retry
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ code: '', explanation: '' }),
+        usage: { totalTokens: 150 },
+      })
+      // Single-shot attempt 1: valid code → success
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ code: 'result = 1', explanation: 'done' }),
+        usage: { totalTokens: 200 },
+      });
+
+    const result = await analyzer.analyze('test question');
+
+    expect(result.mode).toBe('single-shot');
+
+    // Attempt 0 system prompt lists the real dataset names (was: always empty — Object.keys(Map) bug)
+    const attempt0System = invoke.mock.calls[1][0].system as string;
+    expect(attempt0System).toContain('employees, projects');
+
+    // Retry prompt carries the actual error and the real dataset names
+    const retrySystem = invoke.mock.calls[2][0].system as string;
+    expect(retrySystem).toContain('employees, projects');
+    const retryPrompt = (invoke.mock.calls[2][0].messages as Array<{ content: string }>)[0].content;
+    expect(retryPrompt).toContain('The previous code failed with: Empty code from LLM');
+    expect(retryPrompt).toContain('Available datasets: employees, projects.');
+  });
+
 it('falls back after 2 consecutive malformed tool calls', async () => {
     (mockLLM.invoke as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({

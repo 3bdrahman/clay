@@ -478,6 +478,10 @@ describe('useClay', () => {
   });
 
   it('pickedModels in local mode uses single chat model for all chat roles (empty trimmed to undefined)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      jsonResponseLike({ data: [{ id: 'catalog-model', created: 1, owned_by: 'ollama' }] }),
+    ) as never;
+
     useAppStore.setState({
       settings: {
         ...baseSettings,

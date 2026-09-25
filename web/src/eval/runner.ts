@@ -97,10 +97,12 @@ async function createServices(settings: Settings): Promise<{
     providerLabel: endpoint.providerLabel,
   });
 
-  const { tables, metadata } = await loadSampleDatasets();
+  const { tables, metadata, arquero } = await loadSampleDatasets();
+  const analyzerDatasets = new Map<string, unknown>(tables);
+  analyzerDatasets.set('aq', arquero);
   const analyzer = createDataAnalyzer({
     llm,
-    datasets: tables,
+    datasets: analyzerDatasets,
     metadata,
     codeGenModel: picked.chat,
     maxToolLoopTokens: settings.maxToolLoopTokens,
