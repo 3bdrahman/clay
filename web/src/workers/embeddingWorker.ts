@@ -45,6 +45,17 @@ async function handleEmbed(msg: EmbedWorkerRequest): Promise<void> {
     const ex = await getExtractor();
     const output = await ex(msg.texts, { pooling: 'mean', normalize: true });
     const dim = output.dims[1] ?? 0;
+    if (dim <= 0) {
+      // A 0-dimension output would silently produce empty vectors for every
+      // text, which the client would cache and the store would index — chunks
+      // that then never match anything. Fail loudly instead.
+      self.postMessage({
+        type: 'error',
+        id: msg.id,
+        message: `model returned ${dim}-dimension embeddings for ${msg.texts.length} text(s)`,
+      } satisfies EmbedWorkerResponse);
+      return;
+    }
     const data = output.data as Float32Array;
     const embeddings: number[][] = [];
     for (let i = 0; i < msg.texts.length; i += 1) {

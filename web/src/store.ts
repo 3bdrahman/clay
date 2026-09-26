@@ -21,7 +21,6 @@ export interface SandboxDocument {
   source: string;
   chunkCount: number;
   loadedAt: number;
-  chunks?: Array<{ id: string; text: string; page?: number }>;
 }
 
 export interface SandboxProcessing {
@@ -80,6 +79,7 @@ const DEFAULT_SETTINGS: Settings = {
   serperApiKey: '',
   temperature: 0,
   maxRetries: 3,
+  maxToolLoopTokens: 100_000,
   vectorstoreInitialK: 8,
   theme: 'system',
   localServerUrl: LOCAL_DEFAULT_BASE_URL,
@@ -386,7 +386,9 @@ export const useAppStore = create<AppState>()(
             messages: c.messages.slice(-50).map(trimMessage),
           })),
         activeConversationId: state.activeConversationId,
-        sandboxDatasets: state.sandboxDatasets,
+        // csv lives in IndexedDB (localStorage cannot hold large CSVs);
+        // sandboxTables rehydrates from there on reload.
+        sandboxDatasets: state.sandboxDatasets.map(d => ({ ...d, csv: undefined })),
         sandboxDocuments: state.sandboxDocuments,
       }),
     }

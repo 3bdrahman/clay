@@ -38,8 +38,8 @@ export function _resetWriteQueue(): void {
 }
 
 const LEGACY_KEY = 'clay-vector-entries-v1';
-const DB_NAME = 'clay-vector-db';
-const DB_VERSION = 1;
+export const VECTOR_DB_NAME = 'clay-vector-db';
+export const VECTOR_DB_VERSION = 2;
 const STORE_NAME = 'entries';
 
 /**
@@ -149,10 +149,20 @@ function readLegacy(embeddingModel: string): VectorEntry[] | null {
 }
 
 function normalize(v: number[]): number[] {
+  if (v.length === 0) {
+    throw new VectorStoreCorruptedError('empty embedding vector');
+  }
   let sum = 0;
-  for (const n of v) sum += n * n;
+  for (const n of v) {
+    if (!Number.isFinite(n)) {
+      throw new VectorStoreCorruptedError('embedding contains non-finite values');
+    }
+    sum += n * n;
+  }
   const norm = Math.sqrt(sum);
-  if (norm === 0) return v.slice();
+  if (norm === 0) {
+    throw new VectorStoreCorruptedError('embedding is the zero vector');
+  }
   return v.map((n) => n / norm);
 }
 
@@ -212,6 +222,24 @@ function classifyIDBError(error: unknown, operation: string): Error {
   return classifyError(error, 'vectorstore', operation);
 }
 
+/**
+ * The shared upgrade for the clay vector DB: creates the vector entries store
+ * AND the sandbox csv store, so whichever connection opens first (both use
+ * VECTOR_DB_VERSION) leaves both stores present regardless of open order.
+ */
+export function clayDBUpgrade(db: IDBDatabase): void {
+  if (!db.objectStoreNames.contains(STORE_NAME)) {
+    const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+    store.createIndex('source', 'metadata.source', { unique: false });
+    store.createIndex('modelId', 'metadata.modelId', { unique: false });
+  }
+  if (!db.objectStoreNames.contains(SANDBOX_STORE_NAME)) {
+    db.createObjectStore(SANDBOX_STORE_NAME, { keyPath: 'name' });
+  }
+}
+
+const SANDBOX_STORE_NAME = 'sandbox';
+
 export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorStoreConfig): VectorStore {
   const cfg = {
     topK: config?.topK ?? DEFAULT_TOP_K,
@@ -241,13 +269,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
 
   async function doLoad(): Promise<void> {
     try {
-      const idb = await openIDB(DB_NAME, DB_VERSION, (raw) => {
-        if (!raw.objectStoreNames.contains(STORE_NAME)) {
-          const store = raw.createObjectStore(STORE_NAME, { keyPath: 'id' });
-          store.createIndex('source', 'metadata.source', { unique: false });
-          store.createIndex('modelId', 'metadata.modelId', { unique: false });
-        }
-      });
+      const idb = await openIDB(VECTOR_DB_NAME, VECTOR_DB_VERSION, clayDBUpgrade);
       db = wrapIDBStore<VectorEntry>(idb, STORE_NAME);
       if (pendingAdds.length > 0) {
         const toFlush = pendingAdds.splice(0, pendingAdds.length);

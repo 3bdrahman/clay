@@ -170,7 +170,18 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       const finalState = await orchestrator.run(controller.signal);
       setStreamingContent('');
       streamingMessageIdRef.current = null;
-      updateAssistant(finalState);
+      if (controller.signal.aborted) {
+        // The orchestrator returned the partial state on abort — keep the
+        // streamed content and clear the streaming cursor; applying
+        // updateAssistant would flag the message as still-streaming.
+        const conv = useAppStore.getState().conversations.find(c => c.messages.some(m => m.id === assistantId));
+        const partial = conv?.messages.find(m => m.id === assistantId);
+        if (partial) {
+          updateMessage(assistantId, (m) => ({ ...m, streaming: false }));
+        }
+      } else {
+        updateAssistant(finalState);
+      }
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       const isAbort = err.name === 'AbortError' || controller.signal.aborted;

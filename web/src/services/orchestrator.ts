@@ -65,8 +65,6 @@ export function createWorkflowOrchestrator(
     startedAt: Date.now(),
   };
   let steps: StepTrace[] = [];
-  let consecutiveProviderFailures = 0;
-  const MAX_CONSECUTIVE_FAILURES = 3;
 
   function beginStep(node: string, label: string): void {
     const step: StepTrace = {
@@ -100,18 +98,6 @@ export function createWorkflowOrchestrator(
     const code = err instanceof RagError ? err.code : RagErrorCode.UNKNOWN_ERROR;
     const retryable = isRetryable(err);
 
-    // Circuit breaker: track consecutive provider failures
-    if (code === RagErrorCode.PROVIDER_UNREACHABLE || code === RagErrorCode.INVALID_API_KEY) {
-      consecutiveProviderFailures++;
-      if (consecutiveProviderFailures >= MAX_CONSECUTIVE_FAILURES) {
-        // Circuit breaker triggered - don't retry
-        throw new Error(`Circuit breaker triggered after ${consecutiveProviderFailures} consecutive provider failures. Check your configuration.`);
-      }
-    } else {
-      // Reset counter on non-provider errors
-      consecutiveProviderFailures = 0;
-    }
-
     state.error = {
       code,
       message,
@@ -120,6 +106,19 @@ export function createWorkflowOrchestrator(
     };
 
     callbacks.onError?.(err);
+    emitSteps();
+  }
+
+  function endAllRunningSteps(detail: string): void {
+    const now = Date.now();
+    for (const step of steps) {
+      if (step.status === 'running') {
+        step.status = 'skipped';
+        step.finishedAt = now;
+        step.durationMs = now - (step.startedAt || now);
+        step.detail = detail;
+      }
+    }
     emitSteps();
   }
 
@@ -258,10 +257,7 @@ export function createWorkflowOrchestrator(
       let useful = false;
       const maxRetries = deps.settings.maxRetries ?? 3;
       while (!useful && state.retryCount < maxRetries) {
-        if (signal?.aborted) {
-          setError(new Error('Aborted'), 'generate');
-          break;
-        }
+        if (signal?.aborted) break;
         await generate(ctx);
         useful = await evaluate(ctx);
         if (!useful && state.retryCount < maxRetries) {
@@ -283,6 +279,9 @@ export function createWorkflowOrchestrator(
       }
 
       if (signal?.aborted) {
+        // User-intentional abort: not a workflow error. Close in-flight steps
+        // and return the partial state so the streamed answer is kept.
+        endAllRunningSteps('aborted');
         beginStep('end', NODE_LABELS.end);
         state.finishedAt = Date.now();
         endStep('end');
@@ -299,6 +298,17 @@ export function createWorkflowOrchestrator(
       return state;
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
+      if (signal?.aborted || (err instanceof RagError && err.code === RagErrorCode.STREAM_INTERRUPTED)) {
+        // In-flight LLM calls reject with StreamInterruptedError when the user
+        // aborts mid-step — same graceful path as the explicit abort check.
+        endAllRunningSteps('aborted');
+        beginStep('end', NODE_LABELS.end);
+        state.finishedAt = Date.now();
+        endStep('end');
+        emitSteps();
+        callbacks.onPartialUpdate?.(state);
+        return state;
+      }
       const stepContext = err instanceof RagError ? (err.step ?? 'run') : 'run';
       setError(err, stepContext);
       state.finishedAt = Date.now();

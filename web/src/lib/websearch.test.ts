@@ -48,6 +48,26 @@ describe('decodeHtmlEntities', () => {
       '<script>alert("x")</script>',
     );
   });
+
+  it('decodes ampersand entities', () => {
+    expect(decodeHtmlEntities('AT\u0026amp;T')).toBe('AT\u0026T');
+  });
+
+  it('decodes angle-bracket entities', () => {
+    expect(decodeHtmlEntities('a \u0026lt; b \u0026gt; c')).toBe('a < b > c');
+  });
+
+  it('decodes quote entities', () => {
+    expect(decodeHtmlEntities('\u0026quot;quoted\u0026quot;')).toBe('"quoted"');
+  });
+
+  it('decodes numeric apostrophe entities', () => {
+    expect(decodeHtmlEntities("&#39;apostrophe&#39;")).toBe("'apostrophe'");
+  });
+
+  it('decodes & last so entity text is not double-decoded', () => {
+    expect(decodeHtmlEntities('&lt;')).toBe('<');
+  });
 });
 
 describe('extractRealUrl', () => {

@@ -11,6 +11,10 @@ import {
   unregisterSandboxTable,
   clearSandboxTables,
   rehydrateSandboxTables,
+  persistSandboxCsv,
+  loadPersistedSandboxCsvs,
+  deletePersistedSandboxCsv,
+  clearPersistedSandboxCsvs,
 } from '../services/sandboxTables';
 import { createClayServiceBundle } from '../services/clayServices';
 import { useAppStore, type SandboxDataset, type SandboxProcessing } from '../store';
@@ -173,7 +177,13 @@ export function useClay(): {
           if (fresh.length > 0) catalog = fresh;
         }
 
-        const { tables, metadata } = rehydrateSandboxTables(sandboxDatasets);
+        const persistedCsvs = await loadPersistedSandboxCsvs();
+        const hydratedDatasets = sandboxDatasets.map(d =>
+          d.csv === undefined && persistedCsvs.has(d.name)
+            ? { ...d, csv: persistedCsvs.get(d.name) }
+            : d,
+        );
+        const { tables, metadata } = rehydrateSandboxTables(hydratedDatasets);
 
         const bundle = createClayServiceBundle({
           settings,
@@ -261,6 +271,7 @@ export function useClay(): {
               csv,
               isSample: false,
             });
+            await persistSandboxCsv(processed.dataset.name, csv);
             updateSandboxProcessingItem(file.name, { status: 'done' });
             continue;
           }
@@ -275,7 +286,6 @@ export function useClay(): {
                 source: processed.document.source,
                 chunkCount: processed.document.chunks.length,
                 loadedAt: Date.now(),
-                chunks: processed.document.chunks,
               });
               continue;
             }
@@ -294,7 +304,6 @@ export function useClay(): {
               source: processed.document.source,
               chunkCount: processed.document.chunks.length,
               loadedAt: Date.now(),
-              chunks: processed.document.chunks,
             });
             updateSandboxProcessingItem(file.name, { status: 'done' });
             continue;
@@ -350,6 +359,7 @@ export function useClay(): {
         ...newDatasets,
       ],
     }));
+    await Promise.all(newDatasets.flatMap(d => (d.csv !== undefined ? [persistSandboxCsv(d.name, d.csv)] : [])));
   }, []);
 
   const clearSandboxData = useCallback(() => {
@@ -361,6 +371,7 @@ export function useClay(): {
     currentDatasets.forEach(d => unregisterSandboxTable(d.name));
     clearSandboxTables();
     clearSandbox();
+    void clearPersistedSandboxCsvs();
   }, [clearSandbox]);
 
   const removeSandboxDocument = useCallback(
@@ -381,6 +392,7 @@ export function useClay(): {
     (name: string) => {
       unregisterSandboxTable(name);
       removeSandboxDatasetFromStore(name);
+      void deletePersistedSandboxCsv(name);
     },
     [removeSandboxDatasetFromStore],
   );

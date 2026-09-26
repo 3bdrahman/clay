@@ -4,7 +4,6 @@ import {
   InvalidApiKeyError,
   RateLimitError,
   StreamInterruptedError,
-  TokenBudgetExceededError,
   GenerationFailedError,
   ModelNotFoundError,
   classifyError,
@@ -178,11 +177,6 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     const content = (message?.content as string) ?? '';
     const finishReason = (choice.finish_reason as string | undefined) ?? (message?.finish_reason as string | undefined);
 
-    // Check for token budget exceeded in response
-    if (content.includes('token') && content.includes('budget') && content.includes('exceed')) {
-      throw new TokenBudgetExceededError(0, 0, new Error(content));
-    }
-
     const toolCalls = message?.tool_calls as Array<Record<string, unknown>> | undefined;
     const parsedToolCalls = toolCalls?.map(c => ({
       id: c.id as string,
@@ -273,6 +267,10 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     let fullContent = '';
     let usage: LLMResponse['usage'] = undefined;
     let model: string | undefined;
+    // A `data:` JSON line can split across network chunks; without carrying
+    // the partial tail forward, the remainder (which no longer carries the
+    // `data: ` prefix) is silently skipped and the token is lost.
+    let sseBuffer = '';
 
     try {
       while (true) {
@@ -289,8 +287,9 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
         const { done, value } = readResult;
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split('\n');
+        sseBuffer = lines.pop() ?? '';
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
@@ -319,12 +318,26 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
               model = parsed.model;
             }
           } catch (e) {
-            // SSE chunks may split JSON across network boundaries; subsequent
-            // parse failures are expected and benign — skipping a partial chunk
-            // is correct, not a bug. DEV-only log so loud providers still surface.
+            // A partial line is never handed to JSON.parse (the buffer keeps
+            // it), so a parse failure here is a genuinely malformed chunk —
+            // skipping is correct. DEV-only log so loud providers still surface.
             if (import.meta.env.DEV) {
               console.warn('[llm] stream(): partial SSE chunk parse skipped:', e);
             }
+          }
+        }
+      }
+      if (sseBuffer.startsWith('data: ') && !sseBuffer.includes('[DONE]')) {
+        try {
+          const parsed = JSON.parse(sseBuffer.slice(6).trim());
+          const token = parsed.choices?.[0]?.delta?.content;
+          if (token) {
+            fullContent += token;
+            onToken(token);
+          }
+        } catch (e) {
+          if (import.meta.env.DEV) {
+            console.warn('[llm] stream(): final SSE line parse skipped:', e);
           }
         }
       }

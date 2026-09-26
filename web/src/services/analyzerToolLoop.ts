@@ -262,15 +262,6 @@ export async function runToolLoop(
 
       // Budget checks
       const elapsedMs = performance.now() - start;
-      if (iterations > MAX_TOOL_ITERATIONS) {
-        throw new AnalysisBudgetExceededError({
-          iterations,
-          elapsedMs,
-          tokensUsed,
-          tripped: 'iterations',
-          limit: MAX_TOOL_ITERATIONS,
-        });
-      }
       if (elapsedMs > MAX_TOOL_LOOP_MS) {
         throw new AnalysisBudgetExceededError({
           iterations,

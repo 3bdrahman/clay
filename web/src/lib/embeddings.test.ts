@@ -6,20 +6,25 @@ import { createEmbeddingCache } from './embeddingCache';
 
 function fakeWorkerFactory() {
   const listeners: Array<(ev: MessageEvent) => void> = [];
+  const errorListeners: Array<(ev: ErrorEvent) => void> = [];
   const sent: EmbedWorkerRequest[] = [];
   const worker: EmbeddingWorkerLike = {
     postMessage: (msg) => {
       sent.push(msg);
     },
-    addEventListener: (_type, listener) => {
-      listeners.push(listener);
+    addEventListener: (type, listener) => {
+      if (type === 'error') errorListeners.push(listener as (ev: ErrorEvent) => void);
+      else listeners.push(listener);
     },
-  };
+  } as EmbeddingWorkerLike;
   return {
     worker,
     sent,
     respond: (resp: EmbedWorkerResponse) => {
       for (const listener of listeners) listener({ data: resp } as MessageEvent);
+    },
+    fail: (message: string) => {
+      for (const listener of errorListeners) listener({ message } as ErrorEvent);
     },
   };
 }
@@ -153,5 +158,39 @@ describe('createEmbeddingsClient', () => {
     const workerFactory = vi.fn(() => fake.worker);
     createEmbeddingsClient({ workerFactory });
     expect(workerFactory).toHaveBeenCalledTimes(1);
+  });
+
+  it('a worker error event rejects the pending embed and the next embed spawns a fresh worker', async () => {
+    const firstFake = fakeWorkerFactory();
+    const secondFake = fakeWorkerFactory();
+    let spawnCount = 0;
+    const fakes = [firstFake, secondFake];
+    const client = createEmbeddingsClient({ workerFactory: () => fakes[spawnCount++]!.worker });
+
+    const promise = client.embed('doomed text');
+    firstFake.fail('worker module failed to load');
+    await expect(promise).rejects.toThrow('worker module failed to load');
+
+    const retry = client.embed('retry text');
+    secondFake.respond({ type: 'result', id: secondFake.sent[0].id, embeddings: [[3]] });
+    await expect(retry).resolves.toEqual([[3]]);
+  });
+
+  it('rejects when the worker returns an empty vector for a text', async () => {
+    const fake = fakeWorkerFactory();
+    const client = createEmbeddingsClient({ workerFactory: () => fake.worker });
+
+    const promise = client.embed(['a', 'b']);
+    fake.respond({ type: 'result', id: fake.sent[0].id, embeddings: [[1], []] });
+    await expect(promise).rejects.toThrow(/invalid vector/);
+  });
+
+  it('rejects when the worker returns non-finite vector values', async () => {
+    const fake = fakeWorkerFactory();
+    const client = createEmbeddingsClient({ workerFactory: () => fake.worker });
+
+    const promise = client.embed('x');
+    fake.respond({ type: 'result', id: fake.sent[0].id, embeddings: [[Number.NaN]] });
+    await expect(promise).rejects.toThrow(/invalid vector/);
   });
 });

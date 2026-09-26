@@ -390,4 +390,37 @@ describe('createLLMClient', () => {
     const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
     await expect(client.invoke({ messages: [{ role: 'user', content: 'hi' }] }, controller.signal)).rejects.toThrow();
   });
+
+  it('does not discard a response for containing budget-related words', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'The token budget for exceeding limits is 100k.' } }],
+      }),
+    });
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '' });
+    const resp = await client.invoke({ messages: [{ role: 'user', content: 'q' }] });
+    expect(resp.content).toBe('The token budget for exceeding limits is 100k.');
+  });
+
+  it('does not drop a data line split across chunk boundaries', async () => {
+    const line = 'data: {"choices":[{"delta":{"content":"SPLIT_TOKEN"}}]}\n';
+    const splitAt = 30;
+    const mockStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(line.slice(0, splitAt)));
+        controller.enqueue(new TextEncoder().encode(line.slice(splitAt)));
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    mockFetch.mockResolvedValue({ ok: true, body: mockStream });
+
+    const tokens: string[] = [];
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '' });
+    await client.stream({ messages: [{ role: 'user', content: 'hi' }] }, (t: string) => tokens.push(t));
+
+    expect(tokens.join('')).toContain('SPLIT_TOKEN');
+  });
 });

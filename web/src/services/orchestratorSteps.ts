@@ -124,8 +124,10 @@ export async function gradeDocRelevance(
         {
           role: 'user',
           content: DOC_GRADER_PROMPT
-            .replace('{document}', doc.content.slice(0, 1500))
-            .replace('{question}', ctx.question),
+            // Function replacement: a document containing `$&`/`` $` ``/`$'`
+            // must not be interpreted as a replacement pattern.
+            .replace('{document}', () => doc.content.slice(0, 1500))
+            .replace('{question}', () => ctx.question),
         },
       ],
       jsonMode: true,
@@ -399,7 +401,7 @@ export async function generate(ctx: OrchestratorStepContext): Promise<void> {
   }
 
   const context = sections.join('\n\n============\n\n');
-  const prompt = RAG_PROMPT.replace('{context}', context).replace('{question}', ctx.question);
+  const prompt = RAG_PROMPT.replace('{context}', () => context).replace('{question}', () => ctx.question);
 
   try {
     const resp = await ctx.withRetry('llm-stream', () =>
@@ -440,7 +442,9 @@ export async function evaluate(ctx: OrchestratorStepContext): Promise<boolean> {
         messages: [
           {
             role: 'user',
-            content: HALLUCINATION_PROMPT.replace('{documents}', context).replace('{generation}', ctx.state.answer || ''),
+            content: HALLUCINATION_PROMPT
+              .replace('{documents}', () => context)
+              .replace('{generation}', () => ctx.state.answer || ''),
           },
         ],
         jsonMode: true,
@@ -461,7 +465,9 @@ export async function evaluate(ctx: OrchestratorStepContext): Promise<boolean> {
         messages: [
           {
             role: 'user',
-            content: ANSWER_PROMPT.replace('{question}', ctx.question).replace('{generation}', ctx.state.answer || ''),
+            content: ANSWER_PROMPT
+              .replace('{question}', () => ctx.question)
+              .replace('{generation}', () => ctx.state.answer || ''),
           },
         ],
         jsonMode: true,

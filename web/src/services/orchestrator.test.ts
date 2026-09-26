@@ -1917,6 +1917,53 @@ describe('createWorkflowOrchestrator — router confidence + multi-source fallba
     expect(webSearchStep?.status).toBe('error');
   });
 
+  it('a document containing replacement patterns does not corrupt the generated prompt', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ datasource: 'vectorstore' }) })
+      .mockResolvedValueOnce({ content: 'Hypothetical passage.' })
+      .mockResolvedValue({ content: JSON.stringify({ binary_score: 'yes' }) });
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', content: "cost is $& then $` then $'", source: 'test.pdf', score: 0.9 },
+    ]);
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+
+    await orchestrator.run();
+
+    const streamCall = (mockLLM.stream as ReturnType<typeof vi.fn>).mock.calls[0];
+    const streamReq = streamCall?.[0] as { messages?: Array<{ content?: string }> } | undefined;
+    const prompt = streamReq?.messages?.[0]?.content ?? '';
+    expect(prompt).toContain("$& then $` then $'");
+    expect(prompt).not.toContain('cost is {context}');
+  });
+
+  it('an abort during generation returns the partial state without a workflow error', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ datasource: 'vectorstore' }) })
+      .mockResolvedValueOnce({ content: 'Hypothetical passage.' })
+      .mockResolvedValue({ content: JSON.stringify({ binary_score: 'yes' }) });
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+
+    const controller = new AbortController();
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_req: unknown, onToken: (t: string) => void) => {
+        onToken('partial ');
+        controller.abort();
+        return { content: 'partial answer', usage: undefined, model: 'm' };
+      },
+    );
+
+    const state = await orchestrator.run(controller.signal);
+
+    expect(state.error).toBeUndefined();
+    expect(state.answer).toBe('partial answer');
+  });
+
   it('a fallback-source failure after eval retry stops retrying and keeps the last answer', async () => {
     // Once queue in exact consumption order:
     // call 1 route, call 2 HyDE, call 3 doc grade, call 4 hallucination, call 5 rewrite

@@ -173,6 +173,14 @@ describe('createVectorStore', () => {
     expect(vectorstore.getSourceHashes('b.txt')).toEqual(new Set(['hash-b']));
   });
 
+  it('rejects an empty embedding instead of storing a never-matching vector', async () => {
+    await vectorstore.load();
+    expect(() => vectorstore.addEntries([
+      { id: '1', text: 'poison', source: 'a.txt', embedding: [] },
+    ])).toThrow(/empty embedding/);
+    expect(vectorstore.stats.entries).toBe(0);
+  });
+
   it('similaritySearch returns empty when no entries', async () => {
     await vectorstore.load();
     const results = await vectorstore.similaritySearch('query', 4);

@@ -28,6 +28,7 @@ export type EmbedWorkerResponse =
 export type EmbeddingWorkerLike = {
   postMessage(msg: EmbedWorkerRequest): void;
   addEventListener(type: 'message', listener: (ev: MessageEvent<EmbedWorkerResponse>) => void): void;
+  addEventListener(type: 'error', listener: (ev: ErrorEvent) => void): void;
 };
 
 function defaultWorkerFactory(): Worker {
@@ -37,18 +38,18 @@ function defaultWorkerFactory(): Worker {
 /**
  * Create the local embeddings client. Accepts an injectable worker factory
  * and cache for tests; production uses the bundled worker and a fresh LRU.
+ * A worker 'error' event (script failed to load) rejects pending embeds and
+ * spawns a fresh worker so the next embed can retry instead of hanging.
  */
 export function createEmbeddingsClient(options?: {
   workerFactory?: () => EmbeddingWorkerLike;
   cache?: EmbeddingCache;
 }): EmbeddingsClient {
-  const worker: EmbeddingWorkerLike = options?.workerFactory
-    ? options.workerFactory()
-    : defaultWorkerFactory();
   const cache = options?.cache ?? createEmbeddingCache();
 
   let nextId = 1;
   const pending = new Map<number, { resolve: (v: number[][]) => void; reject: (e: Error) => void }>();
+  let worker: EmbeddingWorkerLike;
 
   function isEmbedResponse(v: unknown): v is EmbedWorkerResponse {
     if (typeof v !== 'object' || v === null) return false;
@@ -58,24 +59,38 @@ export function createEmbeddingsClient(options?: {
     return false;
   }
 
-  worker.addEventListener('message', (ev: MessageEvent) => {
-    const data: unknown = ev.data;
-    if (!isEmbedResponse(data)) return;
-    const msg = data;
-    if (msg.type === 'result') {
+  function spawn(): EmbeddingWorkerLike {
+    const w: EmbeddingWorkerLike = options?.workerFactory
+      ? options.workerFactory()
+      : defaultWorkerFactory();
+
+    w.addEventListener('message', (ev: MessageEvent) => {
+      const data: unknown = ev.data;
+      if (!isEmbedResponse(data)) return;
+      const msg = data;
       const entry = pending.get(msg.id);
-      if (entry) {
-        pending.delete(msg.id);
+      if (!entry) return;
+      pending.delete(msg.id);
+      if (msg.type === 'result') {
         entry.resolve(msg.embeddings);
-      }
-    } else if (msg.type === 'error') {
-      const entry = pending.get(msg.id);
-      if (entry) {
-        pending.delete(msg.id);
+      } else {
         entry.reject(new Error(msg.message));
       }
-    }
-  });
+    });
+
+    // The worker 'error' event fires when the script fails to load — no
+    // message is posted, so without this listener every pending embed hangs.
+    w.addEventListener('error', (ev: ErrorEvent) => {
+      const message = ev.message || 'embedding worker failed';
+      for (const entry of pending.values()) entry.reject(new Error(message));
+      pending.clear();
+      worker = spawn();
+    });
+
+    return w;
+  }
+
+  worker = spawn();
 
   async function embed(input: string | string[]): Promise<number[][]> {
     const inputs = Array.isArray(input) ? input : [input];
@@ -102,7 +117,10 @@ export function createEmbeddingsClient(options?: {
         worker.postMessage({ type: 'embed', id, texts: toEmbed });
       });
       for (let j = 0; j < toEmbed.length; j += 1) {
-        const vec = vectors[j] ?? [];
+        const vec = vectors[j];
+        if (!Array.isArray(vec) || vec.length === 0 || !vec.every((n) => Number.isFinite(n))) {
+          throw new Error(`embedding worker returned an invalid vector for text ${j}`);
+        }
         cache.set(EMBEDDING_MODEL_ID, hashText(toEmbed[j]), vec);
         results[toEmbedIdx[j]] = vec;
       }

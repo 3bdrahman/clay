@@ -32,21 +32,20 @@ export interface WebSearchClient {
   search(query: string, k?: number): Promise<WebResult[]>;
 }
 
-// Order matters: named entities (other than &) must be decoded first so
-// that a literal '&' produced by decoding one entity is not double-decoded
-// when & runs last.
+// Order matters: the ampersand entity is decoded LAST so entity text
+// produced by an earlier decode is never double-decoded.
 /**
  * Decode common HTML entities to plain text.
- * Order matters: named entities (other than &) must be decoded first.
+ * Order matters: the ampersand entity must be decoded last.
  */
 export function decodeHtmlEntities(s: string): string {
   return s
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&/g, '&');
+    .replace(/\u0026lt;/g, '<')
+    .replace(/\u0026gt;/g, '>')
+    .replace(/\u0026quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\u0026apos;/g, "'")
+    .replace(/\u0026amp;/g, '&');
 }
 
 /**
