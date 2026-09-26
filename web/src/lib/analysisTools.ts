@@ -25,6 +25,12 @@ function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
+function coerceNumber(v: unknown): number | undefined {
+  if (isFiniteNumber(v)) return v;
+  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
+  return undefined;
+}
+
 export function rowsOf(table: unknown): Array<Record<string, unknown>> {
   const t = table as { objects?: () => unknown[] } | undefined;
   if (t && typeof t.objects === 'function') {
@@ -192,6 +198,7 @@ export function profileColumnTool(
       count,
       missing,
       unique,
+      ...(numericValues.length < count ? { nonNumeric: count - numericValues.length } : {}),
       min: numericValues[0]!,
       max: numericValues[n - 1]!,
       mean,
@@ -247,9 +254,11 @@ export function aggregateTool(
         case 'count':
           computed = vals.length;
           break;
-        case 'sum':
-          computed = vals.reduce((a, b) => (isFiniteNumber(a) ? a : 0) + (isFiniteNumber(b) ? b : 0), 0);
+        case 'sum': {
+          const nums = vals.filter(isFiniteNumber);
+          computed = nums.reduce((a, b) => a + b, 0);
           break;
+        }
         case 'mean': {
           const nums = vals.filter(isFiniteNumber);
           computed = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
@@ -286,14 +295,27 @@ export function filterSampleTool(
     filtered = rows.filter(row => {
       const cell = row[column];
       switch (op) {
-        case 'eq':
-          return cell === value;
+        case 'eq': {
+          if (cell === value) return true;
+          // The LLM passes JSON values: a numeric-looking string never
+          // strict-matches a numeric cell, which reads as "no rows match".
+          // Coerce both sides when both are numeric-looking.
+          const a = coerceNumber(cell);
+          const b = coerceNumber(value);
+          return a !== undefined && b !== undefined && a === b;
+        }
         case 'contains':
           return String(cell ?? '').includes(String(value));
-        case 'gt':
-          return isFiniteNumber(cell) && isFiniteNumber(value) && cell > value;
-        case 'lt':
-          return isFiniteNumber(cell) && isFiniteNumber(value) && cell < value;
+        case 'gt': {
+          const a = coerceNumber(cell);
+          const b = coerceNumber(value);
+          return a !== undefined && b !== undefined && a > b;
+        }
+        case 'lt': {
+          const a = coerceNumber(cell);
+          const b = coerceNumber(value);
+          return a !== undefined && b !== undefined && a < b;
+        }
         default:
           return false;
       }

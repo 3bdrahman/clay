@@ -231,6 +231,9 @@ export function createWorkflowOrchestrator(
         source = 'vectorstore';
       }
       state.routing = source;
+      // Eval measures the FIRST routing decision; routing is mutated by the
+      // retry loop when it re-routes, so the initial value is kept separate.
+      state.initialRouting = source;
 
       const isLowConfidence = confidence < ROUTER_CONFIDENCE_THRESHOLD;
       const routeDetail = isLowConfidence

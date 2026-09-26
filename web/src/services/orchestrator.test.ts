@@ -1964,6 +1964,32 @@ describe('createWorkflowOrchestrator — router confidence + multi-source fallba
     expect(state.answer).toBe('partial answer');
   });
 
+  it('initialRouting keeps the first routing even after a retry re-routes', async () => {
+    // Once queue in consumption order: route, HyDE, grade, hallucination('no'), rewrite
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ datasource: 'vectorstore', confidence: 0.9 }) })
+      .mockResolvedValueOnce({ content: 'Hypothetical passage.' })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'no' }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ question: 'rewritten' }) });
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    (mockWebSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { type: 'web_search' as const, title: 'result', content: 'content', url: 'https://example.com' },
+    ]);
+
+    const state = await orchestrator.run();
+
+    expect(state.initialRouting).toBe('vectorstore');
+    expect(state.routing).toBe('websearch');
+  });
+
   it('a fallback-source failure after eval retry stops retrying and keeps the last answer', async () => {
     // Once queue in exact consumption order:
     // call 1 route, call 2 HyDE, call 3 doc grade, call 4 hallucination, call 5 rewrite

@@ -150,7 +150,7 @@ The site deploys to **GitHub Pages** via [`.github/workflows/deploy-github-pages
 
 ## Data flow
 
-When you drop a CSV, it's parsed by Arquero into a real `ColumnTable` and registered as a variable the LLM-generated code can query. When you drop a PDF/MD/TXT/JSON, it's chunked (~800 chars / ~200 overlap) and embedded locally — `all-MiniLM-L6-v2` runs in a Web Worker via transformers.js, downloads from the HuggingFace CDN on first use, and is cached by the browser afterwards — then added to the vector store (IndexedDB-persisted).
+When you drop a CSV, it's parsed into a real `ColumnTable` through a shared normalized parse path (currency amounts, percentages, and numeric strings become real numbers, empty cells become nulls) and registered as a variable the LLM-generated analysis tools can query. When you drop a PDF/MD/TXT/JSON, it's chunked at ~512 tokens with sentence-boundary alignment and ~64 tokens of overlap, then embedded locally — `all-MiniLM-L6-v2` runs in a Web Worker via transformers.js, downloads from the HuggingFace CDN on first use, and is cached by the browser afterwards — then added to the vector store (IndexedDB-persisted, alongside the sandbox's raw CSVs).
 
 The sandbox is your workspace — there's no preloaded scenario. The next question routes against whatever you've loaded. Your data stays in your browser; only the question and relevant context are sent to your LLM provider.
 
@@ -190,6 +190,18 @@ OLLAMA_ORIGINS="*" ollama serve
 - **Embeddings — local, nothing to pick.** Document chunks and queries are embedded in your browser by `all-MiniLM-L6-v2` (transformers.js, in a Web Worker). There is no embedding model selection and no embedding API call — document text never leaves the machine.
 - **Analysis — agentic tools.** For data questions, the model calls analysis tools (list_datasets, profile_column with full statistics, aggregate, filter_sample, correlate, run_code) to inspect the real data before answering. It returns structured insights (finding, evidence, confidence, implication) plus a deliberately-chosen chart; every tool call is a live sub-step in the workflow view. Models without tool support fall back to the previous single-shot analysis, clearly labeled.
 - Catalog cache TTL is 1 hour. Click **Refresh** in Settings to refetch.
+
+---
+
+## Privacy & safety notes
+
+What to know before sharing this app or loading sensitive data into it:
+
+- **API keys live in browser `localStorage`.** They are sent only to the configured provider's endpoint (as `Authorization`/`X-API-KEY` headers) and nowhere else, but any successful XSS could read them. Clear them in Settings when done.
+- **The embedding model downloads from the HuggingFace CDN** (~23MB, q8-quantized) on first use and is cached by the browser afterwards. Document text never leaves the machine, but the model weights themselves are supplied by that CDN.
+- **LLM-generated code runs in the page context.** The sandbox passes only Arquero tables and namespaces to the generated code, and a static scan rejects known escape vectors (`fetch`, `localStorage`, `eval`, `Function`, constructor chains, dynamic `import`, `require`, URL-based `fromCSV`) before execution — but `new Function` cannot remove the page's global scope, so a determined prompt injection can still construct references dynamically. Treat uploaded documents and web results as untrusted input.
+- **DuckDuckGo web search does not work from browser deployments in production** (it sends no CORS headers). Use a Serper API key in Settings, or set `VITE_WEBSEARCH_BASE_URL` to an edge proxy at build time. In dev, the Vite server proxies it automatically.
+- **Everything else stays local**: your data, its embeddings, and the sandbox's raw CSVs (IndexedDB) never leave your browser; only chat queries and retrieved context go to your configured LLM provider.
 
 ---
 

@@ -95,6 +95,7 @@ export interface VectorStore {
   removeBySource(source: string): number;
   clear(): void;
   getSourceHashes(source: string): Set<string>;
+  listSources(): Array<{ source: string; entryCount: number }>;
   readonly stats: { entries: number };
   readonly persistenceAvailable: boolean;
 }
@@ -467,6 +468,16 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     return hashes;
   }
 
+  function listSources(): Array<{ source: string; entryCount: number }> {
+    const counts = new Map<string, number>();
+    for (const entry of memory.values()) {
+      counts.set(entry.metadata.source, (counts.get(entry.metadata.source) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([source, entryCount]) => ({ source, entryCount }))
+      .sort((a, b) => a.source.localeCompare(b.source));
+  }
+
   return {
     load,
     similaritySearch,
@@ -474,6 +485,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     removeBySource,
     clear,
     getSourceHashes,
+    listSources,
     get stats() {
       return { entries: memory.size };
     },

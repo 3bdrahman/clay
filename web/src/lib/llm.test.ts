@@ -423,4 +423,51 @@ describe('createLLMClient', () => {
 
     expect(tokens.join('')).toContain('SPLIT_TOKEN');
   });
+
+  it('retries a jsonMode request without response_format when the server rejects it with 400', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: async () => 'response_format not supported',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '{"ok": true}' } }] }),
+      });
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '' });
+    const resp = await client.invoke({ messages: [{ role: 'user', content: 'q' }], jsonMode: true });
+
+    expect(resp.content).toBe('{"ok": true}');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const secondBody = JSON.parse((mockFetch.mock.calls[1][1] as { body: string }).body);
+    expect(secondBody.response_format).toBeUndefined();
+  });
+
+  it('remembers a jsonMode rejection and skips response_format on subsequent calls', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: async () => 'response_format not supported',
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
+      });
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '' });
+    await client.invoke({ messages: [{ role: 'user', content: 'q1' }], jsonMode: true });
+    await client.invoke({ messages: [{ role: 'user', content: 'q2' }], jsonMode: true });
+
+    // First invoke: 400 + retry without jsonMode; second invoke: jsonMode skipped
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    const retryBody = JSON.parse((mockFetch.mock.calls[1][1] as { body: string }).body);
+    expect(retryBody.response_format).toBeUndefined();
+    const secondBody = JSON.parse((mockFetch.mock.calls[2][1] as { body: string }).body);
+    expect(secondBody.response_format).toBeUndefined();
+  });
 });

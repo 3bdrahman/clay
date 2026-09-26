@@ -484,7 +484,13 @@ export async function evaluate(ctx: OrchestratorStepContext): Promise<boolean> {
     if (import.meta.env.DEV) {
       console.warn('[orchestrator] evaluate failed (treating as useful to avoid infinite retry):', e);
     }
-    ctx.endStep('evaluate', { detail: 'eval-error', meta: { tokensUsed: totalTokensUsed } });
+    // The quality gate silently disabled on eval failure — surface both the
+    // status and the reason in the trace so a degraded answer is visible.
+    ctx.endStep('evaluate', {
+      status: 'error',
+      detail: `eval-error: ${getUserMessage(e)}`,
+      meta: { tokensUsed: totalTokensUsed },
+    });
     return true;
   }
 }

@@ -77,7 +77,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     throw new GenerationFailedError(providerLabel, new Error(`${status} ${resp.statusText}: ${text}`));
   }
 
-  async function callOpenAICompatible(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
+  async function sendChatRequest(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
     const messages: Array<Record<string, unknown>> = [];
     if (req.system) messages.push({ role: 'system', content: req.system });
     for (const m of req.messages) {
@@ -108,7 +108,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
       temperature: req.temperature ?? defaultTemperature,
     };
     if (req.maxTokens) body.max_tokens = req.maxTokens;
-    if (req.jsonMode) body.response_format = { type: 'json_object' };
+    if (req.jsonMode && jsonModeSupported) body.response_format = { type: 'json_object' };
     if (req.tools) body.tools = req.tools;
     if (req.toolChoice) body.tool_choice = req.toolChoice;
 
@@ -200,6 +200,25 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
       toolCalls: parsedToolCalls,
       finishReason,
     };
+  }
+
+  let jsonModeSupported = true;
+
+  async function callOpenAICompatible(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
+    try {
+      return await sendChatRequest(req, signal);
+    } catch (e) {
+      // Local servers that reject the response_format param fail every
+      // jsonMode call with a 400. Retry once without it and remember the
+      // capability so subsequent calls skip the param.
+      const isBadRequest = e instanceof GenerationFailedError &&
+        e.cause instanceof Error && e.cause.message.startsWith('400');
+      if (req.jsonMode && jsonModeSupported && isBadRequest) {
+        jsonModeSupported = false;
+        return sendChatRequest({ ...req, jsonMode: undefined }, signal);
+      }
+      throw e;
+    }
   }
 
   async function streamOpenAICompatible(

@@ -119,6 +119,7 @@ export interface StepTrace {
 export interface WorkflowState {
   question: string;
   routing?: SourceType;
+  initialRouting?: SourceType;
   documents: Document[];
   webResults: WebResult[];
   dataAnalysis?: DataAnalysisResult;

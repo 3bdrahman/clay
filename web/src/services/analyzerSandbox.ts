@@ -17,16 +17,19 @@ import { CodeExecutionError } from '../lib/errors';
  * ── Mitigations (current) ─────────────────────────────────────────────────
  *  - Strict mode (`"use strict"`) forbids accidental globals / `with` /
  *    undeclared assignments.
- *  - Limited scope. The only external references reachable from the
- *    generated code are:
+ *  - Limited scope. The only external references PASSED to the generated
+ *    code are:
  *        • the `aq` Arquero namespace (isolated per execution — see below)
  *        • `op` Arquero operators object (fresh clone — see below)
  *        • one parameter per loaded dataset table (Arquero `ColumnTable`)
  *        • the `result` slot reserved for the return value
- *    No `window`, `globalThis`, `document`, `fetch`, `eval`, `import`,
- *    `require`, `process`, or any DOM/network primitive is passed in. The
- *    generated code can still *reach* the global scope via property chains
- *    such as `(() => {}).constructor.constructor("...")()` — that is the
+ *    RESIDUAL RISK: `new Function`'s scope chain terminates at the page's
+ *    global scope, so bare references (`fetch(...)`, `localStorage`,
+ *    `document`, `eval`, `Function`, `import`) RESOLVE to page globals even
+ *    though none are passed in — strict mode removes only accidental
+ *    globals, not global reach. The static scan below rejects the known
+ *    vectors before execution; a determined injection can still construct
+ *    references dynamically (String.fromCharCode etc.), which is the
  *    inherent risk of `new Function` and the reason the document-ingestion
  *    path lives in the same browser tab rather than a worker.
  *
@@ -46,11 +49,14 @@ import { CodeExecutionError } from '../lib/errors';
  *    React refresh in dev. A proper sandbox (`quickjs-emscripten`,
  *    `proxy-tree-walker`) is the long-term fix and is incompatible with the
  *    current "no backend, no wasm" deploy profile.
- *  - Static code validation. We could AST-scan generated code for forbidden
- *    references before execution, but a determined prompt-injection can
- *    construct the same refs dynamically (`[][`constructor`]` etc.). The
- *    retry loop already rejects `SyntaxError` and timeouts; runtime failures
- *    return an error result to the UI instead of crashing the chat.
+ *  - Full AST-level validation. A regex scan (applied — see
+ *    `FORBIDDEN_CODE_PATTERNS`) rejects the known escape vectors before
+ *    execution; an AST scan or a real sandbox (`quickjs-emscripten`,
+ *    `proxy-tree-walker`) would narrow the remaining dynamic-construction
+ *    evasion. The scan feeds its rejection back to the model as a retryable
+ *    error result, bounded by the existing loop budgets; a false positive
+ *    (a dataset column named exactly `window` or `constructor`) degrades to
+ *    retries + salvage synthesis, visibly.
  *
  * ── Hardening applied here ────────────────────────────────────────────────
  * `op` is passed as a fresh shallow clone so generated code cannot mutate
@@ -63,8 +69,46 @@ import { CodeExecutionError } from '../lib/errors';
  *
  * @throws CodeExecutionError for syntax errors, runtime errors, timeouts
  */
+/**
+ * Static scan of the generated source for the known escape vectors. `new
+ * Function`'s scope chain terminates at the page's global scope, so bare
+ * references (`fetch(...)`, `localStorage`) resolve to page globals — the
+ * scan rejects them before execution. A determined injection can construct
+ * references dynamically (String.fromCharCode etc.) and evade the scan; the
+ * retry loop feeds the rejection back to the model for self-correction, and
+ * both paths are bounded by the existing budgets.
+ */
+const FORBIDDEN_CODE_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
+  { pattern: /\.constructor/, label: 'constructor access' },
+  { pattern: /__proto__/, label: 'prototype access' },
+  { pattern: /\bglobalThis\b/, label: 'globalThis' },
+  { pattern: /\bFunction\b/, label: 'Function' },
+  { pattern: /\beval\s*\(/, label: 'eval' },
+  { pattern: /\bimport\s*\(/, label: 'dynamic import' },
+  { pattern: /\brequire\s*\(/, label: 'require' },
+  { pattern: /\bprocess\./, label: 'process' },
+  { pattern: /\bwindow\b/, label: 'window' },
+  { pattern: /\bdocument\b/, label: 'document' },
+  { pattern: /\blocalStorage\b/, label: 'localStorage' },
+  { pattern: /\bfetch\s*\(/, label: 'fetch' },
+  { pattern: /fromCSV\s*\(\s*['"`]https?:/, label: 'network fromCSV' },
+];
+
+function assertCodeSafe(code: string): void {
+  for (const { pattern, label } of FORBIDDEN_CODE_PATTERNS) {
+    if (pattern.test(code)) {
+      throw new CodeExecutionError(
+        `generated code references forbidden globals (${label})`,
+        new Error(`forbidden: ${label}`),
+        { code, retryable: true },
+      );
+    }
+  }
+}
+
 export function createUserCodeExecutor(datasets: Map<string, unknown>): (code: string) => unknown {
   function executeUserCode(code: string): unknown {
+    assertCodeSafe(code);
     const aq = datasets.get('aq') as { op?: Record<string, unknown>; from?: unknown; fromCSV?: unknown } | undefined;
     const datasetsObj: Record<string, unknown> = {};
     for (const [name, table] of datasets) {

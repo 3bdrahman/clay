@@ -221,7 +221,9 @@ export async function runEval(
     columns: meta.columns,
     rowCount: meta.rowCount,
   }));
-  const documents: DocumentSummary[] = []; // Would be populated from vectorstore in real use
+  const documents: DocumentSummary[] = services.vectorstore.listSources().map(s => ({
+    fileName: s.source,
+  }));
 
   const evalQuestions = await getEvalQuestions(settings, questions, datasets, documents);
   const results: EvalResult[] = [];
@@ -253,7 +255,7 @@ export async function runEval(
 
       const workflow = await orchestrator.run();
       answer = workflow.answer || '';
-      actualSource = workflow.routing;
+      actualSource = workflow.initialRouting ?? workflow.routing;
       retrievedChunks = workflow.documents.length;
       relevantChunks = workflow.documents.filter(d => (d.score ?? 0) > 0.3).length;
     } catch (e) {
@@ -300,7 +302,12 @@ export async function runEval(
   const avgRecallAtK = results.reduce((sum, r) => sum + r.recallAtK, 0) / total;
   const avgLatencyMs = results.reduce((sum, r) => sum + r.latencyMs, 0) / total;
   const avgAnswerScore = results.reduce((sum, r) => sum + (r.answerScore ?? 0), 0) / total;
-  const avgJudgeScore = results.reduce((sum, r) => sum + (r.judgeScore ?? 0), 0) / total;
+  // Judge failures score 0 as a per-result artifact; the average excludes
+  // them so a failed judge call doesn't drag the aggregate down.
+  const judged = results.filter(r => r.judgeScore !== undefined);
+  const avgJudgeScore = judged.length > 0
+    ? judged.reduce((sum, r) => sum + (r.judgeScore ?? 0), 0) / judged.length
+    : 0;
 
   const byCategory: Record<string, { total: number; passed: number; routingAccuracy: number }> = {};
   for (const r of results) {
@@ -344,8 +351,10 @@ export function gradeQuestionSet(
     results.reduce((sum, r) => sum + r.latencyMs, 0) / (total || 1);
   const avgAnswerScore =
     results.reduce((sum, r) => sum + (r.answerScore ?? 0), 0) / (total || 1);
-  const avgJudgeScore =
-    results.reduce((sum, r) => sum + (r.judgeScore ?? 0), 0) / (total || 1);
+  const judged = results.filter((r) => r.judgeScore !== undefined);
+  const avgJudgeScore = judged.length > 0
+    ? judged.reduce((sum, r) => sum + (r.judgeScore ?? 0), 0) / judged.length
+    : 0;
 
   const byCategory: Record<
     string,

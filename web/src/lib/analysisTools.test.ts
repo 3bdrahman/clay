@@ -221,6 +221,29 @@ describe('analysisTools - profileColumnTool', () => {
     expect(() => profileColumnTool(ctxEmpty, { dataset: 'data', column: 'any' })).toThrow(AnalysisToolError);
     expect(() => profileColumnTool(ctxEmpty, { dataset: 'data', column: 'any' })).toThrow('is empty');
   });
+
+  it('reports how many values were excluded from numeric stats', () => {
+    const mixed = aq.from([
+      { v: 10 },
+      { v: 20 },
+      { v: 30 },
+      { v: 'N/A' },
+    ]);
+    const mixedCtx: AnalysisToolContext = {
+      datasets: new Map([['aq', aq], ['data', mixed]]),
+      metadata: { data: { columns: ['v'], rowCount: 4 } },
+    };
+    const result = profileColumnTool(mixedCtx, { dataset: 'data', column: 'v' });
+    expect(result.type).toBe('numeric');
+    expect(result.count).toBe(4);
+    expect(result.nonNumeric).toBe(1);
+    expect(result.mean).toBe(20);
+  });
+
+  it('omits nonNumeric when every value is numeric', () => {
+    const result = profileColumnTool(ctx, { dataset: 'data', column: 'value' });
+    expect(result.nonNumeric).toBeUndefined();
+  });
 });
 
 describe('analysisTools - aggregateTool', () => {
@@ -282,6 +305,26 @@ describe('analysisTools - aggregateTool', () => {
     });
     expect(result[0]).toHaveProperty('sum_salary');
   });
+
+  it('sum on a mixed column equals the sum of its numeric values', () => {
+    const mixed = aq.from([
+      { dept: 'Eng', amount: 5 },
+      { dept: 'Eng', amount: 'N/A' },
+      { dept: 'Eng', amount: 7 },
+    ]);
+    const mixedCtx: AnalysisToolContext = {
+      datasets: new Map([['aq', aq], ['mixed', mixed]]),
+      metadata: { mixed: { columns: ['dept', 'amount'], rowCount: 3 } },
+    };
+    const result = aggregateTool(mixedCtx, {
+      dataset: 'mixed',
+      groupBy: 'dept',
+      measures: [{ column: 'amount', fn: 'sum', as: 'total' }, { column: 'amount', fn: 'mean', as: 'avg' }],
+    });
+    const eng = result.find(r => r.dept === 'Eng');
+    expect(eng?.total).toBe(12);
+    expect(eng?.avg).toBe(6);
+  });
 });
 
 describe('analysisTools - filterSampleTool', () => {
@@ -303,6 +346,28 @@ describe('analysisTools - filterSampleTool', () => {
     const result = filterSampleTool(ctx, { dataset: 'students', where: { column: 'name', op: 'eq', value: 'Alice' } });
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('Alice');
+  });
+
+  it('eq coerces a numeric-looking string value against a numeric cell', () => {
+    const result = filterSampleTool(ctx, { dataset: 'students', where: { column: 'id', op: 'eq', value: '3' } });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe('Charlie');
+  });
+
+  it('eq coerces a numeric value against a numeric-looking string cell', () => {
+    const strTable = aq.from([{ label: '7' }, { label: '9' }]);
+    const strCtx: AnalysisToolContext = {
+      datasets: new Map([['aq', aq], ['labels', strTable]]),
+      metadata: { labels: { columns: ['label'], rowCount: 2 } },
+    };
+    const result = filterSampleTool(strCtx, { dataset: 'labels', where: { column: 'label', op: 'eq', value: 9 } });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.label).toBe('9');
+  });
+
+  it('eq does not coerce non-numeric strings', () => {
+    const result = filterSampleTool(ctx, { dataset: 'students', where: { column: 'name', op: 'eq', value: 'alic' } });
+    expect(result).toHaveLength(0);
   });
 
   it('filters with contains operator', () => {

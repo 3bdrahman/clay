@@ -181,6 +181,20 @@ describe('createVectorStore', () => {
     expect(vectorstore.stats.entries).toBe(0);
   });
 
+  it('listSources groups entries by source with counts', async () => {
+    await vectorstore.load();
+    vectorstore.addEntries([
+      { id: '1', text: 'a', source: 'doc2', embedding: new Array(1024).fill(0.1) },
+      { id: '2', text: 'b', source: 'doc1', embedding: new Array(1024).fill(0.2) },
+      { id: '3', text: 'c', source: 'doc1', embedding: new Array(1024).fill(0.3) },
+    ]);
+
+    expect(vectorstore.listSources()).toEqual([
+      { source: 'doc1', entryCount: 2 },
+      { source: 'doc2', entryCount: 1 },
+    ]);
+  });
+
   it('similaritySearch returns empty when no entries', async () => {
     await vectorstore.load();
     const results = await vectorstore.similaritySearch('query', 4);
