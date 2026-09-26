@@ -2,19 +2,14 @@
 // Usage: import in a test file or run via `npm run eval`
 
 import { loadSampleDatasets } from '../services/datasets';
-import { createLLMClient, type LLMClient } from '../lib/llm';
-import { createEmbeddingsClient, type EmbeddingsClient } from '../lib/embeddings';
-import { createWebSearchClient, type WebSearchClient } from '../lib/websearch';
-import { createVectorStore, type VectorStore } from '../lib/vectorstore';
-import { createDataAnalyzer, type DataAnalyzer } from '../services/analyzer';
+import type { LLMClient } from '../lib/llm';
+import type { EmbeddingsClient } from '../lib/embeddings';
+import type { WebSearchClient } from '../lib/websearch';
+import type { VectorStore } from '../lib/vectorstore';
+import { createClayServiceBundle } from '../services/clayServices';
+import type { DataAnalyzer, DatasetMeta } from '../services/analyzer';
 import { createWorkflowOrchestrator } from '../services/orchestrator';
-import {
-  listModels,
-  listLocalCatalog,
-  resolveModels,
-  pickLocalModels,
-  type PickedModels,
-} from '../lib/models';
+import { listModels, listLocalCatalog, type PickedModels } from '../lib/models';
 import { resolveProviderEndpoint } from '../lib/providers';
 import type { Settings } from '../lib/types';
 import type { DatasetSummary, DocumentSummary } from '../lib/exampleQueries';
@@ -67,50 +62,33 @@ async function createServices(settings: Settings): Promise<{
   webSearch: WebSearchClient;
   analyzer: DataAnalyzer;
   pickedModels: PickedModels;
+  datasetMetadata: DatasetMeta;
 }> {
   const endpoint = resolveProviderEndpoint(settings);
-
   const catalog =
     settings.provider === 'local'
       ? await listLocalCatalog(endpoint.baseUrl, '')
       : await listModels(settings.provider, endpoint.apiKey);
-  const picked: PickedModels =
-    settings.provider === 'local'
-      ? pickLocalModels(settings.localModels)
-      : resolveModels(settings, catalog).picked;
 
-  const embeddingKey =
-    settings.provider === 'local' ? '' : (settings.embeddingApiKey || settings.apiKey);
-  const embeddings = createEmbeddingsClient({
-    baseUrl: endpoint.baseUrl,
-    apiKey: embeddingKey,
-    embeddingModel: picked.embedding ?? '',
-    providerLabel: endpoint.providerLabel,
-  });
-  const vectorstore = createVectorStore(embeddings);
-  const webSearch = createWebSearchClient(settings);
-
-  const llm = createLLMClient({
-    baseUrl: endpoint.baseUrl,
-    apiKey: endpoint.apiKey,
-    temperature: settings.temperature,
-    providerLabel: endpoint.providerLabel,
+  const { tables, metadata } = await loadSampleDatasets();
+  const bundle = createClayServiceBundle({
+    settings,
+    catalog,
+    analyzerTables: tables,
+    analyzerMetadata: metadata,
   });
 
-  const { tables, metadata, arquero } = await loadSampleDatasets();
-  const analyzerDatasets = new Map<string, unknown>(tables);
-  analyzerDatasets.set('aq', arquero);
-  const analyzer = createDataAnalyzer({
-    llm,
-    datasets: analyzerDatasets,
-    metadata,
-    codeGenModel: picked.chat,
-    maxToolLoopTokens: settings.maxToolLoopTokens,
-  });
+  await bundle.vectorstore.load();
 
-  await vectorstore.load();
-
-  return { llm, embeddings, vectorstore, webSearch, analyzer, pickedModels: picked };
+  return {
+    llm: bundle.llm,
+    embeddings: bundle.embeddings,
+    vectorstore: bundle.vectorstore,
+    webSearch: bundle.webSearch,
+    analyzer: bundle.analyzer,
+    pickedModels: bundle.pickedModels,
+    datasetMetadata: metadata,
+  };
 }
 
 function gradeRouting(result: EvalResult): boolean {
@@ -234,9 +212,9 @@ export async function runEval(
   onProgress?: (done: number, total: number, current: EvalQuestion) => void,
 ): Promise<EvalSummary> {
   const services = await createServices(settings);
-  
+
   // Get datasets and documents for dynamic question generation
-  const { metadata } = await loadSampleDatasets();
+  const metadata = services.datasetMetadata;
   const datasets: DatasetSummary[] = Object.entries(metadata).map(([name, meta]) => ({
     name,
     fileName: name + '.csv',

@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   RagErrorCode,
   NoProviderError,
-  EmbeddingModelMissingError,
   ModelCatalogEmptyError,
   ModelNotFoundError,
   LocalServerUrlMissingError,
@@ -46,15 +45,6 @@ describe('RagError subclasses', () => {
       const cause = new Error('root cause');
       const err = new NoProviderError('openrouter', cause);
       expect(err.cause).toBe(cause);
-    });
-  });
-
-  describe('EmbeddingModelMissingError', () => {
-    it('creates error with correct code and message', () => {
-      const err = new EmbeddingModelMissingError();
-      expect(err.code).toBe(RagErrorCode.EMBEDDING_MODEL_MISSING);
-      expect(err.message).toContain('embedding model');
-      expect(err.retryable).toBe(false);
     });
   });
 

@@ -9,6 +9,14 @@ import { IDBFactory } from 'fake-indexeddb';
 
 const originalFetch = globalThis.fetch;
 
+vi.mock('../lib/embeddings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/embeddings')>()),
+  createEmbeddingsClient: () => ({ embed: vi.fn(async (input: string | string[]) => {
+    const texts = Array.isArray(input) ? input : [input];
+    return texts.map(() => [0.1, 0.2, 0.3]);
+  }) }),
+}));
+
 type HookValue = ReturnType<typeof useClay>;
 type HookResult = { current: HookValue };
 
@@ -49,7 +57,6 @@ const baseSettings = {
   openrouterApiKey: '',
   groqApiKey: '',
   apiKey: '',
-  embeddingApiKey: '',
   webSearchProvider: 'duckduckgo' as const,
   serperApiKey: '',
   temperature: 0,
@@ -58,13 +65,11 @@ const baseSettings = {
   localServerUrl: 'http://localhost:11434/v1',
   localModels: {
     chat: '',
-    embeddings: '',
   },
   localCatalog: [],
   localCatalogFetchedAt: 0,
   pickedModelsOverride: {
     chatModel: '',
-    embedding: '',
   },
 };
 
@@ -459,7 +464,6 @@ describe('useClay', () => {
         localServerUrl: 'http://localhost:11434/v1',
         localModels: {
           chat: 'llama3:8b',
-          embeddings: '',
         },
       } as never,
     });
@@ -489,7 +493,6 @@ describe('useClay', () => {
         localServerUrl: 'http://localhost:11434/v1',
         localModels: {
           chat: 'm1',
-          embeddings: 'm3',
         },
       } as never,
     });
@@ -498,7 +501,6 @@ describe('useClay', () => {
 
     expect(r.current.pickedModels).toEqual({
       chat: 'm1',
-      embedding: 'm3',
     });
   });
 

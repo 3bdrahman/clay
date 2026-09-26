@@ -27,27 +27,31 @@ export function ExampleQuestions({ onSelect, onLoadSample }: Props) {
 
       {hasData ? (
         <Group
-          category="Data Analysis (Arquero)"
+          category="Data Analysis"
           color="text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400"
           icon="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
           questions={dataQuestions}
           onSelect={onSelect}
         />
       ) : (
-        <Group
-          category="Data Analysis (load a CSV to enable)"
-          color="text-ink-500 bg-ink-100 dark:bg-ink-800 dark:text-ink-400"
-          icon="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-          questions={['Drop a CSV in the data sandbox to see data-specific suggestions here.']}
-          onSelect={onSelect}
-          onLoadSample={onLoadSample}
-          disabled
-        />
+        <div className="rounded-lg border border-ink-200 dark:border-ink-700 bg-ink-50 dark:bg-ink-800/50 px-4 py-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-ink-500 dark:text-ink-400">
+            Load a CSV in the Data panel to get data-specific suggestions here.
+          </p>
+          {onLoadSample && (
+            <button
+              onClick={onLoadSample}
+              className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-medium shrink-0"
+            >
+              + Load sample data
+            </button>
+          )}
+        </div>
       )}
 
       {hasDocs && (
         <Group
-          category="Documents (Vector Store)"
+          category="Documents"
           color="text-brand-600 bg-brand-50 dark:bg-brand-900/30 dark:text-brand-400"
           icon="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
           questions={deriveDocumentQueries(sandboxDocuments)}
@@ -72,51 +76,35 @@ function Group({
   color,
   questions,
   onSelect,
-  onLoadSample,
-  disabled,
 }: {
   category: string;
   icon: string;
   color: string;
   questions: string[];
   onSelect: (q: string) => void;
-  onLoadSample?: () => void;
-  disabled?: boolean;
 }) {
   return (
     <div>
-      <div className="flex items-center justify-between gap-2 mb-2.5">
-        <div className="flex items-center gap-2">
-          <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${color}`} aria-hidden="true">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d={icon} />
-            </svg>
-          </span>
-          <h3 className="text-sm font-semibold text-ink-700 dark:text-ink-200">{category}</h3>
-        </div>
-        {disabled && onLoadSample && (
-          <button
-            onClick={onLoadSample}
-            className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-medium"
-          >
-            + Load sample data
-          </button>
-        )}
+      <div className="flex items-center gap-2 mb-2.5">
+        <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${color}`} aria-hidden="true">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d={icon} />
+          </svg>
+        </span>
+        <h3 className="text-sm font-semibold text-ink-700 dark:text-ink-200">{category}</h3>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="list" aria-label={category}>
+      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 list-none p-0" aria-label={category}>
         {questions.map((q, i) => (
-          <button
-            key={i}
-            onClick={() => onSelect(q)}
-            disabled={disabled}
-            role="listitem"
-            aria-disabled={disabled}
-            className="text-left px-3 py-2.5 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-lg hover:border-brand-400 hover:shadow-sm transition text-xs text-ink-700 dark:text-ink-200 leading-relaxed disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-ink-900"
-          >
-            {q}
-          </button>
+          <li key={i}>
+            <button
+              onClick={() => onSelect(q)}
+              className="w-full text-left px-3 py-2.5 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-lg hover:border-brand-400 hover:shadow-sm transition text-xs text-ink-700 dark:text-ink-200 leading-relaxed focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-ink-900"
+            >
+              {q}
+            </button>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }

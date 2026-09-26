@@ -39,6 +39,11 @@ function cspPlugin() {
         'https://duckduckgo.com',
         'https://*.duckduckgo.com',
         'https://google.serper.dev',
+        // Local embeddings (transformers.js): model weights + ONNX WASM from CDN
+        'https://huggingface.co',
+        'https://*.huggingface.co',
+        'https://*.hf.co',
+        'https://cdn.jsdelivr.net',
       ];
 
       if (deployUrl) {

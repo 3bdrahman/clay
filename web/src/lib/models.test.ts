@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterAll } from 'vitest';
 import {
   modelClass,
-  pickBestEmbedding,
   pickLocalModels,
   listModels,
   listLocalCatalog,
@@ -62,30 +61,6 @@ describe('modelClass', () => {
 
   it('defaults unknown models to medium', () => {
     expect(modelClass('foo/bar')).toBe('medium');
-  });
-});
-
-describe('pickBestEmbedding', () => {
-  it('picks the highest-scoring embedding model', () => {
-    expect(pickBestEmbedding(fakeModels)).toBe('nvidia/nv-embedqa-e5-v5');
-  });
-
-  it('ignores non-embedding models when scoring', () => {
-    expect(pickBestEmbedding([
-      { id: 'meta/llama-3.1-8b-instruct', ownedBy: 'meta', created: 0 },
-      { id: 'snowflake/arctic-embed-l', ownedBy: 'snowflake', created: 0 },
-    ])).toBe('snowflake/arctic-embed-l');
-  });
-
-  it('returns undefined when the catalog has no embeddings', () => {
-    expect(pickBestEmbedding([
-      { id: 'meta/llama-3.1-8b-instruct', ownedBy: 'meta', created: 0 },
-      { id: 'meta/llama-guard-3-8b', ownedBy: 'meta', created: 0 },
-    ])).toBeUndefined();
-  });
-
-  it('returns undefined for an empty catalog', () => {
-    expect(pickBestEmbedding([])).toBeUndefined();
   });
 });
 
@@ -281,25 +256,20 @@ describe('listLocalCatalog', () => {
 });
 
 describe('pickLocalModels', () => {
-  it('returns single chat model and embeddings separate', () => {
+  it('returns the chat pick; embeddings are local and never picked', () => {
     const picks: LocalModelPicks = {
       chat: 'llama3.1:8b',
-      embeddings: 'nomic-embed-text',
     };
     expect(pickLocalModels(picks)).toEqual({
       chat: 'llama3.1:8b',
-      embedding: 'nomic-embed-text',
     });
   });
 
-  it('returns undefined for empty / whitespace chat and embeddings', () => {
+  it('returns undefined for empty / whitespace chat', () => {
     const picks: LocalModelPicks = {
       chat: '   ',
-      embeddings: '',
     };
-    const out = pickLocalModels(picks);
-    expect(out.chat).toBeUndefined();
-    expect(out.embedding).toBeUndefined();
+    expect(pickLocalModels(picks).chat).toBeUndefined();
   });
 });
 
@@ -309,40 +279,37 @@ describe('resolveModels', () => {
     openrouterApiKey: 'k',
     groqApiKey: '',
     apiKey: '',
-    embeddingApiKey: '',
     webSearchProvider: 'duckduckgo',
     serperApiKey: '',
     temperature: 0,
     maxRetries: 3,
     theme: 'system',
     localServerUrl: LOCAL_DEFAULT_BASE_URL,
-    localModels: { chat: '', embeddings: '' },
+    localModels: { chat: '' },
     localCatalog: [],
     localCatalogFetchedAt: 0,
     pickedModelsOverride: {
       chatModel: '',
-      embedding: '',
     },
   };
 
   it('preserves an explicit chat model and leaves chat unset when that choice is cleared', () => {
     const selectedSettings: Settings = {
       ...baseSettings,
-      pickedModelsOverride: { chatModel: 'user/chosen-model', embedding: '' },
+      pickedModelsOverride: { chatModel: 'user/chosen-model' },
     };
     expect(resolveModels(selectedSettings, fakeModels).picked.chat).toBe('user/chosen-model');
 
     const clearedSettings: Settings = {
       ...selectedSettings,
-      pickedModelsOverride: { ...selectedSettings.pickedModelsOverride, chatModel: '' },
+      pickedModelsOverride: { chatModel: '' },
     };
     expect(resolveModels(clearedSettings, fakeModels).picked.chat).toBeUndefined();
   });
 
-  it('keeps the embedding catalog default without automatically choosing a chat model', () => {
+  it('never auto-picks a chat model — the choice stays with the user', () => {
     const out = resolveModels(baseSettings, fakeModels);
     expect(out.picked.chat).toBeUndefined();
-    expect(out.picked.embedding).toBe('nvidia/nv-embedqa-e5-v5');
     expect(out.catalog).toBe(fakeModels);
   });
 
@@ -357,14 +324,12 @@ describe('resolveModels', () => {
         provider: 'local',
         localModels: {
           chat: 'llama3.1:8b',
-          embeddings: 'nomic-embed-text',
         },
         localCatalog,
       },
       fakeModels,
     );
     expect(out.picked.chat).toBe('llama3.1:8b');
-    expect(out.picked.embedding).toBe('nomic-embed-text');
     expect(out.catalog).toBe(localCatalog);
     expect(out.warnings).toEqual([]);
   });
@@ -385,29 +350,11 @@ describe('resolveModels', () => {
           provider: 'local',
           localModels: {
             chat: 'nonexistent-chat-model',
-            embeddings: 'nomic-embed-text',
           },
           localCatalog: [
             { id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 },
             { id: 'nomic-embed-text', ownedBy: 'ollama', created: 0 },
           ],
-        },
-        fakeModels,
-      ),
-    ).toThrow(ModelNotFoundError);
-  });
-
-  it('throws ModelNotFoundError when embeddings model is not in the catalog, separately from chat', () => {
-    expect(() =>
-      resolveModels(
-        {
-          ...baseSettings,
-          provider: 'local',
-          localModels: {
-            chat: 'llama3.1:8b',
-            embeddings: 'nonexistent-embed-model',
-          },
-          localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
         },
         fakeModels,
       ),

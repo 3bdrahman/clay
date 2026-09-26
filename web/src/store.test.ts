@@ -11,17 +11,16 @@ describe('useAppStore.updateSettings', () => {
         openrouterApiKey: '',
         groqApiKey: '',
         apiKey: '',
-        embeddingApiKey: '',
         webSearchProvider: 'duckduckgo',
         serperApiKey: '',
         temperature: 0,
         maxRetries: 3,
         theme: 'system',
         localServerUrl: LOCAL_DEFAULT_BASE_URL,
-        localModels: { chat: '', embeddings: '' },
+        localModels: { chat: '' },
         localCatalog: [],
         localCatalogFetchedAt: 0,
-        pickedModelsOverride: { chatModel: '', embedding: '' },
+        pickedModelsOverride: { chatModel: '' },
       },
     });
   });
@@ -73,10 +72,10 @@ describe('useAppStore.updateSettings', () => {
   });
 });
 
-describe('store persist migrate — LocalModelPicks 5-field → 2-field', () => {
+describe('store persist migrate — LocalModelPicks legacy shape → chat-only', () => {
   const migrate = () => useAppStore.persist.getOptions().migrate;
 
-  it('migrates a persisted 5-field localModels into the 2-field chat+embeddings shape', () => {
+  it('migrates a persisted 5-field localModels into the chat-only shape, dropping embedding picks', () => {
     const persistedOld = {
       settings: {
         provider: 'local',
@@ -91,7 +90,7 @@ describe('store persist migrate — LocalModelPicks 5-field → 2-field', () => 
       },
     };
     const out = migrate()?.(persistedOld, 4) as { settings: { localModels: LocalModelPicks } };
-    expect(out.settings.localModels).toEqual({ chat: 'a', embeddings: 'emb' });
+    expect(out.settings.localModels).toEqual({ chat: 'a' });
   });
 
   it('prefers answer for chat carryover, then routing, then codeGen/eval, then first non-empty', () => {
@@ -117,7 +116,7 @@ describe('store persist migrate — LocalModelPicks 5-field → 2-field', () => 
     expect(onlyEval.settings.localModels.chat).toBe('ev');
   });
 
-  it('leaves a loaded localModels untouched when it already has the 2-field chat shape', () => {
+  it('drops legacy embedding picks even from already-migrated localModels', () => {
     const persisted = {
       settings: {
         provider: 'local',
@@ -125,16 +124,7 @@ describe('store persist migrate — LocalModelPicks 5-field → 2-field', () => 
       },
     };
     const out = migrate()?.(persisted, 5) as { settings: { localModels: LocalModelPicks } };
-    expect(out.settings.localModels).toEqual({ chat: 'llama3.1:8b', embeddings: 'nomic-embed-text' });
-  });
-
-  it('does not discard persisted localModels.embeddings when the old shape lacks chat', () => {
-    const out = migrate()?.(
-      { settings: { localModels: { routing: 'r', codeGen: '', answer: '', eval: '', embedding: 'nomic' } } },
-      4,
-    ) as { settings: { localModels: LocalModelPicks } };
-    expect(out.settings.localModels.embeddings).toBe('nomic');
-    expect(out.settings.localModels.chat).toBe('r');
+    expect(out.settings.localModels).toEqual({ chat: 'llama3.1:8b' });
   });
 
   it('falls back to openrouter when persisted provider is no longer registered', () => {
@@ -171,7 +161,7 @@ describe('persisted chat selection', () => {
       }));
       await useAppStore.persist.rehydrate();
       expect(useAppStore.getState().settings.pickedModelsOverride).toEqual({
-        chatModel: 'chosen-answer', embedding: 'embed',
+        chatModel: 'chosen-answer',
       });
     } finally {
       useAppStore.setState(current);
@@ -185,7 +175,7 @@ describe('persisted chat selection', () => {
     const result = merge?.({
       settings: { pickedModelsOverride: { chatModel: '', answer: 'legacy', embedding: 'embed' } },
     }, useAppStore.getState());
-    expect(result?.settings.pickedModelsOverride).toEqual({ chatModel: '', embedding: 'embed' });
+    expect(result?.settings.pickedModelsOverride).toEqual({ chatModel: '' });
   });
 });
 
@@ -204,5 +194,38 @@ describe('sanitizeProvider', () => {
     expect(sanitizeProvider('openrouter')).toBe('openrouter');
     expect(sanitizeProvider('groq')).toBe('groq');
     expect(sanitizeProvider('local')).toBe('local');
+  });
+});
+
+describe('useAppStore.updateMessage routing', () => {
+  beforeEach(() => {
+    useAppStore.setState({ conversations: [], activeConversationId: null });
+  });
+
+  it('routes the update to the conversation containing the message id, not the active one', () => {
+    const convA = {
+      id: 'conv-a',
+      title: 'A',
+      messages: [{ id: 'msg-1', role: 'assistant' as const, content: '', timestamp: 0 }],
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    const convB = { id: 'conv-b', title: 'B', messages: [], createdAt: 0, updatedAt: 0 };
+    useAppStore.setState({ conversations: [convB, convA], activeConversationId: 'conv-b' });
+
+    useAppStore.getState().updateMessage('msg-1', (m) => ({ ...m, content: 'final answer' }));
+
+    const state = useAppStore.getState();
+    expect(state.conversations.find(c => c.id === 'conv-a')?.messages[0]?.content).toBe('final answer');
+  });
+
+  it('is a no-op when no conversation contains the message id', () => {
+    const convA = { id: 'conv-a', title: 'A', messages: [{ id: 'msg-1', role: 'assistant' as const, content: 'kept', timestamp: 0 }], createdAt: 0, updatedAt: 0 };
+    useAppStore.setState({ conversations: [convA], activeConversationId: 'conv-a' });
+
+    useAppStore.getState().updateMessage('msg-missing', (m) => ({ ...m, content: 'changed' }));
+
+    const state = useAppStore.getState();
+    expect(state.conversations[0]?.messages[0]?.content).toBe('kept');
   });
 });

@@ -160,7 +160,19 @@ if (resp.status === 429) {
       });
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));
-      throw new WebSearchProviderError('duckduckgo', `Network error: ${error.message}`, error, { retryable: true });
+      const isBrowserFetchBlocked = !import.meta.env.DEV &&
+        error instanceof TypeError && error.message.includes('fetch');
+      // In production, DDG is fetched directly (no dev proxy) and sends no CORS
+      // headers — the browser blocks reading the response, so retrying is
+      // pointless. Surface the actionable fix instead.
+      const hint = isBrowserFetchBlocked
+        ? ' DuckDuckGo does not send CORS headers, so browser deployments cannot reach it directly. ' +
+          'Configure a Serper API key in Settings for live Google results, or set VITE_WEBSEARCH_BASE_URL ' +
+          'to an edge proxy at build time.'
+        : '';
+      throw new WebSearchProviderError('duckduckgo', `Network error: ${error.message}.${hint}`, error, {
+        retryable: !isBrowserFetchBlocked,
+      });
     }
 
     if (!resp.ok) {

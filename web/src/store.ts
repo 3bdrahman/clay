@@ -42,7 +42,6 @@ interface AppState {
   settings: Settings;
   conversations: Conversation[];
   activeConversationId: string | null;
-  isRunning: boolean;
   availableModels: ModelInfo[];
   modelsLoading: boolean;
   modelsError: string | null;
@@ -58,7 +57,6 @@ interface AppState {
   addMessage: (msg: ChatMessage) => void;
   updateMessage: (id: string, updater: (msg: ChatMessage) => ChatMessage) => void;
   clearMessages: () => void;
-  setRunning: (running: boolean) => void;
   setModels: (models: ModelInfo[]) => void;
   setModelsLoading: (loading: boolean) => void;
   setModelsError: (err: string | null) => void;
@@ -78,7 +76,6 @@ const DEFAULT_SETTINGS: Settings = {
   openrouterApiKey: '',
   groqApiKey: '',
   apiKey: '', // legacy field for migration
-  embeddingApiKey: '',
   webSearchProvider: 'duckduckgo',
   serperApiKey: '',
   temperature: 0,
@@ -88,13 +85,11 @@ const DEFAULT_SETTINGS: Settings = {
   localServerUrl: LOCAL_DEFAULT_BASE_URL,
   localModels: {
     chat: '',
-    embeddings: '',
   },
   localCatalog: [],
   localCatalogFetchedAt: 0,
   pickedModelsOverride: {
     chatModel: '',
-    embedding: '',
   },
 };
 
@@ -134,7 +129,6 @@ export const useAppStore = create<AppState>()(
         settings: DEFAULT_SETTINGS,
         conversations: [],
         activeConversationId: null,
-        isRunning: false,
         availableModels: [],
         modelsLoading: false,
         modelsError: null,
@@ -161,7 +155,6 @@ export const useAppStore = create<AppState>()(
           set(state => ({
             conversations: [conv, ...state.conversations],
             activeConversationId: conv.id,
-            isRunning: false,
           }));
           return conv.id;
         },
@@ -175,7 +168,6 @@ export const useAppStore = create<AppState>()(
             return {
               conversations: remaining,
               activeConversationId: nextActive,
-              isRunning: false,
             };
           }),
         renameConversation: (id, title) =>
@@ -185,7 +177,7 @@ export const useAppStore = create<AppState>()(
             ),
           })),
         switchConversation: id =>
-          set({ activeConversationId: id, isRunning: false }),
+          set({ activeConversationId: id }),
         addMessage: msg =>
           set(state => {
             let activeId = state.activeConversationId;
@@ -210,21 +202,17 @@ export const useAppStore = create<AppState>()(
             return { conversations };
           }),
         updateMessage: (id, updater) =>
-          set(state => {
-            const activeId = state.activeConversationId;
-            if (!activeId) return {};
-            return {
-              conversations: state.conversations.map(c =>
-                c.id === activeId
-                  ? {
-                      ...c,
-                      messages: c.messages.map(m => (m.id === id ? updater(m) : m)),
-                      updatedAt: Date.now(),
-                    }
-                  : c,
-              ),
-            };
-          }),
+          set(state => ({
+            conversations: state.conversations.map(c =>
+              c.messages.some(m => m.id === id)
+                ? {
+                    ...c,
+                    messages: c.messages.map(m => (m.id === id ? updater(m) : m)),
+                    updatedAt: Date.now(),
+                  }
+                : c,
+            ),
+          })),
         clearMessages: () =>
           set(state => {
             const activeId = state.activeConversationId;
@@ -235,7 +223,6 @@ export const useAppStore = create<AppState>()(
               ),
             };
           }),
-        setRunning: running => set({ isRunning: running }),
         setModels: models => set({ availableModels: models, modelsFetchedAt: Date.now() }),
         setModelsLoading: loading => set({ modelsLoading: loading }),
         setModelsError: err => set({ modelsError: err }),
@@ -278,7 +265,6 @@ export const useAppStore = create<AppState>()(
             settings: DEFAULT_SETTINGS,
             conversations: [freshConv],
             activeConversationId: freshConv.id,
-            isRunning: false,
             availableModels: [],
             modelsLoading: false,
             modelsError: null,
@@ -292,7 +278,7 @@ export const useAppStore = create<AppState>()(
     },
     {
       name: 'clay-settings-v1',
-      version: 5,
+      version: 6,
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<{
           settings: Partial<Settings>;
@@ -326,12 +312,16 @@ export const useAppStore = create<AppState>()(
         const legacyApiKey = persistedSettings.apiKey as string | undefined;
         const provider = sanitizeProvider(persistedSettings.provider);
 
+        // v6: drop the removed embedding selection fields from older persisted state
+        const { embeddingApiKey: _legacyEmbeddingKey, ...persistedRest } =
+          persistedSettings as Partial<Settings> & { embeddingApiKey?: string };
+
         const mergedSettings: Settings = {
           ...DEFAULT_SETTINGS,
           // Explicitly set the provider-specific API key from legacy apiKey
           openrouterApiKey: provider === 'openrouter' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.openrouterApiKey,
           groqApiKey: provider === 'groq' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.groqApiKey,
-          ...((persistedSettings as Omit<Partial<Settings>, 'localModels'> | undefined) ?? {}),
+          ...(persistedRest ?? {}),
           localModels: migrateLegacyLocalModels(persistedLocalModels),
           pickedModelsOverride: migrateChatSelection(persistedSettings.pickedModelsOverride),
           provider,

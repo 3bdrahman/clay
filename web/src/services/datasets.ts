@@ -3,6 +3,7 @@ import type { ColumnTable } from 'arquero';
 import type { DatasetMeta } from '../services/analyzer';
 import { isDatasetExtension } from '../lib/fileExtensions';
 import { RagError, RagErrorCode } from '../lib/errors';
+import { parseCsvNormalized } from './csvNormalize';
 
 export interface SampleLoadResult {
   /** Dataset tables keyed by dataset name — real Arquero ColumnTables. */
@@ -90,13 +91,10 @@ export async function loadSampleDatasets(): Promise<SampleLoadResult> {
           throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
         }
         const text = await resp.text();
-        const table = aq.fromCSV(text);
-        const rows = table.objects() as Array<Record<string, unknown>>;
-        const normalized = rows.map(normalizeRow);
-        const normalizedTable = aq.from(normalized);
-        const columns = normalizedTable.columnNames();
-        const rowCount = normalizedTable.numRows();
-        tables.set(name, normalizedTable);
+        const table = parseCsvNormalized(text);
+        const columns = table.columnNames();
+        const rowCount = table.numRows();
+        tables.set(name, table);
         metadata[name] = { columns, rowCount };
         rawCsv[name] = text;
         successes.push(name);
@@ -113,77 +111,5 @@ export async function loadSampleDatasets(): Promise<SampleLoadResult> {
   }
 
   return { tables, metadata, rawCsv, arquero: aq };
-}
-
-export function parseUserCsv(csv: string): {
-  table: ReturnType<typeof aq.from>;
-  columns: string[];
-  rowCount: number;
-} {
-  // Pre-process CSV to normalize currency values in data rows (not header)
-  // Only matches unambiguous currency amounts: $1234.56, $1,234.56, or 1,234,567.89 (thousands separators)
-  const currencyRegex = /\$[\d,]+\.?\d*|\b\d{1,3}(,\d{3})+\.?\d*\b/g;
-
-  const lines = csv.split('\n');
-  if (lines.length < 2) {
-    const table = aq.fromCSV(csv);
-    const rows = table.objects() as Array<Record<string, unknown>>;
-    const normalized = rows.map(normalizeRow);
-    const normalizedTable = aq.from(normalized);
-    const columns = typeof normalizedTable.columnNames === 'function'
-      ? normalizedTable.columnNames()
-      : Object.keys(normalized[0] ?? {});
-    const rowCount = typeof normalizedTable.numRows === 'function'
-      ? normalizedTable.numRows()
-      : normalized.length;
-    return { table: normalizedTable, columns, rowCount };
-  }
-  
-  const header = lines[0];
-  const dataLines = lines.slice(1).map(line => 
-    line.replace(currencyRegex, (match) => match.replace(/[$,]/g, ''))
-  );
-  const processedCsv = [header, ...dataLines].join('\n');
-  
-  const table = aq.fromCSV(processedCsv);
-  const rows = table.objects() as Array<Record<string, unknown>>;
-  const normalized = rows.map(normalizeRow);
-  const normalizedTable = aq.from(normalized);
-  const columns = typeof normalizedTable.columnNames === 'function'
-    ? normalizedTable.columnNames()
-    : Object.keys(normalized[0] ?? {});
-  const rowCount = typeof normalizedTable.numRows === 'function'
-    ? normalizedTable.numRows()
-    : normalized.length;
-  return { table: normalizedTable, columns, rowCount };
-}
-
-function normalizeRow(row: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(row)) {
-    if (value === null || value === undefined || value === '') {
-      out[key] = null;
-      continue;
-    }
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-        out[key] = parseFloat(trimmed);
-        continue;
-      }
-      if (/^\$?-?[\d,]+\.?\d*$/.test(trimmed)) {
-        out[key] = parseFloat(trimmed.replace(/[$,]/g, ''));
-        continue;
-      }
-      if (/^-?\d+(\.\d+)?%$/.test(trimmed)) {
-        out[key] = parseFloat(trimmed.replace('%', '')) / 100;
-        continue;
-      }
-      out[key] = value;
-    } else {
-      out[key] = value;
-    }
-  }
-  return out;
 }
 

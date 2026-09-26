@@ -153,6 +153,56 @@ describe('processFile', () => {
     expect(result.dataset?.rowCount).toBe(2);
   });
 
+  it('normalizes currency strings to numbers', async () => {
+    const csv = 'amount\n$1,234.56\n$99\n';
+    const fake = new FakeFile('curr.csv', csv, 'text/csv') as unknown as File;
+    const result = await processFile(fake);
+
+    const rows = (result.dataset?.table.objects() ?? []) as Array<{ amount: number }>;
+    expect(rows[0]?.amount).toBe(1234.56);
+    expect(rows[1]?.amount).toBe(99);
+  });
+
+  it('normalizes numeric strings to numbers', async () => {
+    const csv = 'price\n100\n200.50\n';
+    const fake = new FakeFile('price.csv', csv, 'text/csv') as unknown as File;
+    const result = await processFile(fake);
+
+    const rows = (result.dataset?.table.objects() ?? []) as Array<{ price: number }>;
+    expect(rows[0]?.price).toBe(100);
+    expect(rows[1]?.price).toBe(200.5);
+  });
+
+  it('normalizes percentages to fractions', async () => {
+    const csv = 'rate\n50%\n25.5%\n';
+    const fake = new FakeFile('rate.csv', csv, 'text/csv') as unknown as File;
+    const result = await processFile(fake);
+
+    const rows = (result.dataset?.table.objects() ?? []) as Array<{ rate: number }>;
+    expect(rows[0]?.rate).toBe(0.5);
+    expect(rows[1]?.rate).toBe(0.255);
+  });
+
+  it('normalizes thousands-separated numbers in data rows only', async () => {
+    const csv = 'label,value\n"Q1, 2024",1,234,567.89\nplain,42\n';
+    const fake = new FakeFile('sep.csv', csv, 'text/csv') as unknown as File;
+    const result = await processFile(fake);
+
+    const rows = (result.dataset?.table.objects() ?? []) as Array<{ label: string; value: number }>;
+    expect(rows[0]?.value).toBe(1234567.89);
+    expect(rows[1]?.value).toBe(42);
+  });
+
+  it('stores empty CSV cells as null', async () => {
+    const csv = 'name,value\nAlice,\nBob,100\n';
+    const fake = new FakeFile('nulls.csv', csv, 'text/csv') as unknown as File;
+    const result = await processFile(fake);
+
+    const rows = (result.dataset?.table.objects() ?? []) as Array<{ name: string; value: number | null }>;
+    expect(rows[0]?.value).toBeNull();
+    expect(rows[1]?.value).toBe(100);
+  });
+
   it('populates sourceHash on text documents', async () => {
     const text = 'Some text content for hashing purposes. '.repeat(10);
     const fake = new FakeFile('h.txt', text, 'text/plain') as unknown as File;
@@ -243,55 +293,32 @@ describe('embedDocumentChunks', () => {
 });
 
 describe('existingSourceHashes', () => {
-  it('collects sourceHash values from vectorstore hits', async () => {
+  it('returns the vectorstore hashes for the given source only', async () => {
     const vs = {
-      stats: { entries: 3 },
-      similaritySearch: vi.fn(async () => [
-        { metadata: { sourceHash: 'a' } },
-        { metadata: { sourceHash: 'b' } },
-        { metadata: { sourceHash: 'a' } },
-      ]),
+      load: vi.fn(async () => undefined),
+      getSourceHashes: vi.fn(() => new Set(['a', 'b'])),
     };
     const hashes = await existingSourceHashes(vs, 'foo.txt');
-    expect(vs.similaritySearch).toHaveBeenCalledWith('foo.txt', 3);
+    expect(vs.getSourceHashes).toHaveBeenCalledWith('foo.txt');
     expect([...hashes].sort()).toEqual(['a', 'b']);
   });
 
-  it('returns empty set when no hits', async () => {
+  it('awaits the vectorstore load before reading hashes', async () => {
+    const order: string[] = [];
     const vs = {
-      stats: { entries: 0 },
-      similaritySearch: vi.fn(async () => []),
+      load: vi.fn(async () => { order.push('load'); }),
+      getSourceHashes: vi.fn(() => { order.push('hashes'); return new Set<string>(); }),
     };
-    const hashes = await existingSourceHashes(vs, 'bar.txt');
-    expect(hashes.size).toBe(0);
+    await existingSourceHashes(vs, 'bar.txt');
+    expect(order).toEqual(['load', 'hashes']);
   });
 
-  it('ignores hits with missing or invalid sourceHash metadata', async () => {
+  it('propagates vectorstore load failures', async () => {
     const vs = {
-      stats: { entries: 5 },
-      similaritySearch: vi.fn(async () => [
-        { metadata: {} },
-        { metadata: { sourceHash: 42 } },
-        { metadata: { sourceHash: 'keep' } },
-      ]),
+      load: vi.fn(async () => { throw new Error('write queue failed'); }),
+      getSourceHashes: vi.fn(() => new Set<string>()),
     };
-    const hashes = await existingSourceHashes(vs, 'baz.txt');
-    expect([...hashes]).toEqual(['keep']);
-  });
-
-  it('passes stats.entries as the k parameter to similaritySearch', async () => {
-    const search = vi.fn(async () => []);
-    await existingSourceHashes({ stats: { entries: 12 }, similaritySearch: search }, 'x.txt');
-    expect(search).toHaveBeenCalledWith('x.txt', 12);
-  });
-
-  it('handles hits without metadata field at all', async () => {
-    const vs = {
-      stats: { entries: 2 },
-      similaritySearch: vi.fn(async () => [{ metadata: undefined }, { metadata: { sourceHash: 'z' } }]),
-    };
-    const hashes = await existingSourceHashes(vs, 'q.txt');
-    expect([...hashes]).toEqual(['z']);
+    await expect(existingSourceHashes(vs, 'baz.txt')).rejects.toThrow('write queue failed');
   });
 });
 
@@ -303,8 +330,8 @@ describe('addFiles dedup via sourceHash', () => {
     expect(first.document?.sourceHash).toBeDefined();
 
     const vs = {
-      stats: { entries: 1 },
-      similaritySearch: vi.fn(async () => [{ metadata: { sourceHash: first.document?.sourceHash } }]),
+      load: vi.fn(async () => undefined),
+      getSourceHashes: vi.fn(() => new Set([first.document?.sourceHash ?? ''])),
     };
     const existing = await existingSourceHashes(vs, 'dup.txt');
     expect(existing.has(first.document?.sourceHash ?? '')).toBe(true);

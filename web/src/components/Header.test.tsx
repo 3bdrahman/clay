@@ -18,7 +18,7 @@ afterEach(() => {
 function renderHeader(provider: ProviderKind = 'openrouter') {
   document.body.appendChild(container);
   root = createRoot(container);
-  const pickedModels: PickedModels = { chat: 'test-chat', embedding: 'test-embedding' };
+  const pickedModels: PickedModels = { chat: 'test-chat' };
   act(() =>
     root.render(
       <Header

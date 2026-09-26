@@ -7,7 +7,6 @@ import type { Settings } from './types';
 import { getProviderConfig } from './providers';
 import {
   NoProviderError,
-  EmbeddingModelMissingError,
   ModelCatalogEmptyError,
   ModelNotFoundError,
   LocalServerUrlMissingError,
@@ -44,11 +43,6 @@ export function validateSettings(
       const err = new ModelNotFoundError('chat', settings.localCatalog?.map((m) => m.id) ?? []);
       errors.push({ code: err.code, message: err.message, providerKind: 'local' });
     }
-
-    if (!settings.localModels?.embeddings || !settings.localModels.embeddings.trim()) {
-      const err = new EmbeddingModelMissingError();
-      errors.push({ code: err.code, message: err.message, providerKind: 'local' });
-    }
   } else {
     const apiKeyField = {
       openrouter: 'openrouterApiKey',
@@ -60,11 +54,6 @@ export function validateSettings(
       const err = new NoProviderError(settings.provider);
       errors.push({ code: err.code, message: err.message });
     }
-
-    if (!settings.embeddingApiKey || !settings.embeddingApiKey.trim()) {
-      const err = new EmbeddingModelMissingError();
-      errors.push({ code: err.code, message: err.message });
-    }
   }
 
   // 2. Model catalog validation
@@ -73,14 +62,10 @@ export function validateSettings(
       const err = new ModelCatalogEmptyError('local');
       warnings.push(err.message);
     } else {
-      // Validate picked models exist in catalog
+      // Validate picked chat model exists in catalog
       const catalogIds = new Set(settings.localCatalog.map((m) => m.id));
       if (settings.localModels?.chat && !catalogIds.has(settings.localModels.chat)) {
         const err = new ModelNotFoundError(settings.localModels.chat, Array.from(catalogIds));
-        errors.push({ code: err.code, message: err.message, providerKind: 'local' });
-      }
-      if (settings.localModels?.embeddings && !catalogIds.has(settings.localModels.embeddings)) {
-        const err = new ModelNotFoundError(settings.localModels.embeddings, Array.from(catalogIds));
         errors.push({ code: err.code, message: err.message, providerKind: 'local' });
       }
     }
@@ -113,8 +98,6 @@ function createErrorFromCode(
   switch (code) {
     case RagErrorCode.NO_PROVIDER_CONFIGURED:
       return new NoProviderError('local', undefined);
-    case RagErrorCode.EMBEDDING_MODEL_MISSING:
-      return new EmbeddingModelMissingError();
     case RagErrorCode.MODEL_CATALOG_EMPTY:
       return new ModelCatalogEmptyError('local', undefined);
     case RagErrorCode.MODEL_NOT_FOUND:
@@ -143,7 +126,6 @@ export function getSettingsStatus(settings: Settings): {
   configured: boolean;
   provider: string;
   hasApiKey: boolean;
-  hasEmbeddingKey: boolean;
   modelCount: number;
   issues: string[];
 } {
@@ -160,7 +142,6 @@ export function getSettingsStatus(settings: Settings): {
     configured: result.valid,
     provider: getProviderConfig(settings.provider).displayName,
     hasApiKey: settings.provider === 'local' ? !!settings.localServerUrl : !!(settings as unknown as Record<string, string>)[apiKeyField],
-    hasEmbeddingKey: settings.provider === 'local' ? !!settings.localModels?.embeddings : !!settings.embeddingApiKey,
     modelCount: settings.provider === 'local' ? settings.localCatalog?.length ?? 0 : 0,
     issues,
   };

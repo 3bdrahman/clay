@@ -7,7 +7,7 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-8.0-646CFF.svg)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-06B6D4.svg)](https://tailwindcss.com/)
-[![Tests](https://img.shields.io/badge/Tests-496_passing-brightgreen.svg)](https://github.com/3bdrahman/clay/actions)
+[![Tests](https://img.shields.io/badge/Tests-498_passing-brightgreen.svg)](https://github.com/3bdrahman/clay/actions)
 [![Deploy](https://img.shields.io/badge/Deploy-GitHub_Pages-121013.svg?logo=github&logoColor=white)](https://3bdrahman.github.io/clay/)
 
 ![Clay — welcome screen](clay-welcome.png)
@@ -38,11 +38,12 @@ Add your own API key in **Settings** — OpenRouter ([openrouter.ai/settings/key
 - **Multi-source synthesis** — documents, structured data, and the open web in one answer
 - **Live workflow visualization** — every step (with timing) is shown as it runs
 - **Self-correcting quality loop** — LLM-as-judge hallucination check + answer-usefulness grading
-- **Single-model architecture** — one user-chosen chat model drives every LLM step (explicit cost control); the embedding model is auto-picked from the live catalog via externalized pattern rules
+- **Single-model architecture** — one user-chosen chat model drives every LLM step (explicit cost control); embeddings are local (transformers.js) and never user-selected
+- **Local in-browser embeddings** — documents are embedded by `all-MiniLM-L6-v2` running in a Web Worker via transformers.js; document text never leaves the machine
 - **Agentic analysis tools** — the model inspects your actual data (column profiles, distributions, correlations, sample rows) through function-calling tools, then delivers structured insights with evidence and a confidence level
 - **Bring-your-own-data** — no forced scenario; drop any CSV/PDF/MD/TXT/JSON and start querying
 - **Runs entirely in your browser** — no backend server required, deploy anywhere as static files
-- **Privacy-first** — your data never leaves your browser; only queries go to your configured LLM provider
+- **Privacy-first** — your data and its embeddings never leave your browser; only chat queries go to your configured LLM provider
 
 ---
 
@@ -114,7 +115,7 @@ The site deploys to **GitHub Pages** via [`.github/workflows/deploy-github-pages
 │                       ▼  (outbound LLM calls)                │
 │   ┌─────────────────────────────────────────┐               │
 │   │  OpenRouter / Groq / Local  │                   │
-│   │  one chat model + one embedding model  │               │
+│   │  one chat model · local embeddings     │               │
 │   └─────────────────────────────────────────┘               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -139,7 +140,7 @@ The site deploys to **GitHub Pages** via [`.github/workflows/deploy-github-pages
 | Reflection rides each tool-loop iteration | A separate critique turn would double the token spend per analysis; the model's own per-iteration summary is mandatory and visible at zero extra cost | `analyzer.ts` (`onIteration` hook) |
 | Plan on the first iteration | The model's first tool-call response opens with a `PLAN:` line — a visible strategy without a separate planning phase (another round trip + tokens) | `analyzer.ts` `buildSystemPrompt` |
 | Synchronous in-browser tools | Tools run against immutable Arquero tables in the same thread; parallelizing them would need Workers, breaking the pure-browser boundary. The `aq`/`op` namespaces are isolated per execution | `analyzer.ts` `executeUserCode` |
-| Single user-chosen chat model | With BYOK you pay per token — the cost decision stays with you; the embedding model is auto-picked from the live catalog | `lib/models.ts` |
+| Single user-chosen chat model | With BYOK you pay per token — the cost decision stays with you; embeddings are local (transformers.js) and never user-selected | `lib/models.ts` |
 | Budgets enforced mid-loop | Each LLM call gets `max_tokens` derived from the remaining budget, so one huge response can't blow the loop's token budget | `analyzer.ts` `runToolLoop`, `lib/llm.ts` |
 | Eval grades answers, not just routing | Lexical overlap + LLM-as-judge scores against the golden set, with aggregates — quality claims are measurable | `eval/runner.ts` |
 | Retrieval-only query rewriting | On eval failure the question is rewritten for the retried source; the answer still answers the original question | `orchestrator.ts` retry loop |
@@ -149,7 +150,7 @@ The site deploys to **GitHub Pages** via [`.github/workflows/deploy-github-pages
 
 ## Data flow
 
-When you drop a CSV, it's parsed by Arquero into a real `ColumnTable` and registered as a variable the LLM-generated code can query. When you drop a PDF/MD/TXT/JSON, it's chunked (~800 chars / ~200 overlap), embedded via the best embedding model in your provider's catalog (or your explicit local pick), and added to the in-memory vector store.
+When you drop a CSV, it's parsed by Arquero into a real `ColumnTable` and registered as a variable the LLM-generated code can query. When you drop a PDF/MD/TXT/JSON, it's chunked (~800 chars / ~200 overlap) and embedded locally — `all-MiniLM-L6-v2` runs in a Web Worker via transformers.js, downloads from the HuggingFace CDN on first use, and is cached by the browser afterwards — then added to the vector store (IndexedDB-persisted).
 
 The sandbox is your workspace — there's no preloaded scenario. The next question routes against whatever you've loaded. Your data stays in your browser; only the question and relevant context are sent to your LLM provider.
 
@@ -177,7 +178,7 @@ Pick **Local server** in Settings and point Clay at any OpenAI-compatible endpoi
 | vLLM | `http://localhost:8000/v1` |
 | llama.cpp server | `http://localhost:8080/v1` |
 
-Click **Discover** to fetch the model catalog, then pick your chat and embedding models. For Ollama, you may need to enable CORS:
+Click **Discover** to fetch the model catalog, then pick your chat model. Embeddings are local — nothing to pick. For Ollama, you may need to enable CORS:
 
 ```bash
 OLLAMA_ORIGINS="*" ollama serve
@@ -186,7 +187,7 @@ OLLAMA_ORIGINS="*" ollama serve
 ### Model selection
 
 - **Chat model — you pick it.** One model drives routing, code generation, answering, evaluation, and self-correction. There is no automatic multi-model selection: with BYOK you pay per token, so the cost decision stays with you.
-- **Embedding model — auto-picked.** On catalog refresh, Clay scores each catalog entry with externalized pattern rules ([`web/src/lib/modelPatterns.config.json`](web/src/lib/modelPatterns.config.json)) and picks the best embedding model. Override it anytime in Settings.
+- **Embeddings — local, nothing to pick.** Document chunks and queries are embedded in your browser by `all-MiniLM-L6-v2` (transformers.js, in a Web Worker). There is no embedding model selection and no embedding API call — document text never leaves the machine.
 - **Analysis — agentic tools.** For data questions, the model calls analysis tools (list_datasets, profile_column with full statistics, aggregate, filter_sample, correlate, run_code) to inspect the real data before answering. It returns structured insights (finding, evidence, confidence, implication) plus a deliberately-chosen chart; every tool call is a live sub-step in the workflow view. Models without tool support fall back to the previous single-shot analysis, clearly labeled.
 - Catalog cache TTL is 1 hour. Click **Refresh** in Settings to refetch.
 

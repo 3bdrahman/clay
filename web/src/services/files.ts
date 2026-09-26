@@ -1,10 +1,10 @@
-import * as aq from 'arquero';
 import type { ColumnTable } from 'arquero';
 import { extractPdfText, type ExtractedPage } from './pdf';
 import { chunkText, type Chunk, type ChunkContext } from './chunker';
 import type { EmbeddingsClient } from '../lib/embeddings';
 import { hashText } from '../lib/hash';
 import { isDatasetExtension, isDocumentExtension } from '../lib/fileExtensions';
+import { parseCsvNormalized } from './csvNormalize';
 
 export type SupportedKind = 'csv' | 'pdf' | 'text' | 'unsupported';
 
@@ -64,7 +64,7 @@ function toChunks(
 
 async function processCsv(file: File): Promise<ProcessedDataset> {
   const text = await file.text();
-  const table = aq.fromCSV(text);
+  const table = parseCsvNormalized(text);
   const columns = table.columnNames();
   const rowCount = typeof table.numRows === 'function' ? table.numRows() : 0;
   return {
@@ -155,16 +155,11 @@ export interface EmbeddedChunk {
  * the given source. Used to short-circuit re-embedding unchanged content.
  */
 export async function existingSourceHashes(
-  vs: { stats: { entries: number }; similaritySearch: (q: string, k: number) => Promise<Array<{ metadata?: Record<string, unknown> }>> },
+  vs: { load(): Promise<void>; getSourceHashes(source: string): Set<string> },
   source: string,
 ): Promise<Set<string>> {
-  const hits = await vs.similaritySearch(source, vs.stats.entries || 1);
-  const hashes = new Set<string>();
-  for (const h of hits) {
-    const hash = h.metadata?.['sourceHash'];
-    if (typeof hash === 'string' && hash.length > 0) hashes.add(hash);
-  }
-  return hashes;
+  await vs.load();
+  return vs.getSourceHashes(source);
 }
 
 export async function embedDocumentChunks(
@@ -173,7 +168,7 @@ export async function embedDocumentChunks(
 ): Promise<EmbeddedChunk[]> {
   if (document.chunks.length === 0) return [];
   const texts = document.chunks.map((c) => c.text);
-  const vectors = await embeddings.embed(texts, { inputType: 'passage' });
+  const vectors = await embeddings.embed(texts);
   return document.chunks.map((c, i) => {
     const vec = vectors[i] ?? [];
     return {

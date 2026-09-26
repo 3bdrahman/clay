@@ -11,7 +11,6 @@
 export enum RagErrorCode {
   // Configuration errors
   NO_PROVIDER_CONFIGURED = 'NO_PROVIDER_CONFIGURED',
-  EMBEDDING_MODEL_MISSING = 'EMBEDDING_MODEL_MISSING',
   MODEL_CATALOG_EMPTY = 'MODEL_CATALOG_EMPTY',
   MODEL_NOT_FOUND = 'MODEL_NOT_FOUND',
   LOCAL_SERVER_URL_MISSING = 'LOCAL_SERVER_URL_MISSING',
@@ -142,18 +141,6 @@ export class NoProviderError extends RagError {
       retryable: false,
       provider,
       context: { provider },
-    });
-  }
-}
-
-export class EmbeddingModelMissingError extends RagError {
-  constructor(cause?: Error) {
-    super({
-      code: RagErrorCode.EMBEDDING_MODEL_MISSING,
-      message: 'No embedding model selected. Choose an embedding model in Settings.',
-      cause,
-      retryable: false,
-      context: {},
     });
   }
 }

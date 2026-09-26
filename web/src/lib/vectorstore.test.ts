@@ -161,6 +161,18 @@ describe('createVectorStore', () => {
     expect(vs2.stats.entries).toBe(1);
   });
 
+  it('persists the passed sourceHash and returns it from getSourceHashes', async () => {
+    await vectorstore.load();
+    vectorstore.addEntries([
+      { id: '1', text: 'chunk one', source: 'a.txt', sourceHash: 'hash-a', embedding: new Array(1024).fill(0.1) },
+      { id: '2', text: 'chunk two', source: 'a.txt', sourceHash: 'hash-a', embedding: new Array(1024).fill(0.2) },
+      { id: '3', text: 'chunk three', source: 'b.txt', sourceHash: 'hash-b', embedding: new Array(1024).fill(0.3) },
+    ]);
+
+    expect(vectorstore.getSourceHashes('a.txt')).toEqual(new Set(['hash-a']));
+    expect(vectorstore.getSourceHashes('b.txt')).toEqual(new Set(['hash-b']));
+  });
+
   it('similaritySearch returns empty when no entries', async () => {
     await vectorstore.load();
     const results = await vectorstore.similaritySearch('query', 4);

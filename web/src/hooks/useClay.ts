@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import * as aq from 'arquero';
-import { createLLMClient, type LLMClient, ProviderUnreachableError } from '../lib/llm';
-import { createEmbeddingsClient, type EmbeddingsClient } from '../lib/embeddings';
-import { createWebSearchClient, type WebSearchClient } from '../lib/websearch';
-import { createVectorStore, type VectorStore } from '../lib/vectorstore';
-import { createDataAnalyzer, type DataAnalyzer, type DatasetMeta } from '../services/analyzer';
+import { type LLMClient, ProviderUnreachableError } from '../lib/llm';
+import type { EmbeddingsClient } from '../lib/embeddings';
+import type { WebSearchClient } from '../lib/websearch';
+import type { VectorStore } from '../lib/vectorstore';
+import type { DataAnalyzer } from '../services/analyzer';
 import { loadSampleDatasets } from '../services/datasets';
 import { processFile, embedDocumentChunks, existingSourceHashes, type ProcessedFile } from '../services/files';
 import {
   registerSandboxTable,
   unregisterSandboxTable,
   clearSandboxTables,
+  rehydrateSandboxTables,
 } from '../services/sandboxTables';
+import { createClayServiceBundle } from '../services/clayServices';
 import { useAppStore, type SandboxDataset, type SandboxProcessing } from '../store';
 import {
   listModels,
@@ -160,13 +161,6 @@ export function useClay(): {
           return;
         }
 
-        const llm = createLLMClient({
-          baseUrl: endpoint.baseUrl,
-          apiKey: endpoint.apiKey,
-          temperature: settings.temperature,
-          providerLabel: endpoint.providerLabel,
-        });
-
         let catalog = availableModels;
         if (settings.provider === 'local') {
           const url = settings.localServerUrl.trim();
@@ -178,58 +172,21 @@ export function useClay(): {
           const fresh = await fetchNimModels(endpoint.apiKey);
           if (fresh.length > 0) catalog = fresh;
         }
-        
-        const { picked } = resolveModels(
-          { ...settings, localCatalog: catalog },
+
+        const { tables, metadata } = rehydrateSandboxTables(sandboxDatasets);
+
+        const bundle = createClayServiceBundle({
+          settings,
           catalog,
-        );
-
-        const embeddingKey =
-          settings.provider === 'local'
-            ? ''
-            : (settings.embeddingApiKey || settings.apiKey);
-        
-        const embeddings = createEmbeddingsClient({
-          baseUrl: endpoint.baseUrl,
-          apiKey: embeddingKey,
-          embeddingModel: picked.embedding ?? '',
-          providerLabel: endpoint.providerLabel,
-        });
-        
-        const vectorstore = createVectorStore(embeddings, {
-          embeddingModel: picked.embedding,
-        });
-        const webSearch = createWebSearchClient(settings);
-
-        const tables = new Map<string, unknown>([['aq', aq]]);
-        const metadata: DatasetMeta = {};
-
-        for (const d of sandboxDatasets) {
-          let table: unknown;
-          if (d.csv !== undefined) {
-            table = aq.fromCSV(d.csv);
-          } else {
-            table = aq.from(
-              d.columns.map(() => ({})),
-            );
-          }
-          tables.set(d.name, table);
-          metadata[d.name] = { columns: d.columns, rowCount: d.rowCount };
-        }
-
-        const analyzer = createDataAnalyzer({
-          llm,
-          datasets: tables,
-          metadata,
-          codeGenModel: picked.chat,
-          maxToolLoopTokens: settings.maxToolLoopTokens,
+          analyzerTables: tables,
+          analyzerMetadata: metadata,
         });
 
-        vectorstore
+        bundle.vectorstore
           .load()
           .then(() => {
             if (cancelled) return;
-            if (!vectorstore.persistenceAvailable) setPersistenceAvailable(false);
+            if (!bundle.vectorstore.persistenceAvailable) setPersistenceAvailable(false);
           })
           .catch((e: unknown) => {
             if (cancelled) return;
@@ -243,11 +200,11 @@ export function useClay(): {
         if (cancelled) return;
 
         const newServices: ClayServices = {
-          llm,
-          embeddings,
-          vectorstore,
-          webSearch,
-          analyzer,
+          llm: bundle.llm,
+          embeddings: bundle.embeddings,
+          vectorstore: bundle.vectorstore,
+          webSearch: bundle.webSearch,
+          analyzer: bundle.analyzer,
           ready: true,
         };
         servicesRef.current = newServices;
@@ -323,6 +280,7 @@ export function useClay(): {
               continue;
             }
             const embedded = await embedDocumentChunks(processed.document, sv.embeddings);
+            sv.vectorstore.removeBySource(processed.document.source);
             sv.vectorstore.addEntries(embedded.map(e => ({
               id: e.id,
               text: e.text,

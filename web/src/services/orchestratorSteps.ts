@@ -38,7 +38,7 @@ export interface OrchestratorStepContext {
   state: WorkflowState;
   steps: StepTrace[];
   beginStep: (node: string, label: string) => void;
-  endStep: (node: string, opts?: { detail?: string; meta?: Record<string, unknown> }) => void;
+  endStep: (node: string, opts?: { status?: 'done' | 'error'; detail?: string; meta?: Record<string, unknown> }) => void;
   emitSteps: () => void;
   withRetry: <T>(stepName: string, fn: () => Promise<T>, signal?: AbortSignal) => Promise<T>;
 }
@@ -185,8 +185,8 @@ export async function runVectorstorePath(
     ctx.state.documents = filtered;
     ctx.endStep('grade_docs', { detail: `${filtered.length}/${docs.length} relevant` });
   } catch (e) {
-    ctx.endStep('retrieve', { detail: 'error' });
-    ctx.endStep('grade_docs', { detail: 'error' });
+    ctx.endStep('retrieve', { status: 'error', detail: getUserMessage(e) });
+    ctx.endStep('grade_docs', { status: 'error' });
     throw e;
   }
 }
@@ -267,7 +267,7 @@ export async function runPythonPath(
       },
     });
   } catch (e) {
-    ctx.endStep('analyze', { detail: 'error' });
+    ctx.endStep('analyze', { status: 'error', detail: getUserMessage(e) });
     throw e;
   }
 }
@@ -285,7 +285,7 @@ export async function runWebSearchStep(
     ctx.state.webResults = results;
     ctx.endStep('web_search', { detail: `${results.length} results` });
   } catch (e) {
-    ctx.endStep('web_search', { detail: 'error' });
+    ctx.endStep('web_search', { status: 'error', detail: getUserMessage(e) });
     throw e;
   }
 }
@@ -419,7 +419,7 @@ export async function generate(ctx: OrchestratorStepContext): Promise<void> {
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     ctx.state.answer = `Error generating answer: ${getUserMessage(err)}`;
-    ctx.endStep('generate', { detail: 'error' });
+    ctx.endStep('generate', { status: 'error', detail: getUserMessage(err) });
     throw err;
   }
 }

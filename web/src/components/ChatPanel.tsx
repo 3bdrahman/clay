@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import type { ChatMessage, WorkflowState } from '../lib/types';
 import { useAppStore } from '../store';
 import { useShallow } from 'zustand/shallow';
@@ -26,8 +26,6 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
   const messages = useActiveMessages();
   const addMessage = useAppStore(s => s.addMessage);
   const updateMessage = useAppStore(s => s.updateMessage);
-  const isRunning = useAppStore(s => s.isRunning);
-  const setRunning = useAppStore(s => s.setRunning);
   const { services, loading, error, needsConfiguration, loadSampleData, pickedModels } = useClay();
   const canSubmit = !!services && !!pickedModels.chat && !loading;
 
@@ -35,6 +33,11 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
   const [streamingContent, setStreamingContent] = useState('');
   const streamingMessageIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Derived from the streaming placeholder, not a global flag: switching
+  // conversations mid-generation must not clear it (the pipeline is still
+  // running) and must not let a second orchestrator start.
+  const isRunning = useMemo(() => messages.some(m => m.streaming === true), [messages]);
 
   const cancel = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -63,8 +66,6 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
     };
     addMessage(userMsg);
 
-    setRunning(true);
-
     const assistantId = crypto.randomUUID();
     streamingMessageIdRef.current = assistantId;
     setStreamingContent('');
@@ -84,9 +85,8 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
 
     const updateAssistant = (workflow: WorkflowState) => {
       const state = useAppStore.getState();
-      const conv = state.conversations.find(c => c.id === state.activeConversationId);
-      const currentMsg = conv?.messages.find(m => m.id === assistantId);
-      const currentContent = currentMsg?.content || '';
+      const conv = state.conversations.find(c => c.messages.some(m => m.id === assistantId));
+      const currentContent = conv?.messages.find(m => m.id === assistantId)?.content || '';
       const finalContent = workflow.answer || currentContent;
       const assistantMsg: ChatMessage = {
         id: assistantId,
@@ -117,7 +117,7 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
         lastStoreFlush = now;
         useAppStore.setState(state => ({
           conversations: state.conversations.map(c =>
-            c.id === state.activeConversationId
+            c.messages.some(m => m.id === id)
               ? { ...c, messages: c.messages.map(m =>
                   m.id === id ? { ...m, content: (m.content || '') + toFlush } : m,
                 ), updatedAt: Date.now() }
@@ -175,7 +175,7 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       const err = e instanceof Error ? e : new Error(String(e));
       const isAbort = err.name === 'AbortError' || controller.signal.aborted;
       const state = useAppStore.getState();
-      const conv = state.conversations.find(c => c.id === state.activeConversationId);
+      const conv = state.conversations.find(c => c.messages.some(m => m.id === assistantId));
       const existingContent = conv?.messages.find(m => m.id === assistantId)?.content || '';
       const errorMsg: ChatMessage = {
         id: assistantId,
@@ -187,7 +187,6 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       };
       updateMessage(assistantId, () => errorMsg);
     } finally {
-      setRunning(false);
       setStreamingContent('');
       streamingMessageIdRef.current = null;
       if (abortControllerRef.current === controller) abortControllerRef.current = null;

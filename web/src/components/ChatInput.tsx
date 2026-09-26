@@ -111,11 +111,8 @@ export function ChatInput({ onSubmit, onCancel, disabled, isRunning, onConfigure
           )}
         </div>
       </div>
-      <div id={helperTextId} className="sr-only">
+      <div id={helperTextId} className="text-[10px] text-ink-400 dark:text-ink-500 text-center mt-1.5">
         Clay may make mistakes — verify important information. Press / to focus input, Escape to stop generation.
-      </div>
-      <div className="text-[10px] text-ink-400 dark:text-ink-500 text-center mt-1.5" aria-hidden="true">
-        Clay may make mistakes — verify important information. Press / to focus, Esc to stop.
       </div>
     </div>
   );

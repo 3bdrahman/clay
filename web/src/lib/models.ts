@@ -8,12 +8,7 @@ import {
   ModelNotFoundError,
   classifyError,
 } from './errors';
-import {
-  EMBEDDING_PATTERNS,
-  EMBEDDING_DETECT,
-  SIZE_PATTERNS,
-  scoreByRules,
-} from './modelPatterns';
+import { SIZE_PATTERNS } from './modelPatterns';
 
 export type { ModelInfo };
 
@@ -21,7 +16,6 @@ export type ModelClass = 'tiny' | 'small' | 'medium' | 'large' | 'huge';
 
 export interface PickedModels {
   chat: string | undefined;
-  embedding: string | undefined;
 }
 
 /**
@@ -102,20 +96,13 @@ export async function listLocalCatalog(baseUrl: string, apiKey: string): Promise
 }
 
 /**
- * Normalize user-provided local model picks into PickedModels.
- * The user-facing LocalModelPicks has 2 slots (chat, embeddings) — the
- * single chat model is used for all chat-style roles (routing, codeGen,
- * answer, eval) that the orchestrator/analyzer/eval consume. Empty strings
- * become undefined.
+ * Normalize the user-provided local chat pick into PickedModels. The single
+ * chat model drives every chat-style role (routing, codeGen, answer, eval);
+ * embeddings are local (transformers.js) and never user-selected. Empty
+ * strings become undefined.
  */
 export function pickLocalModels(picks: LocalModelPicks): PickedModels {
-  const def = (s: string) => s.trim() || undefined;
-  const chat = def(picks.chat);
-  const embedding = def(picks.embeddings);
-  return {
-    chat,
-    embedding,
-  };
+  return { chat: picks.chat.trim() || undefined };
 }
 
 export interface ResolvedModels {
@@ -136,7 +123,7 @@ export function resolveModels(
 ): ResolvedModels {
   const provider = settings.provider;
 
-  // Local uses user-selected models
+  // Local uses the user-selected chat model
   if (provider === 'local') {
     const picked = pickLocalModels(settings.localModels);
     const warnings: string[] = [];
@@ -146,14 +133,8 @@ export function resolveModels(
       );
     } else {
       const catalogIds = new Set(settings.localCatalog.map(m => m.id));
-      const userSlots = [
-        { key: 'chat', model: picked.chat },
-        { key: 'embeddings', model: picked.embedding },
-      ] as const;
-      for (const { model } of userSlots) {
-        if (model && !catalogIds.has(model)) {
-          throw new ModelNotFoundError(model, Array.from(catalogIds));
-        }
+      if (picked.chat && !catalogIds.has(picked.chat)) {
+        throw new ModelNotFoundError(picked.chat, Array.from(catalogIds));
       }
     }
     return { catalog: settings.localCatalog, picked, warnings };
@@ -163,15 +144,13 @@ export function resolveModels(
     catalog,
     picked: {
       chat: settings.pickedModelsOverride.chatModel?.trim() || undefined,
-      embedding: settings.pickedModelsOverride.embedding?.trim() || pickBestEmbedding(catalog),
     },
     warnings: [],
   };
 }
 
-function isEmbedding(id: string): boolean {
-  const lower = id.toLowerCase();
-  return EMBEDDING_DETECT.some((re) => re.test(lower));
+export function modelClass(id: string): ModelClass {
+  return inferClass(id);
 }
 
 function inferClass(id: string): ModelClass {
@@ -180,36 +159,4 @@ function inferClass(id: string): ModelClass {
     if (entry.patterns.some((re) => re.test(lower))) return entry.class;
   }
   return 'medium';
-}
-
-function scoreEmbedding(model: ModelInfo): number {
-  return scoreByRules(model.id.toLowerCase(), EMBEDDING_PATTERNS);
-}
-
-/**
- * Auto-pick the best embedding model from the catalog by pattern score.
- * The embedding slot is the only auto-picked model — the chat model is always
- * an explicit user choice (BYOK cost control: never silently bill a premium
- * chat model the user never selected).
- * @returns the best-scoring embedding id, or undefined when the catalog has none
- */
-export function pickBestEmbedding(models: ModelInfo[]): string | undefined {
-  let best: ModelInfo | undefined;
-  let bestScore = -Infinity;
-  for (const m of models) {
-    if (!isEmbedding(m.id)) continue;
-    const s = scoreEmbedding(m);
-    if (s > bestScore) {
-      bestScore = s;
-      best = m;
-    }
-  }
-  if (best === undefined && models.length > 0 && import.meta.env.DEV) {
-    console.warn(`[models] No embedding model found among ${models.length} catalog models`);
-  }
-  return best?.id;
-}
-
-export function modelClass(id: string): ModelClass {
-  return inferClass(id);
 }

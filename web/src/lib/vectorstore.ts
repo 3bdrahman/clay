@@ -45,7 +45,7 @@ const STORE_NAME = 'entries';
 /**
  * Sentinel model ID stamped on entries migrated from the legacy localStorage
  * store AND on entries added via a VectorStore whose config omitted
- * `embeddingModel`. Real callers (useClay.ts, eval/runner.ts) always pass
+ * `embeddingModel`. The service bundle (clayServices.ts) always passes
  * the picked embedding model; this sentinel exists so model-mismatch
  * detection (`entry.metadata.modelId !== currentEmbeddingModel`) treats
  * legacy/unknown entries as "needs re-embedding" instead of incorrectly
@@ -306,7 +306,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     if (memory.size === 0) return [];
     let queryEmbeddingRaw: number[][];
     try {
-      queryEmbeddingRaw = await embeddings.embed(query, { inputType: 'query' });
+      queryEmbeddingRaw = await embeddings.embed(query);
     } catch (e) {
       throw classifyError(e, 'embeddings', 'similaritySearch');
     }
@@ -354,7 +354,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     return results;
   }
 
-  function addEntries(newEntries: Array<{ id: string; text: string; source: string; page?: number; embedding: number[] }>): void {
+  function addEntries(newEntries: Array<{ id: string; text: string; source: string; sourceHash?: string; page?: number; embedding: number[] }>): void {
     if (!loaded && !loadingPromise) void load();
 
     for (const e of newEntries) {
@@ -372,7 +372,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
         embedding: emb,
         metadata: {
           source: e.source,
-          sourceHash: '',
+          sourceHash: e.sourceHash ?? '',
           page: e.page,
           charStart: 0,
           charEnd: e.text.length,

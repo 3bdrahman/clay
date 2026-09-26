@@ -18,6 +18,7 @@
     "verify": "npm run type-check && npm run lint && npm run test && npm run build"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
     "arquero": "^8.0.3",
     "autoprefixer": "^10.5.4",
     "dompurify": "^3.4.15",

@@ -17,14 +17,12 @@ export interface ToolDefinition {
 
 export interface LocalModelPicks {
   chat: string;
-  embeddings: string;
 }
 
 export type ProviderKind = 'openrouter' | 'groq' | 'local';
 
 export interface PickedModelsOverride {
   chatModel?: string;
-  embedding?: string;
 }
 
 export interface Settings {
@@ -32,7 +30,6 @@ export interface Settings {
   // Provider API keys - each provider has its own key
   openrouterApiKey: string;
   groqApiKey: string;
-  embeddingApiKey: string;
   // Legacy field for backward compat (migration)
   apiKey: string;
   webSearchProvider: 'serper' | 'duckduckgo' | 'none';
@@ -46,9 +43,8 @@ export interface Settings {
   localModels: LocalModelPicks;
   localCatalog: ModelInfo[];
   localCatalogFetchedAt: number;
-  // User-overridable model selections (empty = auto-pick)
+  // User-overridable model selection (empty = auto-pick):
   // chatModel: single model for routing, codeGen, answer, eval
-  // embedding: separate embedding model
   pickedModelsOverride: PickedModelsOverride;
 }
 

@@ -80,11 +80,11 @@ export function createWorkflowOrchestrator(
     emitSteps();
   }
 
-  function endStep(node: string, opts: { detail?: string; meta?: Record<string, unknown> } = {}): void {
+  function endStep(node: string, opts: { status?: 'done' | 'error'; detail?: string; meta?: Record<string, unknown> } = {}): void {
     for (let i = steps.length - 1; i >= 0; i--) {
       const step = steps[i];
-      if (step.node === node && step.status === 'running') {
-        step.status = opts.detail === 'error' ? 'error' : 'done';
+      if (step && step.node === node && step.status === 'running') {
+        step.status = opts.status ?? 'done';
         step.finishedAt = Date.now();
         step.durationMs = step.finishedAt - (step.startedAt || step.finishedAt);
         if (opts.detail) step.detail = opts.detail;
@@ -240,10 +240,17 @@ export function createWorkflowOrchestrator(
       endStep('route', { detail: routeDetail, meta: { tokensUsed: routeResp.usage?.totalTokens ?? 0, confidence } });
 
       if (isLowConfidence) {
-        await Promise.all([
+        const outcomes = await Promise.allSettled([
           runPath(ctx, 'vectorstore', signal),
           runPath(ctx, 'websearch', signal),
         ]);
+        const rejected = outcomes.filter((o): o is PromiseRejectedResult => o.status === 'rejected');
+        if (rejected.length === outcomes.length) {
+          const first = rejected[0];
+          throw first
+            ? first.reason
+            : new GenerationFailedError('orchestrator', new Error('All retrieval paths failed'), { retryable: false });
+        }
       } else {
         await runPath(ctx, source, signal);
       }
@@ -266,7 +273,12 @@ export function createWorkflowOrchestrator(
           const rewrittenQuestion = await rewriteQuestionForSource(ctx, question, fallback, signal);
           endStep('decide', { detail: `-> ${fallback} (rewritten: ${rewrittenQuestion.slice(0, 100)}${rewrittenQuestion.length > 100 ? '…' : ''})` });
           clearSourceData(ctx, previousSource);
-          await runPath(ctx, fallback, signal, rewrittenQuestion);
+          const fallbackOutcome = await Promise.allSettled([runPath(ctx, fallback, signal, rewrittenQuestion)]);
+          if (fallbackOutcome[0]?.status === 'rejected') {
+            // The fallback source failed after its own retries — keep the last
+            // generated answer and stop retrying; the failed step trace carries the reason.
+            break;
+          }
         }
       }
 

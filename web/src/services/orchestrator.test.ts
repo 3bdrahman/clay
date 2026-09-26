@@ -40,7 +40,6 @@ const mockAnalyzer: DataAnalyzer = {
 
 const testSettings: Settings = {
   apiKey: 'test-key',
-  embeddingApiKey: '',
   webSearchProvider: 'duckduckgo',
   serperApiKey: '',
   temperature: 0,
@@ -1881,6 +1880,73 @@ describe('createWorkflowOrchestrator — router confidence + multi-source fallba
     const allSteps = stepUpdates.flat();
     const routeStep = allSteps.find(s => s.node === 'route');
     expect(routeStep?.meta?.confidence).toBe(1.0);
+  });
+
+  it('a websearch failure in the low-confidence path does not fail the question when vectorstore succeeds', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'vectorstore', confidence: 0.4 }),
+    });
+    // HyDE expansion call
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Hypothetical passage.',
+    });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+    (mockWebSearch.search as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('DuckDuckGo search failed: Network error: Failed to fetch.'),
+    );
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: 'Answer based on doc',
+      usage: undefined,
+      model: 'answer-model',
+    });
+
+    const state = await orchestrator.run();
+
+    // The vectorstore path completed, so the question must complete with its results
+    expect(state.error).toBeUndefined();
+    expect(state.routing).toBe('vectorstore');
+    expect(state.documents).toHaveLength(1);
+    expect(state.answer).toBe('Answer based on doc');
+    // The failed web_search step is visible in the trace with its status marked
+    const webSearchStep = state.steps.find(s => s.node === 'web_search');
+    expect(webSearchStep?.status).toBe('error');
+  });
+
+  it('a fallback-source failure after eval retry stops retrying and keeps the last answer', async () => {
+    // Once queue in exact consumption order:
+    // call 1 route, call 2 HyDE, call 3 doc grade, call 4 hallucination, call 5 rewrite
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ datasource: 'vectorstore', confidence: 0.9 }) })
+      .mockResolvedValueOnce({ content: 'Hypothetical passage.' })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'no' }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ question: 'rewritten for websearch' }) });
+    (mockVectorstore.similaritySearch as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: 'Answer judged not useful',
+      usage: undefined,
+      model: 'answer-model',
+    });
+    // Fallback websearch fails on every retry attempt
+    (mockWebSearch.search as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('DuckDuckGo search failed: Network error: Failed to fetch.'),
+    );
+
+    const state = await orchestrator.run();
+
+    // No fatal error: the streamed answer stays and the failed step is visible
+    expect(state.error).toBeUndefined();
+    expect(state.answer).toBe('Answer judged not useful');
+    expect(state.routing).toBe('websearch');
+    const webSearchStep = state.steps.find(s => s.node === 'web_search');
+    expect(webSearchStep?.status).toBe('error');
   });
 });
 

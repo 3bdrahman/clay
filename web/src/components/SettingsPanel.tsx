@@ -10,7 +10,7 @@ import {
   type ProviderApiKeyField,
   type ProviderKind,
 } from '../lib/providers';
-import { modelClass } from '../lib/models';
+import { modelClass, type PickedModels } from '../lib/models';
 import type { LocalModelPicks, Settings } from '../lib/types';
 import { useConfirm } from '../hooks/useConfirm';
 import { useModalFocus } from '../hooks/useModalFocus';
@@ -39,10 +39,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   refreshModels: () => Promise<void>;
-  pickedModels: {
-    chat: string | undefined;
-    embedding: string | undefined;
-  };
+  pickedModels: PickedModels;
   resetAll: () => void;
   clearSandboxData: () => void;
 }
@@ -55,7 +52,6 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
   const modelsLoading = useAppStore(s => s.modelsLoading);
   const modelsError = useAppStore(s => s.modelsError);
   const [showKey, setShowKey] = useState(false);
-  const [showEmbKey, setShowEmbKey] = useState(false);
   const [showCorsHint, setShowCorsHint] = useState(false);
   const [confirm, renderConfirmDialog] = useConfirm();
   const { dialogRef, stopBackdrop } = useModalFocus(open);
@@ -89,12 +85,10 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
 
   const tasks: Array<{ key: LocalModelKey; label: string; hint: string }> = [
     { key: 'chat', label: 'Chat model', hint: 'Used for routing, code generation, answer, and evaluation' },
-    { key: 'embeddings', label: 'Embeddings', hint: 'Document + query vectors' },
   ];
 
-  const apiProviderTaskDisplay: Array<{ key: 'chatModel' | 'embedding'; label: string; hint: string }> = [
+  const apiProviderTaskDisplay: Array<{ key: 'chatModel'; label: string; hint: string }> = [
     { key: 'chatModel', label: 'Chat model', hint: 'Used for routing, code generation, answer, and evaluation' },
-    { key: 'embedding', label: 'Embedding', hint: 'Document + query vectors' },
   ];
 
   const isLocal = settings.provider === 'local';
@@ -106,7 +100,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
     : 'not loaded';
   const providerHintLine = isLocal
     ? `All LLM calls go to ${settings.localServerUrl || '(unset)'}. No API key required.`
-    : `All LLM calls go to ${config.baseUrl}. One API key — one chat model for all tasks (routing, code gen, answer, eval), separate embedding model.`;
+    : `All LLM calls go to ${config.baseUrl}. One API key — one chat model for all tasks (routing, code gen, answer, eval). Embeddings run locally in your browser.`;
 
   function setLocalModel(key: LocalModelKey, value: string) {
     updateSettings({ localModels: { ...settings.localModels, [key]: value } });
@@ -336,10 +330,13 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                         <option key={m.id} value={m.id} />
                       ))}
                    </datalist>
-                 </div>
-                ))}
-             </div>
-            </>
+                  </div>
+                 ))}
+                <p className="text-[10px] text-ink-500 dark:text-ink-400">
+                  Embeddings run locally in your browser (transformers.js) — nothing to pick.
+                </p>
+              </div>
+             </>
 ) : (
             <>
               <div>
@@ -466,10 +463,10 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                         <input
                           aria-label={t.label}
                           list={`provider-models-${t.key}`}
-                          placeholder={t.key === 'chatModel' ? 'Choose or enter a chat model' : 'Choose or enter an embedding model'}
+                          placeholder="Choose or enter a chat model"
                           value={settings.pickedModelsOverride[t.key] || ''}
                           onChange={e => updateSettings({
-                            pickedModelsOverride: { ...settings.pickedModelsOverride, [t.key]: e.target.value }
+                            pickedModelsOverride: { chatModel: e.target.value }
                           })}
                           className="flex-1 px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none font-mono"
                         />
@@ -481,7 +478,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                         {settings.pickedModelsOverride[t.key] && (
                           <button
                             onClick={() => updateSettings({
-                              pickedModelsOverride: { ...settings.pickedModelsOverride, [t.key]: '' }
+                              pickedModelsOverride: { chatModel: '' }
                             })}
                             className="px-2 py-1 text-[10px] text-ink-500 hover:text-ink-700 dark:hover:text-ink-300"
                             type="button"
@@ -495,61 +492,24 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
                       </div>
                       <p className="text-[10px] text-ink-500 dark:text-ink-400 mt-0.5">
                         Current: <span className="font-mono text-ink-700 dark:text-ink-200">
-                          {t.key === 'chatModel' ? pickedModels.chat || 'Choose a chat model' : pickedModels.embedding || 'No embedding model available'}
+                          {pickedModels.chat || 'Choose a chat model'}
                         </span>
                       </p>
                     </div>
                   ))}
+                  <p className="text-[10px] text-ink-500 dark:text-ink-400">
+                    Embeddings run locally in your browser (transformers.js) — nothing to pick.
+                  </p>
                 </div>
 
                 {pickedModels.chat && (
-                  <div className="pt-2 mt-1 border-t border-ink-200 dark:border-ink-700 text-[10px] text-ink-500 dark:text-ink-400 flex items-center justify-between">
+                  <div className="pt-2 mt-1 border-t border-ink-200 dark:border-ink-700 text-[10px] text-ink-500 dark:text-ink-400">
                     <span>Class: {modelClass(pickedModels.chat)}</span>
-                    {pickedModels.embedding && (
-                      <span>Embed class: {modelClass(pickedModels.embedding)}</span>
-                    )}
-                 </div>
+                  </div>
                 )}
-             </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
-                  Embeddings key <span className="text-ink-400 normal-case">(optional</span>
-               </label>
-                <div className="relative">
-                  <input
-                    type={showEmbKey ? 'text' : 'password'}
-                    value={settings.embeddingApiKey}
-                    onChange={e => updateSettings({ embeddingApiKey: e.target.value })}
-                    placeholder="Defaults to your LLM key"
-                    className="w-full px-3 py-2 pr-10 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none font-mono"
-                  />
-                  <button
-                    onClick={() => setShowEmbKey(s => !s)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700 dark:hover:text-ink-200"
-                    type="button"
-                    aria-label={showEmbKey ? 'Hide key' : 'Show key'}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d={
-                          showEmbKey
-                            ? 'M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21'
-                            : 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z'
-                        }
-                      />
-                    </svg>
-                  </button>
-                </div>
-                <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5">
-                  Leave empty to reuse your LLM key.
-               </p>
               </div>
-             </>
-           )}
+            </>
+          )}
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
