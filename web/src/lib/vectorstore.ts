@@ -100,13 +100,23 @@ export interface VectorStore {
   readonly persistenceAvailable: boolean;
 }
 
+function isFiniteNumberArray(vals: unknown[]): vals is number[] {
+  return vals.every((n) => typeof n === 'number' && Number.isFinite(n));
+}
+
 function coerceLegacyEmbedding(v: unknown): number[] | null {
-  if (Array.isArray(v) && v.every((n) => typeof n === 'number' && Number.isFinite(n))) return v as number[];
-  if (v && typeof v === 'object') {
-    const vals = Object.values(v as Record<string, unknown>);
-    if (vals.every((n) => typeof n === 'number' && Number.isFinite(n))) return vals as number[];
-  }
-  return null;
+  const candidate: unknown[] | null = Array.isArray(v)
+    ? v
+    : v && typeof v === 'object'
+      ? Object.values(v as Record<string, unknown>)
+      : null;
+  if (!candidate || !isFiniteNumberArray(candidate)) return null;
+  // An all-zero vector scores 0 against every query, so a migrated entry
+  // could never match anything. Reject it like any other invalid embedding;
+  // when no valid entries remain, readLegacy's zero-valid-entries path clears
+  // the legacy key instead of re-attempting migration on every load.
+  if (candidate.every((n) => n === 0)) return null;
+  return candidate;
 }
 
 function readLegacy(embeddingModel: string): VectorEntry[] | null {

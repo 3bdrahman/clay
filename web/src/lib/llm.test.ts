@@ -4,6 +4,7 @@ import {
   InvalidApiKeyError,
   RateLimitError,
   ProviderUnreachableError,
+  ProviderTimeoutError,
   StreamInterruptedError,
   GenerationFailedError,
   ModelNotFoundError,
@@ -469,5 +470,181 @@ describe('createLLMClient', () => {
     expect(retryBody.response_format).toBeUndefined();
     const secondBody = JSON.parse((mockFetch.mock.calls[2][1] as { body: string }).body);
     expect(secondBody.response_format).toBeUndefined();
+  });
+
+  // --- Timeout through body/read phase (wave 4) ---
+
+  it('rejects with ProviderTimeoutError when the stream stalls mid-read', async () => {
+    // The browser errors the response body when the request signal aborts —
+    // the mock must honor that contract or the abort is invisible to it.
+    mockFetch.mockImplementation((_url: string, init?: { signal?: AbortSignal }) => {
+      const stalledStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
+          const onAbort = () => controller.error(new DOMException('Aborted', 'AbortError'));
+          if (init?.signal?.aborted) onAbort();
+          else init?.signal?.addEventListener('abort', onAbort);
+        },
+      });
+      return Promise.resolve({ ok: true, body: stalledStream });
+    });
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '', timeoutMs: 60 });
+    await expect(
+      client.stream({ messages: [{ role: 'user', content: 'hi' }] }, () => {}),
+    ).rejects.toThrow(ProviderTimeoutError);
+  }, 2000);
+
+  it('surfaces the timeout budget in the stalled-stream error message', async () => {
+    mockFetch.mockImplementation((_url: string, init?: { signal?: AbortSignal }) => {
+      const stalledStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
+          const onAbort = () => controller.error(new DOMException('Aborted', 'AbortError'));
+          if (init?.signal?.aborted) onAbort();
+          else init?.signal?.addEventListener('abort', onAbort);
+        },
+      });
+      return Promise.resolve({ ok: true, body: stalledStream });
+    });
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '', timeoutMs: 60 });
+    const error = await client.stream({ messages: [{ role: 'user', content: 'hi' }] }, () => {}).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(ProviderTimeoutError);
+    expect((error as Error).message).toContain('timed out after 60ms');
+  }, 2000);
+
+  it('rejects with ProviderTimeoutError when the invoke body read stalls', async () => {
+    // Headers resolve immediately; the body never arrives, and resp.json()
+    // rejects when the request signal aborts (the browser contract).
+    mockFetch.mockImplementation((_url: string, init?: { signal?: AbortSignal }) => {
+      const abortError = new DOMException('Aborted', 'AbortError');
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise<never>((_resolve, reject) => {
+            const onAbort = () => reject(abortError);
+            if (init?.signal?.aborted) onAbort();
+            else init?.signal?.addEventListener('abort', onAbort);
+          }),
+      });
+    });
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '', timeoutMs: 60 });
+    await expect(
+      client.invoke({ messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toThrow(ProviderTimeoutError);
+  }, 2000);
+
+  it('classifies a fetch-phase timeout as a timeout, not a user interrupt', async () => {
+    // Simulate the browser fetch contract: the request rejects with an
+    // AbortError when the (combined) signal aborts. Here only the client's
+    // own timeout aborts it — no external signal is passed.
+    mockFetch.mockImplementation(
+      (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise<never>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        }),
+    );
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '', timeoutMs: 60 });
+    await expect(
+      client.invoke({ messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toThrow(ProviderTimeoutError);
+    await expect(
+      client.stream({ messages: [{ role: 'user', content: 'hi' }] }, () => {}),
+    ).rejects.toThrow(ProviderTimeoutError);
+  }, 2000);
+
+  it('still classifies an external abort during the call as StreamInterruptedError', async () => {
+    mockFetch.mockImplementation(
+      (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise<never>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        }),
+    );
+
+    const external = new AbortController();
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '', timeoutMs: 60000 });
+    const timer = setTimeout(() => external.abort(), 30);
+    try {
+      await expect(
+        client.invoke({ messages: [{ role: 'user', content: 'hi' }] }, external.signal),
+      ).rejects.toThrow(StreamInterruptedError);
+    } finally {
+      clearTimeout(timer);
+    }
+  }, 2000);
+
+  // --- Combined-signal listener hygiene (wave 4) ---
+
+  it('removes the abort listeners it added to the external signal after invoke resolves', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
+    });
+
+    const external = new AbortController();
+    const addSpy = vi.spyOn(external.signal, 'addEventListener');
+    const removeSpy = vi.spyOn(external.signal, 'removeEventListener');
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '' });
+    await client.invoke({ messages: [{ role: 'user', content: 'hi' }] }, external.signal);
+
+    const addedHandlers = addSpy.mock.calls.map((c) => c[1]);
+    const removedHandlers = removeSpy.mock.calls.map((c) => c[1]);
+    expect(addedHandlers.length).toBeGreaterThan(0);
+    for (const handler of addedHandlers) {
+      expect(removedHandlers).toContain(handler);
+    }
+  });
+
+  it('removes the abort listeners it added to the external signal after stream resolves', async () => {
+    const mockStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"H"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    mockFetch.mockResolvedValue({ ok: true, body: mockStream });
+
+    const external = new AbortController();
+    const addSpy = vi.spyOn(external.signal, 'addEventListener');
+    const removeSpy = vi.spyOn(external.signal, 'removeEventListener');
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '' });
+    await client.stream({ messages: [{ role: 'user', content: 'hi' }] }, () => {}, external.signal);
+
+    const addedHandlers = addSpy.mock.calls.map((c) => c[1]);
+    const removedHandlers = removeSpy.mock.calls.map((c) => c[1]);
+    expect(addedHandlers.length).toBeGreaterThan(0);
+    for (const handler of addedHandlers) {
+      expect(removedHandlers).toContain(handler);
+    }
+  });
+
+  it('removes the abort listeners even when the invoke throws', async () => {
+    mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const external = new AbortController();
+    const addSpy = vi.spyOn(external.signal, 'addEventListener');
+    const removeSpy = vi.spyOn(external.signal, 'removeEventListener');
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '' });
+    await expect(
+      client.invoke({ messages: [{ role: 'user', content: 'hi' }] }, external.signal),
+    ).rejects.toThrow();
+
+    const addedHandlers = addSpy.mock.calls.map((c) => c[1]);
+    const removedHandlers = removeSpy.mock.calls.map((c) => c[1]);
+    expect(addedHandlers.length).toBeGreaterThan(0);
+    for (const handler of addedHandlers) {
+      expect(removedHandlers).toContain(handler);
+    }
   });
 });

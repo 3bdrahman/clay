@@ -326,6 +326,50 @@ describe('createVectorStore', () => {
     expect(vs2.stats.entries).toBe(1);
   });
 
+  describe('legacy zero-vector migration (wave 4)', () => {
+    it('rejects an all-zero legacy embedding instead of migrating a never-matching vector', async () => {
+      localStorage.setItem(
+        'clay-vector-entries-v1',
+        JSON.stringify([
+          { id: '1', text: 'poison', source: 's', embedding: new Array(384).fill(0) },
+        ]),
+      );
+      const vs = createVectorStore(mockEmbeddings);
+      await vs.load();
+      expect(vs.stats.entries).toBe(0);
+      // Zero valid entries: the legacy key is cleared so migration is not
+      // re-attempted on every load.
+      expect(localStorage.getItem('clay-vector-entries-v1')).toBeNull();
+    });
+
+    it('migrates the valid entries and rejects the zero-vector entry in a mixed set', async () => {
+      localStorage.setItem(
+        'clay-vector-entries-v1',
+        JSON.stringify([
+          { id: '1', text: 'good', source: 's', embedding: [0.1, 0.2, 0.3] },
+          { id: '2', text: 'poison', source: 's', embedding: [0, 0, 0] },
+        ]),
+      );
+      const vs = createVectorStore(mockEmbeddings);
+      await vs.load();
+      expect(vs.stats.entries).toBe(1);
+    });
+
+    it('rejects an all-zero legacy embedding stored as a sparse object', async () => {
+      const obj: Record<string, number> = {};
+      obj['0'] = 0;
+      obj['1'] = 0;
+      obj['2'] = 0;
+      localStorage.setItem(
+        'clay-vector-entries-v1',
+        JSON.stringify([{ id: '1', text: 'a', source: 's', embedding: obj }]),
+      );
+      const vs = createVectorStore(mockEmbeddings);
+      await vs.load();
+      expect(vs.stats.entries).toBe(0);
+    });
+  });
+
   describe('modelId propagation (issue #7, #18)', () => {
     it('stamps entries with the configured embeddingModel, not "unknown"', async () => {
       const vs = createVectorStore(mockEmbeddings, { embeddingModel: 'nv-embedqa-e5-v5' });
