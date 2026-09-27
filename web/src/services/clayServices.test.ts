@@ -127,6 +127,28 @@ describe('createClayServiceBundle', () => {
     expect(analyzerArgs.metadata).toEqual({ employees: { columns: ['a'], rowCount: 1 } });
   });
 
+  it('passes maxToolLoopTokens through to the analyzer (undefined when unset)', () => {
+    const settings = baseSettings({ apiKey: 'k1', maxToolLoopTokens: 123_456 });
+    createClayServiceBundle({
+      settings,
+      catalog,
+      analyzerTables: new Map(),
+      analyzerMetadata: {},
+    });
+    const analyzerArgs = createDataAnalyzerMock.mock.calls[0][0] as { maxToolLoopTokens: number | undefined };
+    expect(analyzerArgs.maxToolLoopTokens).toBe(123_456);
+
+    const unsetSettings = baseSettings({ apiKey: 'k1' });
+    createClayServiceBundle({
+      settings: unsetSettings,
+      catalog,
+      analyzerTables: new Map(),
+      analyzerMetadata: {},
+    });
+    const unsetArgs = createDataAnalyzerMock.mock.calls[1][0] as { maxToolLoopTokens: number | undefined };
+    expect(unsetArgs.maxToolLoopTokens).toBeUndefined();
+  });
+
   it('local provider: user chat pick validated against the catalog', () => {
     const settings = baseSettings({
       provider: 'local',

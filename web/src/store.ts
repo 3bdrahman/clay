@@ -70,6 +70,8 @@ interface AppState {
   resetAll: () => void;
 }
 
+export const DEFAULT_TOOL_LOOP_TOKENS = 100_000;
+
 const DEFAULT_SETTINGS: Settings = {
   provider: 'openrouter',
   openrouterApiKey: '',
@@ -79,7 +81,7 @@ const DEFAULT_SETTINGS: Settings = {
   serperApiKey: '',
   temperature: 0,
   maxRetries: 3,
-  maxToolLoopTokens: 100_000,
+  maxToolLoopTokens: DEFAULT_TOOL_LOOP_TOKENS,
   vectorstoreInitialK: 8,
   theme: 'system',
   localServerUrl: LOCAL_DEFAULT_BASE_URL,

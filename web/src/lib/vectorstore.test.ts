@@ -408,4 +408,66 @@ describe('createVectorStore', () => {
       expect(legacyModelId).toBe('legacy');
     });
   });
+
+  describe('ANN index engagement (wave 4)', () => {
+    function axisVector(dim: number, axis: number): number[] {
+      const v = new Array(dim).fill(0);
+      v[axis] = 1;
+      return v;
+    }
+
+    it('retrieves the brute-force top-K through the index path above the annThreshold', async () => {
+      const vs = createVectorStore(mockEmbeddings, { annThreshold: 20 });
+      await vs.load();
+      const entries = [];
+      for (let i = 0; i < 40; i++) {
+        entries.push({
+          id: `e-${i}`,
+          text: `chunk ${i}`,
+          source: 'a.txt',
+          embedding: axisVector(64, i % 2 === 0 ? 0 : 1),
+        });
+      }
+      vs.addEntries(entries);
+      expect(vs.stats.entries).toBe(40);
+
+      (mockEmbeddings.embed as ReturnType<typeof vi.fn>).mockResolvedValueOnce([axisVector(64, 0)]);
+      const results = await vs.similaritySearch('query', 8);
+      const topIds = results.slice(0, 2).map(r => r.id).sort();
+      expect(topIds).toEqual(['e-0', 'e-2']);
+    });
+
+    it('stays on the exact brute-force path below the annThreshold', async () => {
+      const vs = createVectorStore(mockEmbeddings, { annThreshold: 50 });
+      await vs.load();
+      vs.addEntries([
+        { id: 'a', text: 'a', source: 's', embedding: axisVector(64, 0) },
+        { id: 'b', text: 'b', source: 's', embedding: axisVector(64, 1) },
+      ]);
+
+      (mockEmbeddings.embed as ReturnType<typeof vi.fn>).mockResolvedValueOnce([axisVector(64, 0)]);
+      const results = await vs.similaritySearch('query', 2);
+      expect(results[0].id).toBe('a');
+      expect(results[0].score).toBe(1);
+    });
+
+    it('keeps index results correct across removals (deleted entries filtered)', async () => {
+      const vs = createVectorStore(mockEmbeddings, { annThreshold: 10 });
+      await vs.load();
+      vs.addEntries([
+        { id: 'a', text: 'a', source: 'one', embedding: axisVector(64, 0) },
+        { id: 'b', text: 'b', source: 'two', embedding: axisVector(64, 1) },
+        { id: 'c', text: 'c', source: 'one', embedding: axisVector(64, 0) },
+        { id: 'd', text: 'd', source: 'two', embedding: axisVector(64, 1) },
+      ]);
+      expect(vs.stats.entries).toBe(4);
+
+      vs.removeBySource('one');
+      expect(vs.stats.entries).toBe(2);
+
+      (mockEmbeddings.embed as ReturnType<typeof vi.fn>).mockResolvedValueOnce([axisVector(64, 0)]);
+      const results = await vs.similaritySearch('query', 4);
+      expect(results.map(r => r.id).sort()).toEqual(['b', 'd']);
+    });
+  });
 });

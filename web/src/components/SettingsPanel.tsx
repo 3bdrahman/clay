@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAppStore } from '../store';
+import { useAppStore, DEFAULT_TOOL_LOOP_TOKENS } from '../store';
 import {
   LOCAL_PROVIDER_HINT,
   OLLAMA_CORS_HINT,
@@ -14,6 +14,10 @@ import { modelClass, type PickedModels } from '../lib/models';
 import type { LocalModelPicks, Settings } from '../lib/types';
 import { useConfirm } from '../hooks/useConfirm';
 import { useModalFocus } from '../hooks/useModalFocus';
+
+const MIN_TOOL_LOOP_TOKENS = 25_000;
+const MAX_TOOL_LOOP_TOKENS = 400_000;
+const TOOL_LOOP_TOKENS_STEP = 25_000;
 
 function validateLocalServerUrl(url: string): string | null {
   const trimmed = url.trim();
@@ -562,7 +566,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
               Temperature: <span className="font-mono">{settings.temperature.toFixed(2)}</span>
-           </label>
+            </label>
             <input
               type="range"
               min={0}
@@ -572,7 +576,25 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
               onChange={e => updateSettings({ temperature: parseFloat(e.target.value) })}
               className="w-full accent-brand-500"
             />
-         </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
+              Analysis token budget: <span className="font-mono">{(settings.maxToolLoopTokens ?? DEFAULT_TOOL_LOOP_TOKENS).toLocaleString()}</span>
+            </label>
+            <input
+              type="range"
+              min={MIN_TOOL_LOOP_TOKENS}
+              max={MAX_TOOL_LOOP_TOKENS}
+              step={TOOL_LOOP_TOKENS_STEP}
+              value={settings.maxToolLoopTokens ?? DEFAULT_TOOL_LOOP_TOKENS}
+              onChange={e => updateSettings({ maxToolLoopTokens: parseInt(e.target.value, 10) })}
+              className="w-full accent-brand-500"
+            />
+            <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5">
+              Cumulative token budget for the data-analysis tool loop (every LLM call in one analysis). Lower it to cap spend on data questions.
+            </p>
+          </div>
 
           <div className="pt-4 border-t border-ink-200 dark:border-ink-700">
             <button

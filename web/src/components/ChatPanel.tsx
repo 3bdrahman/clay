@@ -83,7 +83,14 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
     };
     addMessage(placeholder);
 
-    const updateAssistant = (workflow: WorkflowState) => {
+    let pipelineSettled = false;
+
+    const updateAssistant = (workflow: WorkflowState, final = false) => {
+      // emitSteps schedules a rAF that re-invokes this even after the
+      // pipeline settled; a late call would re-flag the placeholder as
+      // streaming (its answer is empty on the abort path) and brick the
+      // conversation. Only pre-settle updates apply.
+      if (pipelineSettled) return;
       const state = useAppStore.getState();
       const conv = state.conversations.find(c => c.messages.some(m => m.id === assistantId));
       const currentContent = conv?.messages.find(m => m.id === assistantId)?.content || '';
@@ -94,7 +101,7 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
         content: finalContent,
         timestamp: Date.now(),
         workflow: { ...workflow },
-        streaming: !workflow.answer,
+        streaming: final ? false : !workflow.answer,
       };
       updateMessage(assistantId, () => assistantMsg);
     };
@@ -180,7 +187,7 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
           updateMessage(assistantId, (m) => ({ ...m, streaming: false }));
         }
       } else {
-        updateAssistant(finalState);
+        updateAssistant(finalState, true);
       }
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
@@ -198,6 +205,9 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       };
       updateMessage(assistantId, () => errorMsg);
     } finally {
+      // The settle guard is set here so the explicit updates above land
+      // first; the late rAF (fires on the next frame) is then blocked.
+      pipelineSettled = true;
       setStreamingContent('');
       streamingMessageIdRef.current = null;
       if (abortControllerRef.current === controller) abortControllerRef.current = null;

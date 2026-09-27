@@ -2,6 +2,7 @@ import type { Document, ChunkMetadata } from './types';
 import type { EmbeddingsClient } from './embeddings';
 import { estimateTokens } from './tokens';
 import { openIDB, wrapIDBStore, type IDBStore } from './idb';
+import { createHnswIndex, type HnswIndex } from './hnsw';
 import {
   VectorStoreCorruptedError,
   VectorStoreQuotaExceededError,
@@ -69,16 +70,25 @@ const LEGACY_EMBEDDING_MODEL_ID = 'legacy';
  *   Ensures sufficient candidate pool for MMR reranking.
  * - useMMR defaults false: the shipped service bundle keeps MMR reranking
  *   off deliberately (see clayServices.ts for the decision record).
+ * - ANN_ENGAGE_THRESHOLD: 10k chunks — at or above it similaritySearch uses
+ *   the in-repo HNSW index (sub-linear, approximate recall); below it the
+ *   brute-force cosine scan stays exact. Measured scan cost at 10k chunks is
+ *   ~200-370ms per query, paid twice per retrieve and once per retry, so the
+ *   index earns its keep above the threshold.
+ * - DEFAULT_ANN_EF_SEARCH: 64 — the HNSW search breadth at or above the
+ *   candidate pool size.
  */
 const DEFAULT_TOP_K = 8;
 const DEFAULT_SCORE_THRESHOLD = 0;
 const DEFAULT_MMR_LAMBDA = 0.5;
 const DENSE_TOP_K_MULTIPLIER = 3;
+const ANN_ENGAGE_THRESHOLD = 10_000;
+const DEFAULT_ANN_EF_SEARCH = 64;
 
 interface VectorEntry {
   id: string;
   text: string;
-  embedding: number[];
+  embedding: Float32Array;
   metadata: ChunkMetadata;
 }
 
@@ -88,6 +98,10 @@ export interface VectorStoreConfig {
   useMMR?: boolean;
   mmrLambda?: number;
   embeddingModel?: string;
+  /** Chunk count at or above which the HNSW index engages. */
+  annThreshold?: number;
+  /** HNSW search breadth; at or above the candidate pool size. */
+  annEfSearch?: number;
 }
 
 export interface VectorStore {
@@ -138,7 +152,7 @@ function readLegacy(embeddingModel: string): VectorEntry[] | null {
       out.push({
         id: r.id,
         text: r.text,
-        embedding: emb,
+        embedding: Float32Array.from(emb),
         metadata: {
           source: r.source,
           sourceHash: '',
@@ -161,7 +175,7 @@ function readLegacy(embeddingModel: string): VectorEntry[] | null {
   }
 }
 
-function normalize(v: number[]): number[] {
+function normalize(v: number[]): Float32Array {
   if (v.length === 0) {
     throw new VectorStoreCorruptedError('empty embedding vector');
   }
@@ -176,19 +190,21 @@ function normalize(v: number[]): number[] {
   if (norm === 0) {
     throw new VectorStoreCorruptedError('embedding is the zero vector');
   }
-  return v.map((n) => n / norm);
+  const out = new Float32Array(v.length);
+  for (let i = 0; i < v.length; i++) out[i] = v[i]! / norm;
+  return out;
 }
 
-function cosineUnit(a: number[], b: number[]): number {
+function cosineUnit(a: Float32Array, b: Float32Array): number {
   if (a.length !== b.length) return 0;
   let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  for (let i = 0; i < a.length; i++) dot += a[i]! * b[i]!;
   return dot; // both unit-norm
 }
 
 interface ScoredCandidate { id: string; score: number; }
 
-function mmrSelect(candidates: ScoredCandidate[], embeddings: Map<string, number[]>, k: number, lambda: number): string[] {
+function mmrSelect(candidates: ScoredCandidate[], embeddings: Map<string, Float32Array>, k: number, lambda: number): string[] {
   const selected: string[] = [];
   const remaining = candidates.slice();
   while (selected.length < k && remaining.length > 0) {
@@ -260,6 +276,8 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     useMMR: config?.useMMR ?? false,
     mmrLambda: config?.mmrLambda ?? DEFAULT_MMR_LAMBDA,
     embeddingModel: config?.embeddingModel ?? '',
+    annThreshold: config?.annThreshold ?? ANN_ENGAGE_THRESHOLD,
+    annEfSearch: config?.annEfSearch ?? DEFAULT_ANN_EF_SEARCH,
   };
   const entryModelId = cfg.embeddingModel || LEGACY_EMBEDDING_MODEL_ID;
 
@@ -270,7 +288,26 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
   let warnOnce = false;
   let knownDimension: number | null = null;
   let persistenceAvailable = false;
+  let annIndex: HnswIndex | null = null;
   const pendingAdds: VectorEntry[] = [];
+
+  function ensureAnnIndex(): HnswIndex | null {
+    if (annIndex !== null) return annIndex;
+    if (knownDimension === null || knownDimension === 0) return null;
+    const index = createHnswIndex({ dimensions: knownDimension });
+    for (const e of memory.values()) index.insert(e.id, e.embedding);
+    annIndex = index;
+    return index;
+  }
+
+  function bruteForceCandidates(queryEmbedding: Float32Array, poolK: number): ScoredCandidate[] {
+    const scored: ScoredCandidate[] = [];
+    for (const e of memory.values()) {
+      scored.push({ id: e.id, score: cosineUnit(queryEmbedding, e.embedding) });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, poolK);
+  }
 
   function warnFallbackOnce(cause?: unknown): void {
     if (warnOnce) return;
@@ -302,7 +339,12 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
           localStorage.removeItem(LEGACY_KEY);
         }
       } else {
-        for (const e of existing) memory.set(e.id, e);
+        for (const e of existing) {
+          // Entries written before the Float32Array representation load as
+          // number[]; normalize the in-memory representation so every entry
+          // is uniform for the scan and index paths.
+          memory.set(e.id, { ...e, embedding: Float32Array.from(e.embedding) });
+        }
       }
     } catch (e) {
       warnFallbackOnce(e);
@@ -345,22 +387,30 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     } catch (e) {
       throw classifyError(e, 'embeddings', 'similaritySearch');
     }
-    const queryEmbedding = queryEmbeddingRaw[0];
-    if (!queryEmbedding) return [];
+    const queryRaw = queryEmbeddingRaw[0];
+    if (!queryRaw) return [];
+    const queryEmbedding = Float32Array.from(queryRaw);
 
-    // Dense cosine scoring (assumes normalized embeddings).
-    const scored: ScoredCandidate[] = [];
-    for (const e of memory.values()) {
-      scored.push({ id: e.id, score: cosineUnit(queryEmbedding, e.embedding) });
+    // Candidate pool: the ANN index at or above the engage threshold
+    // (sub-linear, approximate recall), brute-force cosine below it (exact).
+    const poolK = Math.max(topK * DENSE_TOP_K_MULTIPLIER, 6);
+    let denseCandidates: ScoredCandidate[];
+    if (memory.size >= cfg.annThreshold) {
+      const index = ensureAnnIndex();
+      denseCandidates = index
+        ? index
+            .search(queryEmbedding, poolK, Math.max(poolK, cfg.annEfSearch))
+            .map(f => ({ id: f.label, score: f.score }))
+        : bruteForceCandidates(queryEmbedding, poolK);
+    } else {
+      denseCandidates = bruteForceCandidates(queryEmbedding, poolK);
     }
-    scored.sort((a, b) => b.score - a.score);
-    const denseTop = scored.slice(0, Math.max(topK * DENSE_TOP_K_MULTIPLIER, 6));
 
-    const filtered = denseTop.filter((c) => c.score >= cfg.scoreThreshold);
+    const filtered = denseCandidates.filter((c) => c.score >= cfg.scoreThreshold);
 
     let chosen: string[];
     if (cfg.useMMR) {
-      const embMap = new Map<string, number[]>();
+      const embMap = new Map<string, Float32Array>();
       for (const id of new Set(filtered.map((f) => f.id))) {
         const e = memory.get(id);
         if (e) embMap.set(id, e.embedding);
@@ -370,7 +420,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
       chosen = filtered.slice(0, topK).map((c) => c.id);
     }
 
-    const scoreLookup = new Map(denseTop.map((m) => [m.id, m.score]));
+    const scoreLookup = new Map(denseCandidates.map((m) => [m.id, m.score]));
     const results: Document[] = [];
     for (const id of chosen) {
       const e = memory.get(id);
@@ -418,6 +468,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
         },
       };
       memory.set(entry.id, entry);
+      if (annIndex !== null) annIndex.insert(entry.id, entry.embedding);
       pendingAdds.push(entry);
       if (db) {
         const capture = db;
@@ -436,8 +487,15 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
 
   function removeBySource(source: string): number {
     const before = memory.size;
+    const removedIds: string[] = [];
     for (const [id, e] of memory) {
-      if (e.metadata.source === source) memory.delete(id);
+      if (e.metadata.source === source) {
+        memory.delete(id);
+        removedIds.push(id);
+      }
+    }
+    if (annIndex !== null) {
+      for (const id of removedIds) annIndex.markDeleted(id);
     }
     if (db) enqueueWrite(async () => {
       try {
@@ -452,6 +510,7 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
   function clear(): void {
     memory.clear();
     knownDimension = null;
+    annIndex = null;
     try {
       localStorage.removeItem(LEGACY_KEY);
     } catch (e) {
