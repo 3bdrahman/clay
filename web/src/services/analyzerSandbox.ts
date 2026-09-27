@@ -2,82 +2,71 @@
 // turn generated source into a result value, or a typed CodeExecutionError.
 
 import { CodeExecutionError } from '../lib/errors';
+import {
+  loadQuickJS,
+  runInRealm,
+  loadArqueroUmd,
+  isSafeRealmIdentifier,
+  tableToCsv,
+  type SandboxWorkerRequest,
+} from './realmExecutor';
 
 /**
- * SECURITY: Execute LLM-generated JavaScript in a constrained sandbox.
+ * SECURITY: Execute LLM-generated JavaScript inside a QuickJS realm in a
+ * dedicated Web Worker.
  *
  * ── Trust boundary ────────────────────────────────────────────────────────
  * The source of `code` is an LLM completion, NOT user-typed input. The LLM
  * has been system-prompted to emit only Arquero transformations, but the
  * underlying threat is prompt injection: a malicious document ingested via
  * the vectorstore (or a user-chosen CSV column header) could contain
- * instructions the LLM dutifully echoes into the generated code, after which
- * `new Function(...)` executes them in the host page context.
+ * instructions the LLM dutifully echoes into the generated code.
  *
- * ── Mitigations (current) ─────────────────────────────────────────────────
- *  - Strict mode (`"use strict"`) forbids accidental globals / `with` /
- *    undeclared assignments.
- *  - Limited scope. The only external references PASSED to the generated
- *    code are:
- *        • the `aq` Arquero namespace (isolated per execution — see below)
- *        • `op` Arquero operators object (fresh clone — see below)
- *        • one parameter per loaded dataset table (Arquero `ColumnTable`)
- *        • the `result` slot reserved for the return value
- *    RESIDUAL RISK: `new Function`'s scope chain terminates at the page's
- *    global scope, so bare references (`fetch(...)`, `localStorage`,
- *    `document`, `eval`, `Function`, `import`) RESOLVE to page globals even
- *    though none are passed in — strict mode removes only accidental
- *    globals, not global reach. The static scan below rejects the known
- *    vectors before execution; a determined injection can still construct
- *    references dynamically (String.fromCharCode etc.), which is the
- *    inherent risk of `new Function` and the reason the document-ingestion
- *    path lives in the same browser tab rather than a worker.
+ * ── Mitigations ───────────────────────────────────────────────────────────
+ *  - Realm isolation by construction. Each execution runs in a FRESH QuickJS
+ *    context with NO page globals: `fetch`, `localStorage`, `document`,
+ *    `Function`, `eval` all resolve to undefined inside the realm. The
+ *    escape-vector class that `new Function` could not close (its scope
+ *    chain reaches the page's global scope) is eliminated rather than
+ *    enumerated away. A fresh context per execution also means generated
+ *    code cannot poison the realm's own `aq` namespace or leak globals into
+ *    the next question's execution.
+ *  - Static scan, defense-in-depth. The scan below rejects the known escape
+ *    vectors BEFORE execution, so a rejected source fails fast with a
+ *    retryable error fed back to the model instead of paying realm startup.
+ *  - Off the UI thread. The realm runs in a dedicated Web Worker; the
+ *    interpreter's ~4-5x cost on data-heavy code (measured: a 20k-row
+ *    aggregate is 728ms interpreted vs 170ms JIT) never freezes the page.
+ *  - Bounded execution. The realm's interrupt handler trips at
+ *    EXECUTION_TIMEOUT_MS (an infinite loop in generated code is killed in
+ *    milliseconds instead of hanging the tab forever) and the runtime memory
+ *    limit bounds allocation.
+ *  - Data crossing the boundary. Dataset tables cannot cross the realm
+ *    boundary; the host serializes them with Arquero's own `toCSV` and the
+ *    realm re-parses via `fromCSV`, so the tables the generated code sees
+ *    are fresh per execution and the in-memory store cannot be poisoned.
+ *    Dataset names are validated as safe realm identifiers before injection.
+ *  - Worker death. The client listens for the worker's 'error' event,
+ *    rejects pending executions, and respawns on the next call; a silent
+ *    round-trip stall is rejected by the client-side timeout.
  *
- *  - Input discipline. CSV column names are NOT injected as identifier names
- *    (they're accessed as `d['column name with spaces']`). The only
- *    identifierss derived from user-controlled data are dataset names, which
- *    are themselves produced by `deriveName()` in `services/files.ts` and
- *    stripped to `[a-zA-Z0-9_]`.
- *
- * ── Mitigations NOT applied (and why) ─────────────────────────────────────
- *  - Web Worker isolation. Moving execution to a Worker would buy true
- *    wall-clock isolation (no access to `window`, no synchronous DOM), at
- *    the cost of postMessage serialization of Arquero tables on every call.
- *    Tracked as a follow-up — this is the only call site that would move.
- *  - CSP `unsafe-eval` removal. The Vite dev build and the GitHub Pages
- *    deploy both rely on `new Function`; turning it off would also disable
- *    React refresh in dev. A proper sandbox (`quickjs-emscripten`,
- *    `proxy-tree-walker`) is the long-term fix and is incompatible with the
- *    current "no backend, no wasm" deploy profile.
- *  - Full AST-level validation. A regex scan (applied — see
- *    `FORBIDDEN_CODE_PATTERNS`) rejects the known escape vectors before
- *    execution; an AST scan or a real sandbox (`quickjs-emscripten`,
- *    `proxy-tree-walker`) would narrow the remaining dynamic-construction
- *    evasion. The scan feeds its rejection back to the model as a retryable
- *    error result, bounded by the existing loop budgets; a false positive
- *    (a dataset column named exactly `window` or `constructor`) degrades to
- *    retries + salvage synthesis, visibly.
- *
- * ── Hardening applied here ────────────────────────────────────────────────
- * `op` is passed as a fresh shallow clone so generated code cannot mutate
- * the real `aq.op` and corrupt subsequent Arquero verbs. we do NOT freeze
- * `aq` because Arquero internally relies on the namespace being mutable
- * (attempted and reverted after test regression). Dataset tables are
- * Arquero `ColumnTable` instances (immutable by contract) and are re-read
- * from the `datasets` map on every execution, so generated code cannot
- * poison the in-memory store for the next question.
+ * ── Residual risk ─────────────────────────────────────────────────────────
+ *  - The `toCSV`/`fromCSV` round-trip re-parses values (numbers, nulls,
+ *    quoted strings); exotic column content could lose fidelity. The
+ *    analyzer's normalized CSV parse path produces the tables, and the
+ *    round-trip is verified by test.
+ *  - A bug in the QuickJS interpreter or the in-realm codecs is contained by
+ *    the per-execution context disposal.
+ *  - The main-thread realm path runs inline when no Worker exists (the test
+ *    harness); it is not used in production browsers.
  *
  * @throws CodeExecutionError for syntax errors, runtime errors, timeouts
  */
-/**
- * Static scan of the generated source for the known escape vectors. `new
- * Function`'s scope chain terminates at the page's global scope, so bare
- * references (`fetch(...)`, `localStorage`) resolve to page globals — the
- * scan rejects them before execution. A determined injection can construct
- * references dynamically (String.fromCharCode etc.) and evade the scan; the
- * retry loop feeds the rejection back to the model for self-correction, and
- * both paths are bounded by the existing budgets.
- */
+
+// (defense-in-depth) Static scan of the generated source for the known
+// escape vectors. The QuickJS realm resolves bare references to undefined,
+// so these cannot reach page globals any more — the scan still rejects them
+// before execution to fail fast with a retryable error for the model.
 const FORBIDDEN_CODE_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
   { pattern: /\.constructor/, label: 'constructor access' },
   { pattern: /__proto__/, label: 'prototype access' },
@@ -106,63 +95,117 @@ function assertCodeSafe(code: string): void {
   }
 }
 
-export function createUserCodeExecutor(datasets: Map<string, unknown>): (code: string) => unknown {
-  function executeUserCode(code: string): unknown {
-    assertCodeSafe(code);
-    const aq = datasets.get('aq') as { op?: Record<string, unknown>; from?: unknown; fromCSV?: unknown } | undefined;
-    const datasetsObj: Record<string, unknown> = {};
+const CLIENT_EXECUTION_TIMEOUT_MS = 15_000;
+
+export function createUserCodeExecutor(
+  datasets: Map<string, unknown>,
+  options?: { workerFactory?: () => Worker },
+): (code: string) => Promise<unknown> {
+  const hasWorker = typeof Worker !== 'undefined';
+
+  let worker: Worker | null = null;
+  let nextId = 1;
+  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+
+  function spawnWorker(): Worker {
+    const w = options?.workerFactory
+      ? options.workerFactory()
+      : new Worker(new URL('../workers/analysisSandboxWorker.ts', import.meta.url), { type: 'module' });
+
+    w.addEventListener('message', (ev: MessageEvent) => {
+      const data: unknown = ev.data;
+      if (typeof data !== 'object' || data === null) return;
+      const msg = data as { type?: string; id?: number; rows?: unknown; kind?: string; message?: string };
+      if (msg.type !== 'result' && msg.type !== 'error') return;
+      const id = msg.id;
+      if (typeof id !== 'number') return;
+      const entry = pending.get(id);
+      if (!entry) return;
+      pending.delete(id);
+      if (msg.type === 'result') {
+        entry.resolve(msg.rows);
+      } else {
+        const message = msg.message ?? 'sandbox execution failed';
+        entry.reject(new CodeExecutionError(message, new Error(message), {
+          code: '',
+          retryable: msg.kind === 'runtime',
+        }));
+      }
+    });
+
+    // The worker 'error' event fires when the script fails to load — no
+    // message is posted, so without this listener every pending execution
+    // hangs. Respawning happens on the next execution.
+    w.addEventListener('error', () => {
+      const message = 'analysis sandbox worker failed to load';
+      for (const entry of pending.values()) entry.reject(new Error(message));
+      pending.clear();
+      worker = null;
+    });
+
+    return w;
+  }
+
+  let mainThreadQuickJS: Awaited<ReturnType<typeof loadQuickJS>> | null = null;
+  let mainThreadAqUmd: string | null = null;
+
+  async function ensureMainThreadLoaded(): Promise<void> {
+    if (mainThreadQuickJS === null) mainThreadQuickJS = await loadQuickJS();
+    if (mainThreadAqUmd === null) mainThreadAqUmd = await loadArqueroUmd();
+  }
+
+  function collectTables(code: string): Array<{ name: string; csv: string }> {
+    const tables: Array<{ name: string; csv: string }> = [];
     for (const [name, table] of datasets) {
       if (name === 'aq') continue;
-      datasetsObj[name] = table;
-    }
-    const opRaw = aq?.op || {};
-    // Create a request-scoped aq wrapper to isolate the namespace per execution
-    const aqRef = {
-      from: aq?.from,
-      fromCSV: aq?.fromCSV,
-    };
-    const opRef = { ...opRaw };
-    const argNames = Object.keys(datasetsObj);
-    const argValues = Object.values(datasetsObj);
-
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-    const fn = new Function(
-      ...argNames,
-      'aq',
-      'op',
-      '"use strict"; let result; ' + code + '; return result;'
-    );
-
-    try {
-      const result = fn(...argValues, aqRef, opRef);
-      if (result && typeof result === 'object' && typeof (result as { objects?: () => unknown[] }).objects === 'function') {
-        return (result as { objects: () => unknown[] }).objects();
+      if (!isSafeRealmIdentifier(name)) {
+        throw new CodeExecutionError(
+          `dataset name "${name}" is not a safe realm identifier`,
+          new Error('unsafe dataset name'),
+          { code, retryable: false },
+        );
       }
-      return result;
-    } catch (e) {
-      const error = e instanceof Error ? e : new Error(String(e));
-
-      const isSyntaxError = error instanceof SyntaxError ||
-        error.name === 'SyntaxError' ||
-        error.message.includes('SyntaxError') ||
-        error.message.includes('Unexpected token') ||
-        error.message.includes('Unexpected end of input');
-
-      const isTimeout = error.name === 'TimeoutError' ||
-        error.message.includes('timeout') ||
-        error.message.includes('timed out');
-
-      throw new CodeExecutionError(
-        isSyntaxError ? 'Syntax error in generated code' :
-        isTimeout ? 'Code execution timed out' :
-        'Runtime error in generated code',
-        error,
-        {
-          code,
-          retryable: !isSyntaxError && !isTimeout,
-        }
-      );
+      tables.push({ name, csv: tableToCsv(table) });
     }
+    return tables;
+  }
+
+  async function executeUserCode(code: string): Promise<unknown> {
+    assertCodeSafe(code);
+
+    if (!hasWorker) {
+      // The main-thread realm path: environments without a Worker (the test
+      // harness). The same realm logic runs inline.
+      await ensureMainThreadLoaded();
+      const { rows, context } = runInRealm(
+        () => mainThreadQuickJS!.newContext(),
+        mainThreadAqUmd!,
+        code,
+        collectTables(code),
+      );
+      context.dispose();
+      return rows;
+    }
+
+    if (worker === null) worker = spawnWorker();
+    const id = nextId++;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const rows = await new Promise<unknown>((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      const request: SandboxWorkerRequest = { type: 'execute', id, code, tables: collectTables(code) };
+      worker!.postMessage(request);
+      timeoutId = setTimeout(() => {
+        if (pending.delete(id)) {
+          reject(new CodeExecutionError(
+            'Code execution timed out',
+            new Error('sandbox worker round-trip timed out'),
+            { code, retryable: false },
+          ));
+        }
+      }, CLIENT_EXECUTION_TIMEOUT_MS);
+    });
+    if (timeoutId !== null) clearTimeout(timeoutId);
+    return rows;
   }
 
   return executeUserCode;

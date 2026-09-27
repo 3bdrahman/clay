@@ -349,7 +349,7 @@ export function correlateTool(
   return { correlation, method, n };
 }
 
-export function runCodeTool(args: { code: string }, executor: (code: string) => unknown): unknown {
+export async function runCodeTool(args: { code: string }, executor: (code: string) => Promise<unknown>): Promise<unknown> {
   return executor(args.code);
 }
 
@@ -466,12 +466,12 @@ export const TOOL_SCHEMAS: ToolDefinition[] = [
   },
 ];
 
-export function executeToolCall(
+export async function executeToolCall(
   ctx: AnalysisToolContext,
   name: string,
   args: Record<string, unknown>,
-  executor?: (code: string) => unknown
-): unknown {
+  executor?: (code: string) => Promise<unknown>
+): Promise<unknown> {
   switch (name) {
     case 'list_datasets':
       return listDatasetsTool(ctx);

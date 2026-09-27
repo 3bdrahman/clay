@@ -16,7 +16,7 @@ export interface SingleShotDeps {
   metadata: DatasetMeta;
   codeGenModel?: string;
   relevantDatasets: (question: string) => string[];
-  executeUserCode: (code: string) => unknown;
+  executeUserCode: (code: string) => Promise<unknown>;
 }
 
 export function createSingleShotAnalyzer(
@@ -174,7 +174,7 @@ export function createSingleShotAnalyzer(
         const parsed = JSON.parse(resp.content || '{"code":"","explanation":""}');
         code = parsed.code || '';
         if (!code) throw new Error('Empty code from LLM');
-        const result = executeUserCode(code);
+        const result = await executeUserCode(code);
         return formatResult(question, result, code, parsed.explanation, attempt + 1, start);
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e));

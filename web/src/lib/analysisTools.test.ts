@@ -486,12 +486,12 @@ describe('analysisTools - correlateTool', () => {
 });
 
 describe('analysisTools - runCodeTool', () => {
-  it('executes code via executor and returns result', () => {
-    const executor = vi.fn((code: string) => {
+  it('executes code via executor and returns result', async () => {
+    const executor = vi.fn(async (code: string) => {
       if (code.includes('return 42')) return 42;
       return undefined;
     });
-    const result = runCodeTool({ code: 'return 42' }, executor);
+    const result = await runCodeTool({ code: 'return 42' }, executor);
     expect(result).toBe(42);
     expect(executor).toHaveBeenCalledWith('return 42');
   });
@@ -504,21 +504,21 @@ describe('analysisTools - executeToolCall', () => {
     metadata: { data: { columns: ['a', 'b'], rowCount: 1 } },
   };
 
-  const executor = vi.fn((code: string) => `executed: ${code}`);
+  const executor = vi.fn(async (code: string) => `executed: ${code}`);
 
-  it('dispatches list_datasets', () => {
-    const result = executeToolCall(ctx, 'list_datasets', {}, executor);
+  it('dispatches list_datasets', async () => {
+    const result = await executeToolCall(ctx, 'list_datasets', {}, executor);
     expect(Array.isArray(result)).toBe(true);
     expect(result).toHaveLength(1);
   });
 
-  it('dispatches profile_column', () => {
-    const result = executeToolCall(ctx, 'profile_column', { dataset: 'data', column: 'a' }, executor);
+  it('dispatches profile_column', async () => {
+    const result = await executeToolCall(ctx, 'profile_column', { dataset: 'data', column: 'a' }, executor);
     expect(result).toHaveProperty('type');
   });
 
-  it('dispatches aggregate', () => {
-    const result = executeToolCall(ctx, 'aggregate', {
+  it('dispatches aggregate', async () => {
+    const result = await executeToolCall(ctx, 'aggregate', {
       dataset: 'data',
       groupBy: 'a',
       measures: [{ column: 'b', fn: 'sum' }],
@@ -526,39 +526,39 @@ describe('analysisTools - executeToolCall', () => {
     expect(Array.isArray(result)).toBe(true);
   });
 
-  it('dispatches filter_sample', () => {
-    const result = executeToolCall(ctx, 'filter_sample', { dataset: 'data' }, executor);
+  it('dispatches filter_sample', async () => {
+    const result = await executeToolCall(ctx, 'filter_sample', { dataset: 'data' }, executor);
     expect(Array.isArray(result)).toBe(true);
   });
 
-  it('dispatches correlate', () => {
-    const result = executeToolCall(ctx, 'correlate', { dataset: 'data', columnA: 'a', columnB: 'b' }, executor);
+  it('dispatches correlate', async () => {
+    const result = await executeToolCall(ctx, 'correlate', { dataset: 'data', columnA: 'a', columnB: 'b' }, executor);
     expect(result).toHaveProperty('correlation');
   });
 
-  it('dispatches run_code', () => {
-    const result = executeToolCall(ctx, 'run_code', { code: '1+1' }, executor);
+  it('dispatches run_code', async () => {
+    const result = await executeToolCall(ctx, 'run_code', { code: '1+1' }, executor);
     expect(result).toBe('executed: 1+1');
   });
 
-  it('throws AnalysisToolError for unknown tool name', () => {
-    expect(() => executeToolCall(ctx, 'unknown_tool', {}, executor)).toThrow(AnalysisToolError);
+  it('throws AnalysisToolError for unknown tool name', async () => {
+    await expect(executeToolCall(ctx, 'unknown_tool', {}, executor)).rejects.toThrow(AnalysisToolError);
   });
 
-  it('throws AnalysisToolError for bad args (missing dataset)', () => {
-    expect(() => executeToolCall(ctx, 'profile_column', { column: 'a' }, executor)).toThrow(AnalysisToolError);
+  it('throws AnalysisToolError for bad args (missing dataset)', async () => {
+    await expect(executeToolCall(ctx, 'profile_column', { column: 'a' }, executor)).rejects.toThrow(AnalysisToolError);
   });
 
-  it('throws AnalysisToolError for bad args (unknown dataset)', () => {
-    expect(() => executeToolCall(ctx, 'profile_column', { dataset: 'unknown', column: 'a' }, executor)).toThrow(AnalysisToolError);
+  it('throws AnalysisToolError for bad args (unknown dataset)', async () => {
+    await expect(executeToolCall(ctx, 'profile_column', { dataset: 'unknown', column: 'a' }, executor)).rejects.toThrow(AnalysisToolError);
   });
 
-  it('throws AnalysisToolError for bad args (empty measures)', () => {
-    expect(() => executeToolCall(ctx, 'aggregate', { dataset: 'data', groupBy: 'a', measures: [] }, executor)).toThrow(AnalysisToolError);
+  it('throws AnalysisToolError for bad args (empty measures)', async () => {
+    await expect(executeToolCall(ctx, 'aggregate', { dataset: 'data', groupBy: 'a', measures: [] }, executor)).rejects.toThrow(AnalysisToolError);
   });
 
-  it('throws AnalysisToolError for bad args (empty code)', () => {
-    expect(() => executeToolCall(ctx, 'run_code', { code: '' }, executor)).toThrow(AnalysisToolError);
+  it('throws AnalysisToolError for bad args (empty code)', async () => {
+    await expect(executeToolCall(ctx, 'run_code', { code: '' }, executor)).rejects.toThrow(AnalysisToolError);
   });
 });
 

@@ -33,7 +33,7 @@ export interface AnalyzerToolLoopDeps {
   metadata: { [datasetName: string]: { columns: string[]; rowCount: number } };
   codeGenModel?: string;
   maxToolLoopTokens?: number;
-  executeUserCode: (code: string) => unknown;
+  executeUserCode: (code: string) => Promise<unknown>;
 }
 
 export interface AnalyzerToolLoopOptions {
@@ -355,7 +355,7 @@ export async function runToolLoop(
                 datasets: deps.datasets,
                 metadata: deps.metadata,
               };
-              toolResult = executeToolCall(ctx, toolName, args, deps.executeUserCode);
+              toolResult = await executeToolCall(ctx, toolName, args, deps.executeUserCode);
             } catch (e) {
               const err = e instanceof Error ? e : new Error(String(e));
               toolError = err.message;

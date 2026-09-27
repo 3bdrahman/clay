@@ -25,6 +25,7 @@
     "marked": "^18.0.7",
     "pdfjs-dist": "^6.3.289",
     "postcss": "^8.5.25",
+    "quickjs-emscripten": "^0.32.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "recharts": "^3.10.1",
