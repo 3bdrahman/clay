@@ -67,6 +67,8 @@ const LEGACY_EMBEDDING_MODEL_ID = 'legacy';
  *   Standard default for Maximal Marginal Relevance.
  * - DENSE_TOP_K_MULTIPLIER: 3 - fetch 3x top-K from dense search before fusion.
  *   Ensures sufficient candidate pool for MMR reranking.
+ * - useMMR defaults false: the shipped service bundle keeps MMR reranking
+ *   off deliberately (see clayServices.ts for the decision record).
  */
 const DEFAULT_TOP_K = 8;
 const DEFAULT_SCORE_THRESHOLD = 0;

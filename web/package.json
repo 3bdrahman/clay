@@ -13,7 +13,7 @@
     "lint:fix": "oxlint src --fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "eval": "vitest run src/eval/eval.test.ts",
+    "eval": "vitest run src/eval/",
     "generate:og-image": "node scripts/generate-og-image.mjs",
     "verify": "npm run type-check && npm run lint && npm run test && npm run build"
   },

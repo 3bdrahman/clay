@@ -55,6 +55,12 @@ export function createClayServiceBundle(input: ClayServiceBundleInput): ClayServ
   const embeddings = createEmbeddingsClient();
   // Entries and queries embed under the same fixed local model — the model
   // never changes across adapters, so stored vectors always match queries.
+  // MMR reranking ships off deliberately (useMMR defaults false): the dense
+  // path already fetches 3x top-K candidates and the HyDE reranker supplies
+  // diversity upstream, while MMR trades top-1 relevance for diversity —
+  // near-duplicate chunks reinforce the same context and rarely hurt the
+  // judge's grounded-answer check. Revisit when eval baseline data supports
+  // the relevance/diversity tradeoff.
   const vectorstore = createVectorStore(embeddings, {
     embeddingModel: EMBEDDING_MODEL_ID,
   });

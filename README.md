@@ -145,6 +145,7 @@ The site deploys to **GitHub Pages** via [`.github/workflows/deploy-github-pages
 | Eval grades answers, not just routing | Lexical overlap + LLM-as-judge scores against the golden set, with aggregates — quality claims are measurable | `eval/runner.ts` |
 | Retrieval-only query rewriting | On eval failure the question is rewritten for the retried source; the answer still answers the original question | `orchestrator.ts` retry loop |
 | Final synthesis rides the loop's last response | A separate streaming synthesis call would add a round trip per analysis; live visibility comes from sub-steps + reflections | `analyzer.ts` `runToolLoop` |
+| MMR reranking ships off | The dense path fetches 3× top-K and HyDE supplies diversity upstream; MMR trades top-1 relevance for diversity, and near-duplicate chunks rarely hurt the judge's grounded-answer check. Enable per-store when eval baseline data supports it | `vectorstore.ts` (`useMMR`), `clayServices.ts` |
 
 ---
 
@@ -274,6 +275,16 @@ npm run lint
 # Full verification (type-check + lint + test + build)
 npm run verify
 ```
+
+### Quality measurement in CI
+
+Every push runs the **no-LLM golden-summary gate** (`web/src/eval/goldenSummary.test.ts`): the schema-bound golden question set is regenerated deterministically, and lexical-overlap aggregates (overlap between each question and its golden answer, via the same scoring function the eval runner uses) are compared against a committed baseline (`web/src/eval/goldenBaseline.json`). Aggregates that drop more than 0.03 below the baseline fail the check — golden-set drift (a degraded golden answer, a mispaired question, a template change that hurts coherence) is caught in CI. Regenerate the baseline after intentional golden-set changes:
+
+```bash
+EVAL_UPDATE_BASELINE=1 npx vitest run src/eval/goldenSummary.test.ts
+```
+
+The full LLM-backed eval (`npm run eval`, gated on `VITE_EVAL_API_KEY`) runs the complete golden set against the live provider with routing/judge/latency scoring, but needs a browser-like environment (real Web Worker for embeddings, an HTTP origin for the bundled sample data) that the Node test harness cannot provide — it is not wired into CI. Run it locally against a real key.
 
 ---
 

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "aggregates": {
+    "avgQuestionGoldenOverlap": 0.128825435055786,
+    "minQuestionGoldenOverlap": 0.03788279468975105,
+    "perCategory": {
+      "data_analysis": 0.1384893184676196,
+      "documents": 0.11410471763198479,
+      "web_search": 0.11470443044812034
+    }
+  }
+}
