@@ -23,7 +23,7 @@ const { mockLLM, mockVectorstore } = vi.hoisted(() => {
   };
   return {
     mockLLM: { invoke: vi.fn(), stream: vi.fn() },
-    mockVectorstore: { similaritySearch: vi.fn(async () => [fakeDoc]) },
+    mockVectorstore: { similaritySearch: vi.fn(async () => [fakeDoc]), listSources: vi.fn(() => []) },
   };
 });
 

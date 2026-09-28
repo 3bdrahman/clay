@@ -4,7 +4,7 @@ import type { LLMClient } from '../lib/llm';
 import type { VectorStore } from '../lib/vectorstore';
 import type { WebSearchClient } from '../lib/websearch';
 import type { DataAnalyzer, AnalyzerHooks } from '../services/analyzer';
-import type { Settings, Document, WebResult, DataAnalysisResult } from '../lib/types';
+import type { Settings, Document, WebResult, DataAnalysisResult, DatasetSummary } from '../lib/types';
 import type { PickedModels } from '../lib/models';
 import { AnalysisBudgetExceededError, ProviderUnreachableError } from '../lib/errors';
 
@@ -25,7 +25,10 @@ const mockVectorstore: VectorStore = {
   addEntries: vi.fn<void, [Array<{ id: string; text: string; source: string; page?: number; embedding: number[] }>]>(),
   removeBySource: vi.fn<number, [string]>(),
   clear: vi.fn<void, []>(),
+  getSourceHashes: vi.fn<Set<string>, [string]>(),
+  listSources: vi.fn<Array<{ source: string; entryCount: number }>, []>(() => []),
   stats: { entries: 0 },
+  persistenceAvailable: true,
 };
 
 const mockWebSearch: WebSearchClient = {
@@ -34,7 +37,7 @@ const mockWebSearch: WebSearchClient = {
 
 const mockAnalyzer: DataAnalyzer = {
   analyze: vi.fn<Promise<DataAnalysisResult>, [string, AbortSignal?, AnalyzerHooks?]>(),
-  listDatasets: vi.fn<DatasetSummary[], []>(),
+  listDatasets: vi.fn<DatasetSummary[], []>(() => []),
   getDatasetSummary: vi.fn<DatasetSummary | undefined, [string]>(),
 };
 
@@ -56,7 +59,7 @@ describe('createWorkflowOrchestrator', () => {
   let orchestrator: ReturnType<typeof createWorkflowOrchestrator>;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([]);
@@ -206,11 +209,22 @@ describe('createWorkflowOrchestrator', () => {
       usage: undefined,
       model: 'answer-model',
     });
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockResolvedValue({
+      type: 'data_analysis',
+      question: 'test question',
+      code: '',
+      explanation: 'the answer from data',
+      resultType: 'scalar',
+      result: '42',
+      attempts: 1,
+      durationMs: 1,
+      timestamp: Date.now(),
+    });
 
     const state = await orchestrator.run();
 
     expect(state.retryCount).toBe(1);
-    expect(state.routing).toBe('websearch');
+    expect(state.routing).toBe('python');
   });
 
   it('includes data analysis in citations', async () => {
@@ -701,7 +715,7 @@ describe('createWorkflowOrchestrator — analyzer tool-call sub-steps and insigh
   let stepUpdates: StepTrace[][] = [];
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([]);
@@ -849,7 +863,7 @@ describe('createWorkflowOrchestrator — analyzer tool-call sub-steps and insigh
 
 describe('createWorkflowOrchestrator — route datasource validation (FIX 1)', () => {
   it('an invalid route datasource falls back to vectorstore', async () => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([
@@ -896,7 +910,7 @@ describe('createWorkflowOrchestrator — route datasource validation (FIX 1)', (
 
 describe('createWorkflowOrchestrator — withRetry RagError preservation (FIX 2)', () => {
   it('a typed RagError from the analyzer keeps its message', async () => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([]);
@@ -949,7 +963,7 @@ describe('createWorkflowOrchestrator — withRetry RagError preservation (FIX 2)
 
 describe('createWorkflowOrchestrator — fallback reason visibility (FIX 3)', () => {
   it('the fallback reason appears in the analyze step detail', async () => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([]);
@@ -1014,7 +1028,7 @@ describe('createWorkflowOrchestrator — rAF coalescing of onPartialUpdate', () 
   let partialUpdates: WorkflowState[] = [];
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([]);
@@ -1092,7 +1106,7 @@ describe('createWorkflowOrchestrator — step-level observability (retries + tok
   let stepUpdates: StepTrace[][] = [];
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([]);
@@ -1250,7 +1264,7 @@ describe('createWorkflowOrchestrator — step-level observability (retries + tok
 
   it('records tokensUsed in step meta for evaluate step (sum of both invokes)', async () => {
     // Reset all mocks for this test
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([
@@ -1321,7 +1335,7 @@ describe('createWorkflowOrchestrator — step-level observability (retries + tok
   });
 
   it('threads previousAnalysis into the analyzer call for cross-turn memory', async () => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     stepUpdates = [];
@@ -1391,7 +1405,7 @@ describe('createWorkflowOrchestrator — query rewriting on eval failure (Unit 1
   let stepUpdates: StepTrace[][] = [];
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([
@@ -1459,18 +1473,17 @@ describe('createWorkflowOrchestrator — query rewriting on eval failure (Unit 1
     const state = await orchestrator.run();
 
     expect(state.retryCount).toBe(1);
-    expect(state.routing).toBe('websearch');
-    expect(state.webResults).toHaveLength(1);
-    expect(state.webResults[0].content).toBe('Web content for rewritten question');
+    expect(state.routing).toBe('python');
+    expect(state.webResults).toHaveLength(0);
 
     const rewriteCall = vi.mocked(mockLLM.invoke).mock.calls.find(
-      (call) => call[0]?.messages?.[0]?.content?.includes('Rewrite this question to maximize retrieval effectiveness for websearch')
+      (call) => call[0]?.messages?.[0]?.content?.includes('Rewrite this question to maximize retrieval effectiveness for python')
     );
     expect(rewriteCall).toBeDefined();
 
-    const webSearchCalls = vi.mocked(mockWebSearch.search).mock.calls;
-    expect(webSearchCalls.length).toBe(1);
-    expect(webSearchCalls[0][0]).toBe('rewritten question for web search');
+    const analyzerCalls = vi.mocked(mockAnalyzer.analyze).mock.calls;
+    expect(analyzerCalls.length).toBe(1);
+    expect(analyzerCalls[0][0]).toBe('rewritten question for web search');
   });
 
   it('falls back to original question when rewrite parse fails', async () => {
@@ -1513,13 +1526,24 @@ describe('createWorkflowOrchestrator — query rewriting on eval failure (Unit 1
     (mockWebSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue([
       { type: 'web_search', title: 'Web Result', content: 'Web content for original', url: 'http://example.com' },
     ]);
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockResolvedValue({
+      type: 'data_analysis',
+      question: 'original question about data',
+      code: '',
+      explanation: 'the answer from data',
+      resultType: 'scalar',
+      result: '42',
+      attempts: 1,
+      durationMs: 1,
+      timestamp: Date.now(),
+    });
 
     const state = await orchestrator.run();
 
     expect(state.retryCount).toBe(1);
-    expect(state.routing).toBe('websearch');
-    const webSearchCalls = vi.mocked(mockWebSearch.search).mock.calls;
-    expect(webSearchCalls[0][0]).toBe('original question about data');
+    expect(state.routing).toBe('python');
+    const analyzerCalls = vi.mocked(mockAnalyzer.analyze).mock.calls;
+    expect(analyzerCalls[0][0]).toBe('original question about data');
   });
 
   it('generate step still uses original question in prompt even after rewrite', async () => {
@@ -1562,6 +1586,17 @@ describe('createWorkflowOrchestrator — query rewriting on eval failure (Unit 1
     (mockWebSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue([
       { type: 'web_search', title: 'Web', content: 'Web content', url: 'http://example.com' },
     ]);
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockResolvedValue({
+      type: 'data_analysis',
+      question: 'original question about data',
+      code: '',
+      explanation: 'the answer from data',
+      resultType: 'scalar',
+      result: '42',
+      attempts: 1,
+      durationMs: 1,
+      timestamp: Date.now(),
+    });
 
     await orchestrator.run();
 
@@ -1579,7 +1614,7 @@ describe('createWorkflowOrchestrator — plan on first iteration (Unit 2)', () =
   let stepUpdates: StepTrace[][] = [];
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([]);
@@ -1702,7 +1737,7 @@ describe('createWorkflowOrchestrator — router confidence + multi-source fallba
   let stepUpdates: StepTrace[][] = [];
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([
@@ -1987,7 +2022,7 @@ describe('createWorkflowOrchestrator — router confidence + multi-source fallba
     const state = await orchestrator.run();
 
     expect(state.initialRouting).toBe('vectorstore');
-    expect(state.routing).toBe('websearch');
+    expect(state.routing).toBe('python');
   });
 
   it('a fallback-source failure after eval retry stops retrying and keeps the last answer', async () => {
@@ -2007,9 +2042,10 @@ describe('createWorkflowOrchestrator — router confidence + multi-source fallba
       usage: undefined,
       model: 'answer-model',
     });
-    // Fallback websearch fails on every retry attempt
-    (mockWebSearch.search as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error('DuckDuckGo search failed: Network error: Failed to fetch.'),
+    // The fallback source is python (the richest untried); it fails on every
+    // attempt, so the loop stops and keeps the last generated answer.
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new ProviderUnreachableError('Local (OpenAI-compatible)', new Error('Failed to fetch'), { retryable: true }),
     );
 
     const state = await orchestrator.run();
@@ -2017,9 +2053,9 @@ describe('createWorkflowOrchestrator — router confidence + multi-source fallba
     // No fatal error: the streamed answer stays and the failed step is visible
     expect(state.error).toBeUndefined();
     expect(state.answer).toBe('Answer judged not useful');
-    expect(state.routing).toBe('websearch');
-    const webSearchStep = state.steps.find(s => s.node === 'web_search');
-    expect(webSearchStep?.status).toBe('error');
+    expect(state.routing).toBe('python');
+    const analyzeStep = state.steps.find(s => s.node === 'analyze');
+    expect(analyzeStep?.status).toBe('error');
   });
 });
 
@@ -2028,7 +2064,7 @@ describe('createWorkflowOrchestrator — onSynthesisToken wiring (Unit 4)', () =
   let stepUpdates: StepTrace[][] = [];
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockVectorstore.load.mockResolvedValue(undefined);
     mockVectorstore.stats = { entries: 0 };
     mockVectorstore.similaritySearch.mockResolvedValue([]);
@@ -2117,6 +2153,167 @@ describe('createWorkflowOrchestrator — onSynthesisToken wiring (Unit 4)', () =
 
     // Assert the tokens arrive at the onToken callback
     expect(receivedTokens).toEqual(['Salvaged ', 'answer ', 'streamed.']);
+  });
+});
+
+describe('createWorkflowOrchestrator — router context + untried-source fallback (wave 4)', () => {
+  it('router user message carries loaded datasets, documents, and websearch availability', async () => {
+    vi.resetAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockAnalyzer.listDatasets.mockReturnValue([
+      { name: 'employees', fileName: 'employees.csv', columns: ['id', 'name', 'salary_usd'], rowCount: 10 },
+    ]);
+    mockVectorstore.listSources.mockReturnValue([{ source: 'handbook.pdf', entryCount: 3 }]);
+
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'python', confidence: 0.9 }),
+    });
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockResolvedValue({
+      type: 'data_analysis',
+      question: 'what is the average salary_usd?',
+      code: '',
+      explanation: '42',
+      resultType: 'scalar',
+      result: '42',
+      attempts: 1,
+      durationMs: 1,
+      timestamp: Date.now(),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({ content: 'Answer' });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } });
+
+    const orchestrator = createWorkflowOrchestrator(
+      'what is the average salary_usd?',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {},
+    );
+    await orchestrator.run();
+
+    const routeCall = (mockLLM.invoke as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+      system: string;
+      messages: Array<{ role: string; content: string }>;
+    };
+    const userContent = routeCall.messages[0].content;
+    expect(userContent).toContain('what is the average salary_usd?');
+    expect(userContent).toContain('employees');
+    expect(userContent).toContain('salary_usd');
+    expect(userContent).toContain('handbook.pdf');
+    expect(userContent.toLowerCase()).toContain('web search');
+  });
+
+  it('router user message marks disabled websearch as never-route', async () => {
+    vi.resetAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.listSources.mockReturnValue([]);
+    mockAnalyzer.listDatasets.mockReturnValue([
+      { name: 'employees', fileName: 'employees.csv', columns: ['id'], rowCount: 10 },
+    ]);
+
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      content: JSON.stringify({ datasource: 'python', confidence: 0.9 }),
+    });
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockResolvedValue({
+      type: 'data_analysis',
+      question: 'how many rows',
+      code: '',
+      explanation: '10',
+      resultType: 'scalar',
+      result: '10',
+      attempts: 1,
+      durationMs: 1,
+      timestamp: Date.now(),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({ content: 'Answer' });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }), usage: { totalTokens: 10 } });
+
+    const orchestrator = createWorkflowOrchestrator(
+      'how many rows',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: { ...testSettings, webSearchProvider: 'none' },
+        pickedModels: testPickedModels,
+      },
+      {},
+    );
+    await orchestrator.run();
+
+    const routeCall = (mockLLM.invoke as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const userContent = routeCall.messages[0].content;
+    expect(userContent).toMatch(/disabled|never route/i);
+  });
+
+  it('eval-failed fallback routes to untried python after vectorstore', async () => {
+    vi.resetAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.listSources.mockReturnValue([]);
+    mockAnalyzer.listDatasets.mockReturnValue([
+      { name: 'employees', fileName: 'employees.csv', columns: ['id', 'salary_usd'], rowCount: 10 },
+    ]);
+    mockVectorstore.similaritySearch.mockResolvedValue([
+      { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
+    ]);
+
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ datasource: 'vectorstore', confidence: 0.9 }) })
+      .mockResolvedValueOnce({ content: 'Hypothetical passage.' })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'no' }), usage: { totalTokens: 10 } })
+      .mockResolvedValueOnce({ content: JSON.stringify({ question: 'rewritten question' }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'yes' }) });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: 'Answer', usage: undefined, model: 'answer-model' })
+      .mockResolvedValueOnce({ content: 'Better answer', usage: undefined, model: 'answer-model' });
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockResolvedValue({
+      type: 'data_analysis',
+      question: 'test question',
+      code: '',
+      explanation: 'the answer from data',
+      resultType: 'scalar',
+      result: '42',
+      attempts: 1,
+      durationMs: 1,
+      timestamp: Date.now(),
+    });
+
+    const orchestrator = createWorkflowOrchestrator(
+      'test question',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {},
+    );
+    const state = await orchestrator.run();
+
+    expect(state.routing).toBe('python');
+    expect(mockAnalyzer.analyze).toHaveBeenCalled();
+    expect(mockWebSearch.search).not.toHaveBeenCalled();
   });
 });
 });

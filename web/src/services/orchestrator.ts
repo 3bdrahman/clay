@@ -50,6 +50,55 @@ const ROUTER_CONFIDENCE_THRESHOLD = 0.6;
 const MAX_STEP_RETRIES = 2;
 const BASE_RETRY_DELAY_MS = 1000;
 
+function webSearchAvailability(settings: Settings): string {
+  if (settings.webSearchProvider === 'none') return 'disabled by the user — never route here';
+  if (settings.webSearchProvider === 'serper') {
+    return settings.serperApiKey
+      ? 'available (Serper API key configured)'
+      : 'selected but no Serper API key configured — requests would fail';
+  }
+  return import.meta.env.DEV
+    ? 'available (DuckDuckGo via the dev proxy)'
+    : 'DEGRADED: DuckDuckGo cannot be reached from browser deployments in production (no CORS headers) — route here only for general-knowledge questions the sources above cannot answer';
+}
+
+function buildRouterContext(deps: OrchestratorDeps): string {
+  const lines: string[] = [];
+
+  const datasets = deps.analyzer.listDatasets();
+  if (datasets.length > 0) {
+    const dsLines = datasets.slice(0, 8).map(d => {
+      const cols = (d.columns ?? []).slice(0, 12).join(', ');
+      return `- ${d.name} (${d.rowCount} rows): [${cols}]`;
+    });
+    lines.push(`Datasets available for data analysis (source "python"):\n${dsLines.join('\n')}`);
+  } else {
+    lines.push('Datasets: none loaded — data analysis cannot answer anything');
+  }
+
+  const sources = deps.vectorstore.listSources();
+  if (sources.length > 0) {
+    const docLines = sources.slice(0, 8).map(s => `- ${s.source} (${s.entryCount} chunks)`);
+    lines.push(`Documents available for vector search (source "vectorstore"):\n${docLines.join('\n')}`);
+  } else {
+    lines.push('Documents: none uploaded — vector search cannot answer anything');
+  }
+
+  lines.push(`Web search (source "websearch"): ${webSearchAvailability(deps.settings)}`);
+
+  return lines.join('\n\n');
+}
+
+function nextUntriedSource(tried: SourceType[]): SourceType {
+  // Prefer the richest untried source: the real data beats documents beats
+  // the open web, and web search is CORS-degraded in production deployments.
+  const richness: SourceType[] = ['python', 'vectorstore', 'websearch'];
+  for (const s of richness) {
+    if (!tried.includes(s)) return s;
+  }
+  return 'vectorstore';
+}
+
 export function createWorkflowOrchestrator(
   question: string,
   deps: OrchestratorDeps,
@@ -207,7 +256,10 @@ export function createWorkflowOrchestrator(
       const routeResp = await withRetry('llm-invoke-route', () =>
         deps.llm.invoke({
           system: ROUTER_INSTRUCTIONS,
-          messages: [{ role: 'user', content: question }],
+          messages: [{
+            role: 'user',
+            content: `${question}\n\n---\n\nROUTING CONTEXT (current sandbox contents):\n\n${buildRouterContext(deps)}`,
+          }],
           jsonMode: true,
           temperature: EVAL_TEMPERATURE,
           model: deps.pickedModels.chat,
@@ -241,10 +293,13 @@ export function createWorkflowOrchestrator(
         : `-> ${source} (confidence: ${confidence.toFixed(2)})`;
       endStep('route', { detail: routeDetail, meta: { tokensUsed: routeResp.usage?.totalTokens ?? 0, confidence } });
 
+      const triedSources: SourceType[] = [];
       if (isLowConfidence) {
+        triedSources.push('vectorstore', 'websearch', 'python');
         const outcomes = await Promise.allSettled([
           runPath(ctx, 'vectorstore', signal),
           runPath(ctx, 'websearch', signal),
+          runPath(ctx, 'python', signal),
         ]);
         const rejected = outcomes.filter((o): o is PromiseRejectedResult => o.status === 'rejected');
         if (rejected.length === outcomes.length) {
@@ -254,6 +309,7 @@ export function createWorkflowOrchestrator(
             : new GenerationFailedError('orchestrator', new Error('All retrieval paths failed'), { retryable: false });
         }
       } else {
+        triedSources.push(source);
         await runPath(ctx, source, signal);
       }
 
@@ -267,11 +323,12 @@ export function createWorkflowOrchestrator(
           state.retryCount++;
           beginStep('decide', 'Re-routing');
           const previousSource: SourceType = state.routing ?? 'vectorstore';
-          const fallback: SourceType = previousSource === 'vectorstore' ? 'websearch' : 'vectorstore';
+          const fallback: SourceType = nextUntriedSource(triedSources);
           state.routing = fallback;
           const rewrittenQuestion = await rewriteQuestionForSource(ctx, question, fallback, signal);
           endStep('decide', { detail: `-> ${fallback} (rewritten: ${rewrittenQuestion.slice(0, 100)}${rewrittenQuestion.length > 100 ? '…' : ''})` });
           clearSourceData(ctx, previousSource);
+          triedSources.push(fallback);
           const fallbackOutcome = await Promise.allSettled([runPath(ctx, fallback, signal, rewrittenQuestion)]);
           if (fallbackOutcome[0]?.status === 'rejected') {
             // The fallback source failed after its own retries — keep the last
