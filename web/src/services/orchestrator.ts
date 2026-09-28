@@ -16,7 +16,6 @@ import {
   NODE_LABELS,
   EVAL_TEMPERATURE,
   type OrchestratorStepContext,
-  clearSourceData,
   rewriteQuestionForSource,
   runPath,
   generate,
@@ -322,12 +321,10 @@ export function createWorkflowOrchestrator(
         if (!useful && state.retryCount < maxRetries) {
           state.retryCount++;
           beginStep('decide', 'Re-routing');
-          const previousSource: SourceType = state.routing ?? 'vectorstore';
           const fallback: SourceType = nextUntriedSource(triedSources);
           state.routing = fallback;
           const rewrittenQuestion = await rewriteQuestionForSource(ctx, question, fallback, signal);
           endStep('decide', { detail: `-> ${fallback} (rewritten: ${rewrittenQuestion.slice(0, 100)}${rewrittenQuestion.length > 100 ? '…' : ''})` });
-          clearSourceData(ctx, previousSource);
           triedSources.push(fallback);
           const fallbackOutcome = await Promise.allSettled([runPath(ctx, fallback, signal, rewrittenQuestion)]);
           if (fallbackOutcome[0]?.status === 'rejected') {

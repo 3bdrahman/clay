@@ -292,12 +292,6 @@ export async function runWebSearchStep(
   }
 }
 
-export function clearSourceData(ctx: OrchestratorStepContext, source: SourceType): void {
-  if (source === 'vectorstore') ctx.state.documents = [];
-  else if (source === 'python') ctx.state.dataAnalysis = undefined;
-  else if (source === 'websearch') ctx.state.webResults = [];
-}
-
 export async function rewriteQuestionForSource(
   ctx: OrchestratorStepContext,
   originalQuestion: string,

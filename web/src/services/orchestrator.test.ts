@@ -2057,6 +2057,56 @@ describe('createWorkflowOrchestrator — router confidence + multi-source fallba
     const analyzeStep = state.steps.find(s => s.node === 'analyze');
     expect(analyzeStep?.status).toBe('error');
   });
+
+  it('eval-failed re-route keeps the previous source data so the retry still sees it', async () => {
+    vi.resetAllMocks();
+    mockVectorstore.load.mockResolvedValue(undefined);
+    mockVectorstore.stats = { entries: 0 };
+    mockVectorstore.listSources.mockReturnValue([]);
+    mockAnalyzer.listDatasets.mockReturnValue([
+      { name: 'employees', fileName: 'employees.csv', columns: ['id', 'salary_usd'], rowCount: 10 },
+    ]);
+    // Once queue: route(python), then the eval's hallucination returns 'no'
+    // so the pipeline re-routes; the analyzer's complete result must survive.
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: JSON.stringify({ datasource: 'python', confidence: 1.0 }) })
+      .mockResolvedValueOnce({ content: JSON.stringify({ binary_score: 'no' }) });
+    (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ binary_score: 'yes' }),
+    });
+    (mockAnalyzer.analyze as ReturnType<typeof vi.fn>).mockResolvedValue({
+      type: 'data_analysis',
+      question: 'total salary_usd',
+      code: '',
+      explanation: 'total is 42',
+      resultType: 'scalar',
+      result: '42',
+      attempts: 1,
+      durationMs: 1,
+      timestamp: Date.now(),
+    });
+    (mockLLM.stream as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: 'First answer', usage: undefined, model: 'answer-model' })
+      .mockResolvedValueOnce({ content: 'Better answer', usage: undefined, model: 'answer-model' });
+
+    const orchestrator = createWorkflowOrchestrator(
+      'total salary_usd',
+      {
+        llm: mockLLM,
+        vectorstore: mockVectorstore,
+        webSearch: mockWebSearch,
+        analyzer: mockAnalyzer,
+        settings: testSettings,
+        pickedModels: testPickedModels,
+      },
+      {},
+    );
+    const state = await orchestrator.run();
+
+    expect(state.retryCount).toBeGreaterThanOrEqual(1);
+    expect(state.dataAnalysis).toBeDefined();
+    expect(state.dataAnalysis?.result).toBe('42');
+  });
 });
 
 describe('createWorkflowOrchestrator — onSynthesisToken wiring (Unit 4)', () => {
