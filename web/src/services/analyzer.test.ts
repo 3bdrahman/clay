@@ -4,7 +4,7 @@ import type { LLMClient } from '../lib/llm';
 import type { EmbeddingsClient } from '../lib/embeddings';
 import * as aq from 'arquero';
 import type { ColumnTable } from 'arquero';
-import { RateLimitError } from '../lib/errors';
+import { GenerationFailedError, RateLimitError } from '../lib/errors';
 
 const mockLLM: LLMClient = {
   invoke: vi.fn(),
@@ -161,6 +161,56 @@ describe('createDataAnalyzer', () => {
 
     expect(result.explanation).toBe('Average salary by department');
     expect(result.attempts).toBe(2); // 2 iterations (tool call + synthesis)
+  });
+
+  it('salvages the synthesis when the tool loop exhausts its iteration budget', async () => {
+    const mock = mockLLM.invoke as ReturnType<typeof vi.fn>;
+    for (let i = 0; i < 8; i++) {
+      mock.mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: `c${i}`, type: 'function', function: { name: 'list_datasets', arguments: '{}' } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 100 },
+      });
+    }
+    // The salvage synthesis rides a stream call after the loop exhausts.
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: JSON.stringify({ answer: 'Salvaged answer', insights: [] }),
+      finishReason: 'stop',
+      usage: { totalTokens: 50 },
+    });
+
+    const result = await analyzer.analyze('average salary');
+
+    expect(result.mode).toBe('fallback');
+    expect(result.partial).toBe(true);
+    expect(result.fallbackReason).toBe('salvaged-iterations');
+    expect(result.explanation).toBe('Salvaged answer');
+  });
+
+  it('propagates a salvage-synthesis failure with its type and retryable flag intact', async () => {
+    const mock = mockLLM.invoke as ReturnType<typeof vi.fn>;
+    for (let i = 0; i < 8; i++) {
+      mock.mockResolvedValueOnce({
+        content: '',
+        toolCalls: [{ id: `c${i}`, type: 'function', function: { name: 'list_datasets', arguments: '{}' } }],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 100 },
+      });
+    }
+    // The salvage synthesis's stream call fails with the typed error the
+    // real LLM client throws; the failure must reach the orchestrator with
+    // its retryable flag intact so withRetry re-runs the whole analysis.
+    (mockLLM.stream as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new GenerationFailedError('OpenRouter', new Error('stream failed')),
+    );
+
+    const err = await analyzer.analyze('average salary').then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(GenerationFailedError);
+    expect((err as GenerationFailedError).retryable).toBe(true);
   });
 
   it('returns the user question in result.question, not the generated code', async () => {
