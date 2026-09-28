@@ -182,6 +182,39 @@ describe('createDataAnalyzer', () => {
     expect(result.question).toBe('count employees by department');
   });
 
+  it('synthesizes a tool-call id when the model omits one (providers 400 on empty tool_call_id)', async () => {
+    (mockLLM.invoke as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [
+          { type: 'function', function: { name: 'list_datasets', arguments: '{}' } },
+        ],
+        finishReason: 'tool_calls',
+        usage: { totalTokens: 100 },
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ answer: 'Count by department', insights: [] }),
+        finishReason: 'stop',
+        usage: { totalTokens: 200 },
+      });
+
+    const result = await analyzer.analyze('count employees by department');
+    expect(result.explanation).toBe('Count by department');
+
+    // The follow-up call's history must carry a non-empty tool_call_id on
+    // the tool message and a matching id on the assistant's tool_calls —
+    // JSON.stringify drops an undefined id and providers reject the request.
+    const secondCall = (mockLLM.invoke as ReturnType<typeof vi.fn>).mock.calls[1][0] as {
+      messages: Array<Record<string, unknown>>;
+    };
+    const assistantMsg = secondCall.messages.find(m => m.role === 'assistant') as { toolCalls?: Array<{ id?: string }> } | undefined;
+    const toolMsg = secondCall.messages.find(m => m.role === 'tool') as { toolCallId?: string } | undefined;
+    expect(typeof toolMsg?.toolCallId).toBe('string');
+    expect((toolMsg?.toolCallId ?? '').length).toBeGreaterThan(0);
+    expect(typeof assistantMsg?.toolCalls?.[0]?.id).toBe('string');
+    expect((assistantMsg?.toolCalls?.[0]?.id ?? '').length).toBeGreaterThan(0);
+  });
+
   it('retries on tool error', async () => {
     (mockLLM.invoke as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({

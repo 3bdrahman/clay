@@ -294,7 +294,14 @@ export async function runToolLoop(
         }
       }
 
-      const toolCalls = resp.toolCalls;
+      const toolCalls = resp.toolCalls?.map(c => ({
+        ...c,
+        // Some models emit tool calls without an id; the OpenAI-compatible
+        // protocol requires a non-empty tool_call_id on the assistant message
+        // and the matching tool message, and providers 400 without it.
+        // Synthesize one so the linkage stays valid.
+        id: typeof c.id === 'string' && c.id ? c.id : crypto.randomUUID(),
+      }));
       const finishReason = resp.finishReason;
 
       if (toolCalls && toolCalls.length > 0) {
