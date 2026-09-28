@@ -262,9 +262,29 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     onToken: (token: string) => void,
     signal?: AbortSignal,
   ): Promise<LLMResponse> {
-    const messages: Array<{ role: string; content: string }> = [];
+    const messages: Array<Record<string, unknown>> = [];
     if (req.system) messages.push({ role: 'system', content: req.system });
-    for (const m of req.messages) messages.push({ role: m.role, content: m.content });
+    for (const m of req.messages) {
+      if (m.role === 'assistant' && m.toolCalls) {
+        messages.push({
+          role: 'assistant',
+          content: m.content,
+          tool_calls: m.toolCalls.map(c => ({
+            id: c.id,
+            type: 'function',
+            function: { name: c.function.name, arguments: c.function.arguments },
+          })),
+        });
+      } else if (m.role === 'tool') {
+        messages.push({
+          role: 'tool',
+          content: m.content,
+          tool_call_id: m.toolCallId,
+        });
+      } else {
+        messages.push({ role: m.role, content: m.content });
+      }
+    }
 
     const body: Record<string, unknown> = {
       model: req.model,

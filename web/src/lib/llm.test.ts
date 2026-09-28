@@ -647,4 +647,36 @@ describe('createLLMClient', () => {
       expect(removedHandlers).toContain(handler);
     }
   });
+
+  it('serializes tool-call history into stream requests (providers 400 without the linkage)', async () => {
+    // The salvage synthesis streams over a history that contains assistant
+    // tool_calls + tool results; the body must carry tool_calls on the
+    // assistant message and tool_call_id on the tool message, the same
+    // shape the invoke path serializes.
+    const mockStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    mockFetch.mockResolvedValue({ ok: true, body: mockStream });
+
+    const client = createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '' });
+    await client.stream({
+      messages: [
+        { role: 'user', content: 'q' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'list_datasets', arguments: '{}' } }] },
+        { role: 'tool', content: '[{"name":"employees"}]', toolCallId: 'call_1' },
+      ],
+    }, () => {});
+
+    const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
+    const assistantMsg = body.messages.find((m: { role: string }) => m.role === 'assistant');
+    const toolMsg = body.messages.find((m: { role: string }) => m.role === 'tool');
+    expect(assistantMsg.tool_calls).toBeDefined();
+    expect(assistantMsg.tool_calls[0].id).toBe('call_1');
+    expect(assistantMsg.tool_calls[0].function.name).toBe('list_datasets');
+    expect(toolMsg.tool_call_id).toBe('call_1');
+  });
 });
