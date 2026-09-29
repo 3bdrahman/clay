@@ -4,29 +4,25 @@ import type { EmbeddingsClient } from '../lib/embeddings';
 import type { WebSearchClient } from '../lib/websearch';
 import type { VectorStore } from '../lib/vectorstore';
 import type { DataAnalyzer } from '../services/analyzer';
-import { loadSampleDatasets } from '../services/datasets';
-import { processFile, embedDocumentChunks, existingSourceHashes, type ProcessedFile } from '../services/files';
 import {
-  registerSandboxTable,
   unregisterSandboxTable,
   clearSandboxTables,
   rehydrateSandboxTables,
-  persistSandboxCsv,
   loadPersistedSandboxCsvs,
   deletePersistedSandboxCsv,
   clearPersistedSandboxCsvs,
 } from '../services/sandboxTables';
 import { createClayServiceBundle } from '../services/clayServices';
-import { useAppStore, type SandboxDataset, type SandboxProcessing } from '../store';
-import {
-  listModels,
-  listLocalCatalog,
-  resolveModels,
-  pickLocalModels,
-  type ModelInfo,
-  type PickedModels,
-} from '../lib/models';
+import { useAppStore, type SandboxDataset } from '../store';
+import { pickLocalModels, resolveModels, type PickedModels } from '../lib/models';
 import { resolveProviderEndpoint } from '../lib/providers';
+import {
+  useFetchNimModels,
+  useFetchLocalModels,
+  useRefreshModels,
+  type ModelCatalogDeps,
+} from './useModelCatalog';
+import { addFiles, loadSampleData, type SandboxIngestDeps } from '../services/sandboxIngest';
 
 export interface ClayServices {
   llm: LLMClient;
@@ -35,10 +31,8 @@ export interface ClayServices {
   webSearch: WebSearchClient;
   analyzer: DataAnalyzer;
   ready: boolean;
+  dispose: () => void;
 }
-
-const MODEL_TTL_MS = 60 * 60 * 1000;
-const LOCAL_CATALOG_TTL_MS = 60 * 60 * 1000;
 
 export function useClay(): {
   services: ClayServices | null;
@@ -78,70 +72,19 @@ export function useClay(): {
   const [persistenceAvailable, setPersistenceAvailable] = useState(true);
   const servicesRef = useRef<ClayServices | null>(null);
 
-  const fetchedKeyRef = useRef<string | null>(null);
+  const modelCatalogDeps: ModelCatalogDeps = {
+    settings,
+    availableModels,
+    modelsFetchedAt,
+    setModels,
+    setModelsLoading,
+    setModelsError,
+    setLocalCatalog,
+  };
 
-  const fetchNimModels = useCallback(
-    async (key: string, force = false): Promise<ModelInfo[]> => {
-      if (
-        !force &&
-        fetchedKeyRef.current === key &&
-        Date.now() - modelsFetchedAt < MODEL_TTL_MS &&
-        availableModels.length > 0
-      ) {
-        return availableModels;
-      }
-      setModelsLoading(true);
-      setModelsError(null);
-      try {
-        const settings = useAppStore.getState().settings;
-        const models = await listModels(settings.provider, key);
-        setModels(models);
-        fetchedKeyRef.current = key;
-        return models;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setModelsError(msg);
-        return [];
-      } finally {
-        setModelsLoading(false);
-      }
-    },
-    [availableModels, modelsFetchedAt, setModels, setModelsLoading, setModelsError],
-  );
-
-  const fetchLocalModels = useCallback(
-    async (baseUrl: string, force = false): Promise<ModelInfo[]> => {
-      const stamp = useAppStore.getState().settings.localCatalogFetchedAt;
-      const existing = useAppStore.getState().settings.localCatalog;
-      if (!force && existing.length > 0 && Date.now() - stamp < LOCAL_CATALOG_TTL_MS) {
-        return existing;
-      }
-      setModelsLoading(true);
-      setModelsError(null);
-      try {
-        const models = await listLocalCatalog(baseUrl, '');
-        setLocalCatalog(models);
-        return models;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setModelsError(msg);
-        return [];
-      } finally {
-        setModelsLoading(false);
-      }
-    },
-    [setLocalCatalog, setModelsLoading, setModelsError],
-  );
-
-  const refreshModels = useCallback(async () => {
-    if (settings.provider === 'local') {
-      const url = settings.localServerUrl.trim();
-      if (url) await fetchLocalModels(url, true);
-    } else {
-      const endpoint = resolveProviderEndpoint(settings);
-      if (endpoint.apiKey) await fetchNimModels(endpoint.apiKey, true);
-    }
-  }, [settings, fetchNimModels, fetchLocalModels]);
+  const fetchNimModels = useFetchNimModels(modelCatalogDeps);
+  const fetchLocalModels = useFetchLocalModels(modelCatalogDeps);
+  const refreshModels = useRefreshModels(modelCatalogDeps, fetchNimModels, fetchLocalModels);
 
   useEffect(() => {
     let cancelled = false;
@@ -216,6 +159,7 @@ export function useClay(): {
           webSearch: bundle.webSearch,
           analyzer: bundle.analyzer,
           ready: true,
+          dispose: bundle.dispose,
         };
         servicesRef.current = newServices;
         setServices(newServices);
@@ -233,134 +177,37 @@ export function useClay(): {
     init();
     return () => {
       cancelled = true;
+      // The bundle is replaced on every settings/catalog/dataset change and
+      // on unmount. Without this teardown, every recreation leaks the
+      // embeddings worker and (after the first analysis) the sandbox worker.
+      servicesRef.current?.dispose();
     };
   }, [settings, availableModels, sandboxDatasets, fetchNimModels, fetchLocalModels]);
 
-  const addFiles = useCallback(
+  const sandboxIngestDeps = useMemo<SandboxIngestDeps>(() => ({
+    services,
+    setSandboxProcessing,
+    updateSandboxProcessingItem,
+    addSandboxDataset,
+    addSandboxDocument,
+    getSandboxProcessing: () => useAppStore.getState().sandboxProcessing,
+    getSandboxDatasets: () => useAppStore.getState().sandboxDatasets,
+    setSandboxDatasets: (datasets: SandboxDataset[]) => useAppStore.setState({ sandboxDatasets: datasets }),
+  }), [services, setSandboxProcessing, updateSandboxProcessingItem, addSandboxDataset, addSandboxDocument]);
+
+  const addFilesCallback = useCallback(
     async (files: FileList | File[]) => {
-      const arr = Array.from(files);
-      if (arr.length === 0) return;
-      const sv = servicesRef.current;
-      if (!sv) {
-        throw new Error('Services not ready — add an API key first');
-      }
-
-      const initial: SandboxProcessing[] = arr.map(f => ({
-        fileName: f.name,
-        status: 'processing',
-      }));
-      setSandboxProcessing([...useAppStore.getState().sandboxProcessing, ...initial]);
-
-      for (const file of arr) {
-        try {
-          updateSandboxProcessingItem(file.name, { status: 'processing' });
-          const processed: ProcessedFile = await processFile(file);
-          if (processed.error) {
-            updateSandboxProcessingItem(file.name, { status: 'error', error: processed.error });
-            continue;
-          }
-          if (processed.dataset) {
-            const csv = await file.text();
-            registerSandboxTable(processed.dataset.name, processed.dataset.table);
-            addSandboxDataset({
-              name: processed.dataset.name,
-              fileName: file.name,
-              columns: processed.dataset.columns,
-              rowCount: processed.dataset.rowCount,
-              loadedAt: Date.now(),
-              csv,
-              isSample: false,
-            });
-            await persistSandboxCsv(processed.dataset.name, csv);
-            updateSandboxProcessingItem(file.name, { status: 'done' });
-            continue;
-          }
-          if (processed.document) {
-            updateSandboxProcessingItem(file.name, { status: 'embedding' });
-            const hashes = await existingSourceHashes(sv.vectorstore, processed.document.source);
-            if (hashes.has(processed.document.sourceHash)) {
-              updateSandboxProcessingItem(file.name, { status: 'done' });
-              addSandboxDocument({
-                id: processed.document.source,
-                fileName: file.name,
-                source: processed.document.source,
-                chunkCount: processed.document.chunks.length,
-                loadedAt: Date.now(),
-              });
-              continue;
-            }
-            const embedded = await embedDocumentChunks(processed.document, sv.embeddings);
-            sv.vectorstore.removeBySource(processed.document.source);
-            sv.vectorstore.addEntries(embedded.map(e => ({
-              id: e.id,
-              text: e.text,
-              source: e.source,
-              page: e.page,
-              embedding: e.embedding,
-            })));
-            addSandboxDocument({
-              id: processed.document.source,
-              fileName: file.name,
-              source: processed.document.source,
-              chunkCount: processed.document.chunks.length,
-              loadedAt: Date.now(),
-            });
-            updateSandboxProcessingItem(file.name, { status: 'done' });
-            continue;
-          }
-          updateSandboxProcessingItem(file.name, { status: 'error', error: 'No content extracted' });
-        } catch (e) {
-          updateSandboxProcessingItem(file.name, {
-            status: 'error',
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-      }
-
-      setTimeout(() => {
-        useAppStore.setState(state => ({
-          sandboxProcessing: state.sandboxProcessing.filter(
-            p => p.status === 'processing' || p.status === 'embedding',
-          ),
-        }));
-      }, 3000);
+      await addFiles(files, sandboxIngestDeps);
     },
-    [
-      setSandboxProcessing,
-      updateSandboxProcessingItem,
-      addSandboxDataset,
-      addSandboxDocument,
-    ],
+    [sandboxIngestDeps],
   );
 
-  const loadSampleData = useCallback(async () => {
-    const sample = await loadSampleDatasets();
-    sample.tables.forEach((table, name) => {
-      registerSandboxTable(name, table);
-    });
-    const newDatasets: SandboxDataset[] = [];
-    sample.tables.forEach((table, name) => {
-      const columns = table.columnNames();
-      const rowCount = table.numRows();
-      const originalCsv = sample.rawCsv[name];
-      newDatasets.push({
-        name,
-        fileName: `sample/${name}.csv`,
-        columns,
-        rowCount,
-        loadedAt: Date.now(),
-        csv: originalCsv,
-        isSample: true,
-      });
-    });
-    useAppStore.setState(state => ({
-      sandboxDatasets: [
-        ...state.sandboxDatasets.filter(d => !newDatasets.some(n => n.name === d.name)),
-        ...newDatasets,
-      ],
-    }));
-    await Promise.all(newDatasets.flatMap(d => (d.csv !== undefined ? [persistSandboxCsv(d.name, d.csv)] : [])));
-  }, []);
+  const loadSampleDataCallback = useCallback(
+    async () => {
+      await loadSampleData(sandboxIngestDeps);
+    },
+    [sandboxIngestDeps],
+  );
 
   const clearSandboxData = useCallback(() => {
     const sv = servicesRef.current;
@@ -412,8 +259,8 @@ export function useClay(): {
     persistenceAvailable,
     pickedModels,
     refreshModels,
-    addFiles,
-    loadSampleData,
+    addFiles: addFilesCallback,
+    loadSampleData: loadSampleDataCallback,
     clearSandboxData,
     removeSandboxDocument,
     removeSandboxDataset,

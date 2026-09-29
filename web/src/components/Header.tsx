@@ -1,3 +1,4 @@
+import { useCallback, useEffect } from 'react';
 import { useAppStore } from '../store';
 import type { PickedModels } from '../lib/models';
 import { getProviderApiKeyField, getProviderConfig } from '../lib/providers';
@@ -27,7 +28,7 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
   const [confirm, renderConfirmDialog] = useConfirm();
 
-  const clearChat = async () => {
+  const clearChat = useCallback(async () => {
     const ok = await confirm({
       title: 'Clear chat history?',
       message: 'All messages in the current conversation will be removed.',
@@ -35,7 +36,27 @@ export function Header({ onOpenSettings, onOpenData, onToggleSidebar, pickedMode
       destructive: true,
     });
     if (ok) clearMessages();
-  };
+  }, [confirm, clearMessages]);
+
+  // Documented keyboard shortcuts (README): Cmd/Ctrl+K opens a new chat,
+  // Cmd/Ctrl+Shift+C clears the active chat through the same confirmation
+  // dialog as the header button. Both are preventDefault-able — unlike
+  // Ctrl+T/W/N, browsers do not reserve them.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      if (!e.shiftKey && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        useAppStore.getState().createConversation();
+      } else if (e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        void clearChat();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [clearChat]);
 
   const cycleTheme = () => {
     const order: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];

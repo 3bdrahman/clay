@@ -69,3 +69,73 @@ describe('Header accessibility', () => {
     expect(el.querySelector('[aria-label="Clear chat history"]')).not.toBeNull();
   });
 });
+
+describe('Header keyboard shortcuts', () => {
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    useAppStore.setState({ conversations: [], activeConversationId: null });
+  });
+
+  it('Cmd/Ctrl+K creates a new conversation and activates it', () => {
+    renderHeader();
+    expect(useAppStore.getState().conversations).toHaveLength(0);
+
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }),
+      );
+    });
+
+    const state = useAppStore.getState();
+    expect(state.conversations).toHaveLength(1);
+    expect(state.activeConversationId).toBe(state.conversations[0]!.id);
+  });
+
+  it('Cmd/Ctrl+Shift+C opens the clear-chat confirmation dialog and confirming clears messages', async () => {
+    const el = renderHeader();
+    act(() => {
+      useAppStore.setState(state => ({
+        conversations: [
+          ...state.conversations,
+          {
+            id: 'test-conv',
+            title: 'Test conversation',
+            messages: [
+              { id: 'm1', role: 'assistant' as const, content: 'hello', timestamp: Date.now() },
+            ],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+        activeConversationId: 'test-conv',
+      }));
+    });
+
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, shiftKey: true, bubbles: true }),
+      );
+    });
+
+    const dialog = el.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+
+    const confirmButton = dialog?.querySelector<HTMLButtonElement>('button[data-autofocus="true"]') ?? null;
+    expect(confirmButton).not.toBeNull();
+    await act(async () => {
+      confirmButton?.click();
+    });
+
+    const conv = useAppStore.getState().conversations.find(c => c.id === 'test-conv');
+    expect(conv?.messages).toHaveLength(0);
+  });
+
+  it('plain K without the modifier does not create a conversation', () => {
+    renderHeader();
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }));
+    });
+    expect(useAppStore.getState().conversations).toHaveLength(0);
+  });
+});

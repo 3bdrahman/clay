@@ -3,6 +3,8 @@ import { useAppStore } from '../store';
 import { useConfirm } from '../hooks/useConfirm';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { ACCEPT_EXTENSIONS } from '../lib/fileExtensions';
+import { DatasetList } from './DatasetList';
+import { DocumentList } from './DocumentList';
 
 interface Props {
   open: boolean;
@@ -18,12 +20,8 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
   const sandboxProcessing = useAppStore(s => s.sandboxProcessing);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [isWorking, setIsWorking] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [confirm, renderConfirmDialog] = useConfirm();
-  const { dialogRef, stopBackdrop } = useModalFocus(open);
+  const [isDragOver, setIsDragOver] = useState(false), [isWorking, setIsWorking] = useState(false), [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null), [confirm, renderConfirmDialog] = useConfirm(), { dialogRef, stopBackdrop } = useModalFocus(open);
 
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
@@ -51,15 +49,8 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
     [handleFiles],
   );
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-  }, []);
+  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragOver(true); }, []);
+  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragOver(false); }, []);
 
   const handlePickFiles = useCallback(() => {
     fileInputRef.current?.click();
@@ -233,91 +224,9 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
            </div>
           )}
 
-          {sandboxDatasets.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400">
-                  Datasets
-               </div>
-                <span className="text-[10px] text-ink-400">{sandboxDatasets.length}</span>
-             </div>
-              <ul className="space-y-1.5">
-                {sandboxDatasets.map(d => (
-                  <li
-                    key={d.name}
-                    className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <svg className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                       </svg>
-                        <span className="font-mono text-xs font-semibold text-ink-800 dark:text-ink-100 truncate">
-                          {d.name}
-                       </span>
-                     </div>
-                      <div className="text-[10px] text-ink-500 dark:text-ink-400 mt-0.5 ml-5.5">
-                        {d.rowCount} row{d.rowCount === 1 ? '' : 's'} · {d.columns.length} col{d.columns.length === 1 ? '' : 's'}
-                     </div>
-                   </div>
-                    <button
-                      onClick={() => removeSandboxDataset(d.name)}
-                      className="text-ink-400 hover:text-rose-500 transition flex-shrink-0"
-                      type="button"
-                      aria-label={`Remove ${d.name}`}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                     </svg>
-                   </button>
-                 </li>
-                ))}
-             </ul>
-           </div>
-          )}
+<DatasetList datasets={sandboxDatasets} onRemove={removeSandboxDataset} />
 
-          {sandboxDocuments.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400">
-                  Documents
-               </div>
-                <span className="text-[10px] text-ink-400">{sandboxDocuments.length}</span>
-             </div>
-              <ul className="space-y-1.5">
-                {sandboxDocuments.map(d => (
-                  <li
-                    key={d.id}
-                    className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <svg className="w-3.5 h-3.5 text-brand-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                       </svg>
-                        <span className="font-mono text-xs font-semibold text-ink-800 dark:text-ink-100 truncate">
-                          {d.fileName}
-                       </span>
-                     </div>
-                      <div className="text-[10px] text-ink-500 dark:text-ink-400 mt-0.5 ml-5.5">
-                        {d.chunkCount} chunk{d.chunkCount === 1 ? '' : 's'} embedded
-                     </div>
-                   </div>
-                    <button
-                      onClick={() => removeSandboxDocument(d.fileName)}
-                      className="text-ink-400 hover:text-rose-500 transition flex-shrink-0"
-                      type="button"
-                      aria-label={`Remove ${d.fileName}`}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                     </svg>
-                   </button>
-                 </li>
-                ))}
-             </ul>
-           </div>
-          )}
+<DocumentList documents={sandboxDocuments} onRemove={removeSandboxDocument} />
 
           {!isEmpty && (
             <div className="pt-3 border-t border-ink-200 dark:border-ink-700 flex gap-2">

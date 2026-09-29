@@ -12,18 +12,15 @@ import { resolveModels, pickLocalModels } from '../lib/models';
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
-function useActiveMessages(): ChatMessage[] {
+const STREAMING_STORE_THROTTLE_MS = 500;
+
+export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => void; onOpenSettings: () => void }) {
   const messages = useAppStore(
     useShallow(s => {
       const conv = s.conversations.find(c => c.id === s.activeConversationId);
       return conv?.messages ?? EMPTY_MESSAGES;
     }),
   ) as ChatMessage[];
-  return messages;
-}
-
-export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => void; onOpenSettings: () => void }) {
-  const messages = useActiveMessages();
   const addMessage = useAppStore(s => s.addMessage);
   const updateMessage = useAppStore(s => s.updateMessage);
   const { services, loading, error, needsConfiguration, loadSampleData, pickedModels } = useClay();
@@ -52,7 +49,7 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
   }, [messages, isRunning, streamingContent]);
 
   const handleSubmit = async (text: string) => {
-    if (!services || !canSubmit) {
+    if (!canSubmit) {
       onOpenSettings();
       return;
     }
@@ -91,9 +88,7 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       // streaming (its answer is empty on the abort path) and brick the
       // conversation. Only pre-settle updates apply.
       if (pipelineSettled) return;
-      const state = useAppStore.getState();
-      const conv = state.conversations.find(c => c.messages.some(m => m.id === assistantId));
-      const currentContent = conv?.messages.find(m => m.id === assistantId)?.content || '';
+      const currentContent = useAppStore.getState().conversations.flatMap(c => c.messages).find(m => m.id === assistantId)?.content || '';
       const finalContent = workflow.answer || currentContent;
       const assistantMsg: ChatMessage = {
         id: assistantId,
@@ -105,8 +100,6 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       };
       updateMessage(assistantId, () => assistantMsg);
     };
-
-    const STREAMING_STORE_THROTTLE_MS = 500;
 
     let pendingToken = '';
     let rafScheduled = false;
@@ -175,14 +168,11 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       );
 
       const finalState = await orchestrator.run(controller.signal);
-      setStreamingContent('');
-      streamingMessageIdRef.current = null;
       if (controller.signal.aborted) {
         // The orchestrator returned the partial state on abort — keep the
         // streamed content and clear the streaming cursor; applying
         // updateAssistant would flag the message as still-streaming.
-        const conv = useAppStore.getState().conversations.find(c => c.messages.some(m => m.id === assistantId));
-        const partial = conv?.messages.find(m => m.id === assistantId);
+        const partial = useAppStore.getState().conversations.flatMap(c => c.messages).find(m => m.id === assistantId);
         if (partial) {
           updateMessage(assistantId, (m) => ({ ...m, streaming: false }));
         }
@@ -192,9 +182,7 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       const isAbort = err.name === 'AbortError' || controller.signal.aborted;
-      const state = useAppStore.getState();
-      const conv = state.conversations.find(c => c.messages.some(m => m.id === assistantId));
-      const existingContent = conv?.messages.find(m => m.id === assistantId)?.content || '';
+      const existingContent = useAppStore.getState().conversations.flatMap(c => c.messages).find(m => m.id === assistantId)?.content || '';
       const errorMsg: ChatMessage = {
         id: assistantId,
         role: 'assistant',
@@ -214,8 +202,50 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
     }
   };
 
-const showExamples = messages.length === 0 && !isRunning;
+  const showExamples = messages.length === 0 && !isRunning;
   const showLanding = messages.length === 0 && needsConfiguration && !loading && !error;
+
+  let content: React.ReactNode;
+  if (showLanding) {
+    content = (
+      <LandingHero
+        onLoadSample={loadSampleData}
+        onAddData={onOpenData}
+        onExampleSelect={handleSubmit}
+      />
+    );
+  } else if (showExamples) {
+    if (loading) {
+      content = (
+        <div className="pt-8">
+          <div className="text-center py-12">
+            <div className="inline-block w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mb-3" />
+            <p className="text-sm text-ink-500">Loading Clay</p>
+          </div>
+        </div>
+      );
+    } else if (services) {
+      content = <div className="pt-8"><ExampleQuestions onSelect={handleSubmit} /></div>;
+    } else if (error) {
+      content = (
+        <div className="pt-8">
+          <div className="text-center py-12">
+            <p className="text-sm text-rose-600 dark:text-rose-400 mb-2">{String(error)}</p>
+            <button
+              onClick={() => location.reload()}
+              className="text-sm text-brand-600 hover:underline"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    } else {
+      content = null;
+    }
+  } else {
+    content = messages.map(m => <MessageBubble key={m.id} message={m} />);
+  }
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0">
@@ -227,36 +257,7 @@ const showExamples = messages.length === 0 && !isRunning;
         aria-label="Chat messages"
       >
         <div className="max-w-4xl mx-auto space-y-5">
-          {showLanding ? (
-            <LandingHero
-              onLoadSample={loadSampleData}
-              onAddData={onOpenData}
-              onExampleSelect={handleSubmit}
-            />
-          ) : showExamples ? (
-            <div className="pt-8">
-              {loading ? (
-                <div className="text-center py-12">
-                  <div className="inline-block w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mb-3" />
-                  <p className="text-sm text-ink-500">Loading Clay</p>
-               </div>
-              ) : services ? (
-                <ExampleQuestions onSelect={handleSubmit} />
-              ) : error ? (
-                <div className="text-center py-12">
-                  <p className="text-sm text-rose-600 dark:text-rose-400 mb-2">{String(error)}</p>
-                  <button
-                    onClick={() => location.reload()}
-                    className="text-sm text-brand-600 hover:underline"
-                  >
-                    Retry
-                 </button>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            messages.map(m => <MessageBubble key={m.id} message={m} />)
-          )}
+          {content}
           {isRunning && !showExamples && !showLanding && (
             <div className="flex justify-start">
               <div className="bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-2xl rounded-tl-sm px-4 py-2.5 shadow-sm">
@@ -264,7 +265,7 @@ const showExamples = messages.length === 0 && !isRunning;
                   <span className="w-2 h-2 bg-brand-500 rounded-full animate-pulse" />
                   <span className="w-2 h-2 bg-brand-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }} />
                   <span className="w-2 h-2 bg-brand-500 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }} />
-               </div>
+                </div>
               </div>
             </div>
           )}
@@ -278,6 +279,6 @@ const showExamples = messages.length === 0 && !isRunning;
         isRunning={isRunning}
         onConfigure={canSubmit ? undefined : onOpenSettings}
       />
-   </div>
+    </div>
   );
 }
