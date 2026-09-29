@@ -7,10 +7,8 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-8.0-646CFF.svg)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-06B6D4.svg)](https://tailwindcss.com/)
-[![Tests](https://img.shields.io/badge/Tests-498_passing-brightgreen.svg)](https://github.com/3bdrahman/clay/actions)
+[![Tests](https://img.shields.io/badge/Tests-589_passing-brightgreen.svg)](https://github.com/3bdrahman/clay/actions)
 [![Deploy](https://img.shields.io/badge/Deploy-GitHub_Pages-121013.svg?logo=github&logoColor=white)](https://3bdrahman.github.io/clay/)
-
-![Clay — welcome screen](clay-welcome.png)
 
 Clay combines three retrieval paths behind a single chat surface:
 
@@ -138,13 +136,13 @@ The site deploys to **GitHub Pages** via [`.github/workflows/deploy-github-pages
 | Decision | Rationale | Code |
 |---|---|---|
 | Reflection rides each tool-loop iteration | A separate critique turn would double the token spend per analysis; the model's own per-iteration summary is mandatory and visible at zero extra cost | `analyzer.ts` (`onIteration` hook) |
-| Plan on the first iteration | The model's first tool-call response opens with a `PLAN:` line — a visible strategy without a separate planning phase (another round trip + tokens) | `analyzer.ts` `buildSystemPrompt` |
+| Plan on the first iteration | The model's first tool-call response opens with a `PLAN:` line — a visible strategy without a separate planning phase (another round trip + tokens) | `analyzerPrompts.ts` `buildSystemPrompt` |
 | Generated code runs in a QuickJS realm | A fresh QuickJS context per execution has no page globals by construction — the prompt-injection escape class `new Function` could not close is eliminated; the realm runs in a dedicated Web Worker with an interrupt handler (5s wall clock) and a memory limit | `services/analyzerSandbox.ts`, `services/realmExecutor.ts`, `workers/analysisSandboxWorker.ts` |
 | Single user-chosen chat model | With BYOK you pay per token — the cost decision stays with you; embeddings are local (transformers.js) and never user-selected | `lib/models.ts` |
-| Budgets enforced mid-loop | Each LLM call gets `max_tokens` derived from the remaining budget, so one huge response can't blow the loop's token budget | `analyzer.ts` `runToolLoop`, `lib/llm.ts` |
+| Budgets enforced mid-loop | Each LLM call gets `max_tokens` derived from the remaining budget, so one huge response can't blow the loop's token budget | `analyzerToolLoop.ts` `runToolLoop`, `analyzerBudget.ts` |
 | Eval grades answers, not just routing | Lexical overlap + LLM-as-judge scores against the golden set, with aggregates — quality claims are measurable | `eval/runner.ts` |
 | Retrieval-only query rewriting | On eval failure the question is rewritten for the retried source; the answer still answers the original question | `orchestrator.ts` retry loop |
-| Final synthesis rides the loop's last response | A separate streaming synthesis call would add a round trip per analysis; live visibility comes from sub-steps + reflections | `analyzer.ts` `runToolLoop` |
+| Final synthesis rides the loop's last response | A separate streaming synthesis call would add a round trip per analysis; live visibility comes from sub-steps + reflections | `analyzerToolLoop.ts` `runToolLoop` |
 | MMR reranking ships off | The dense path fetches 3× top-K and HyDE supplies diversity upstream; MMR trades top-1 relevance for diversity, and near-duplicate chunks rarely hurt the judge's grounded-answer check. Enable per-store when eval baseline data supports it | `vectorstore.ts` (`useMMR`), `clayServices.ts` |
 
 ---

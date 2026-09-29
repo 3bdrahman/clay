@@ -9,6 +9,9 @@ All notable changes to **Clay** are documented here. Format follows [Keep a Chan
 - **Single-model architecture.** One user-chosen chat model now drives every LLM step — routing, code generation, answering, evaluation, and self-correction. Automatic per-role chat selection is gone: with BYOK you pay per token, so the cost decision stays with you. Only the embedding model is auto-picked (best pattern score in the live catalog, via `pickBestEmbedding`).
 - **Typed provider API-key fields.** New `ProviderApiKeyField` union (`openrouterApiKey` / `groqApiKey` / `togetherApiKey`) replaces index-signature access; all `as any` / `as unknown as` escape hatches removed from `providers.ts`, `Header.tsx`, and `SettingsPanel.tsx`.
 - **Embedding pattern config trimmed and validated.** `modelPatterns.config.json` now carries only embedding + size-tier rules (chat/code/safety/vision heuristics removed); `parseConfig` validates every consumed field.
+- **CSP `script-src` no longer ships `'unsafe-inline'` in production builds** (the built bundle has no inline scripts); the dev server keeps it for the React refresh preamble. `'unsafe-eval'` stays in both modes — Arquero's table-verb code generation cannot run under a CSP without it — and `'wasm-unsafe-eval'` covers the QuickJS/transformers.js WASM compilation.
+- **The PDF path is fully lazy.** `pdfjs-dist` (~1.3MB) and the pdf-extraction module load on the first PDF drop instead of at startup: `files.ts` imports `pdf.ts` dynamically and `pdf.ts` pulls `pdfjs-dist` through a memoized dynamic loader whose failure resets, so a later extraction retries instead of every subsequent call rejecting off a memoized failure.
+- **`rehydrateSandboxTables` memoizes parsed CSVs** (keyed by dataset name, guarded by the csv's FNV-1a hash): the service bundle is recreated on every settings/catalog/dataset change, and each recreation no longer re-parses every dataset through Arquero. A re-upload under the same name re-parses instead of serving a stale table.
 
 ### Removed
 
@@ -27,6 +30,10 @@ All notable changes to **Clay** are documented here. Format follows [Keep a Chan
 - `vite.config.ts`: invalid `VITE_DEPLOY_URL` values now log a build-time warning instead of being silently swallowed.
 - OpenRouter `Referer` fallback now points at the GitHub Pages origin and is overridable via `VITE_OPENROUTER_REFERER`.
 - README/doc drift: GitHub Pages deploy story, current dependency badges, provider list, and model-selection docs now match the code.
+- **Broken `404.html` SPA fallback.** It was a stale dev-page copy carrying an unprocessed `%CSP%` placeholder, the dev-only `/src/main.tsx` entry, and root-absolute asset paths — all of which break under a subpath deployment (GitHub Pages serves `public/` files verbatim; `transformIndexHtml` never sees them). It is now a static redirect-to-app-root page rewritten with the resolved build-time `base` by a new `base-404` Vite plugin.
+- **Worker leaks across service-bundle recreation.** The embeddings client spawned its worker eagerly on every bundle recreation (every dataset load or settings change) and neither it nor the analysis-sandbox worker was ever terminated. Both now spawn lazily, the embeddings client no longer respawns inside the worker error handler (which could loop endlessly when the worker script keeps failing to load), and each exposes `dispose()` that terminates the worker once pending work drains. The service bundle wires `dispose`, and `useClay` disposes the old bundle when it is replaced or on unmount.
+- **CI's build gate now mirrors the deploy workflow's build env** (`DEPLOY_TARGET=github-pages` + `VITE_DEPLOY_URL` instead of a divergent `BASE_PATH` variant), so CI validates the exact configuration that ships to GitHub Pages.
+- Doc drift: `index.html` meta/OG/Twitter descriptions still referenced the removed Together/NVIDIA NIM providers; `.env.example` documented `VITE_NIM_BASE_URL` and a removed Netlify deploy workflow (and suggested `VITE_BASE_PATH`, which the build does not read); the README test-count badge was stale; the 0.3.0 `frame-ancestors 'none'` claim was corrected (see that entry).
 
 ### Added
 
@@ -34,6 +41,8 @@ All notable changes to **Clay** are documented here. Format follows [Keep a Chan
 - From-scratch statistics helpers (quantile, Pearson, Spearman) powering the analysis tools — no new dependencies.
 - `fake-indexeddb` dev dependency for spec-accurate IndexedDB tests.
 - Documented build-time env overrides: `DEPLOY_TARGET`, `BASE_PATH`, `VITE_DEPLOY_URL`, `VITE_CSP_EXTRA_CONNECT_SRC`, `VITE_OPENROUTER_REFERER`.
+- **Global keyboard shortcuts** from the README's table: `Cmd/Ctrl+K` (new chat) and `Cmd/Ctrl+Shift+C` (clear chat, through the same confirmation dialog as the header button). `/` focus and `Esc` stop-generation were already wired in `ChatInput`.
+- **Session-shared embeddings cache** (`getSharedEmbeddingCache`): the service bundle is recreated on every settings/catalog/dataset change; the shared cache survives recreation so repeated queries skip re-embedding instead of starting cold each time. Tests needing isolation inject their own cache.
 
 ## [0.3.0] — 2026-08-06
 
@@ -48,7 +57,7 @@ All notable changes to **Clay** are documented here. Format follows [Keep a Chan
 
 ### Security
 
-- **CSP**: Tightened Content Security Policy — removed `https://3bdrahman.github.io` from `connect-src` (self-referential), added `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'` directives. Kept `'unsafe-inline'` for `style-src` due to Tailwind/Recharts runtime injection (documented as known exception)
+- **CSP**: Tightened Content Security Policy — removed `https://3bdrahman.github.io` from `connect-src` (self-referential), added `base-uri 'self'`, `form-action 'self'` directives. Kept `'unsafe-inline'` for `style-src` due to Tailwind/Recharts runtime injection (documented as known exception). (A `frame-ancestors 'none'` claim previously appeared in this entry; it was incorrect — `frame-ancestors` is ignored inside `<meta>` CSP policies and GitHub Pages cannot set response headers, so it was never deliverable.)
 
 ### Build & Type Safety
 
