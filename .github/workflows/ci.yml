@@ -31,8 +31,12 @@ jobs:
 
       - name: Type-check + Build
         working-directory: web
+        # Mirror the deploy workflow's build env so CI validates the exact
+        # configuration that ships to GitHub Pages, not a divergent variant.
         env:
-          BASE_PATH: '/clay'
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DEPLOY_TARGET: github-pages
+          VITE_DEPLOY_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: npm run build
 
       - name: Lint

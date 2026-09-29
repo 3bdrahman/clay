@@ -1,4 +1,6 @@
-import { defineConfig } from 'vite';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // DuckDuckGo HTML search returns no CORS headers. Proxying lets the in-browser
@@ -26,7 +28,19 @@ const base = isGitHubPages ? `/${repoName}/` : (process.env.BASE_PATH || './');
 function cspPlugin() {
   return {
     name: 'csp-inject',
-    transformIndexHtml(html: string) {
+    transformIndexHtml(html: string, ctx?: { server?: unknown }) {
+      // 'unsafe-inline' in script-src is only needed on the dev server (the
+      // @react/refresh preamble is an inline module script and HMR evaluates
+      // code). The production bundle has no inline scripts (verified in
+      // dist/index.html), so builds ship without it. 'unsafe-eval' stays in
+      // both modes: Arquero compiles table verbs through code generation and
+      // cannot run under a CSP without it; 'wasm-unsafe-eval' covers the
+      // QuickJS/transformers.js WASM compilation.
+      const isDevServer = Boolean(ctx?.server);
+      const scriptSrc = isDevServer
+        ? "'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"
+        : "'self' 'unsafe-eval' 'wasm-unsafe-eval'";
+
       const extraConnectSrc = process.env.VITE_CSP_EXTRA_CONNECT_SRC?.trim();
       const deployUrl = process.env.VITE_DEPLOY_URL?.trim();
 
@@ -62,7 +76,7 @@ function cspPlugin() {
         connectSrc.push(...extraConnectSrc.split(',').map(s => s.trim()).filter(Boolean));
       }
 
-      const csp = `default-src 'self'; connect-src ${connectSrc.join(' ')}; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; manifest-src 'self'; base-uri 'self'; form-action 'self'`;
+      const csp = `default-src 'self'; connect-src ${connectSrc.join(' ')}; script-src ${scriptSrc}; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; manifest-src 'self'; base-uri 'self'; form-action 'self'`;
 
       return html.replace(
         '<meta http-equiv="Content-Security-Policy" content="%CSP%" />',
@@ -72,8 +86,32 @@ function cspPlugin() {
   };
 }
 
+// Rewrites the %BASE% placeholders in dist/404.html to the resolved
+// build-time base. Files in public/ are copied verbatim (transformIndexHtml
+// never sees them), so the SPA fallback needs its own build-time pass. For a
+// relative './' base the redirect must be site-root-anchored: 404.html served
+// at an arbitrary missing depth cannot resolve a relative path back to the
+// app root. Absolute bases pass through unchanged.
+function base404Plugin() {
+  let root = process.cwd();
+  let outDir = 'dist';
+  return {
+    name: 'base-404-rewrite',
+    configResolved(config: { root: string; build: { outDir: string } }) {
+      root = config.root;
+      outDir = config.build.outDir;
+    },
+    closeBundle() {
+      const redirectBase = base === './' ? '/' : base;
+      const p = resolve(root, outDir, '404.html');
+      const html = readFileSync(p, 'utf8');
+      writeFileSync(p, html.replaceAll('%BASE%', redirectBase));
+    },
+  } satisfies Plugin;
+}
+
 export default defineConfig({
-  plugins: [react(), cspPlugin()],
+  plugins: [react(), cspPlugin(), base404Plugin()],
   server: {
     proxy: proxyConfig,
   },
