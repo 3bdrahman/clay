@@ -14,46 +14,21 @@ import { resolveProviderEndpoint } from '../lib/providers';
 import type { Settings } from '../lib/types';
 import type { DatasetSummary, DocumentSummary } from '../lib/exampleQueries';
 import { generateEvalQuestions } from './dynamicQuestions';
+import type { EvalQuestion, EvalResult, EvalSummary } from './types';
+import { computeLexicalOverlap, computeRecallAtK, gradeRouting } from './metrics';
+import { scoreWithJudge } from './grading';
 
-export interface EvalQuestion {
-  id: string;
-  question: string;
-  category: 'data_analysis' | 'documents' | 'web_search';
-  expectedSource: 'python' | 'vectorstore' | 'websearch';
-  expectedColumnIntent?: string[];
-  goldenAnswer: string;
-  minRelevantChunks: number;
-}
+// Re-export types
+export type { EvalQuestion, EvalResult, EvalSummary } from './types';
 
-export interface EvalResult {
-  questionId: string;
-  question: string;
-  category: string;
-  expectedSource: string;
-  actualSource: string | undefined;
-  routingCorrect: boolean;
-  retrievedChunks: number;
-  relevantChunks: number;
-  recallAtK: number;
-  answer: string;
-  latencyMs: number;
-  error?: string;
-  answerScore?: number; // Lexical overlap score 0-1
-  judgeScore?: number; // LLM-as-judge score 0-1
-}
+// Re-export metrics functions
+export { computeLexicalOverlap, computeRecallAtK, gradeRouting } from './metrics';
 
-export interface EvalSummary {
-  total: number;
-  passed: number;
-  failed: number;
-  routingAccuracy: number;
-  avgRecallAtK: number;
-  avgLatencyMs: number;
-  avgAnswerScore: number;
-  avgJudgeScore: number;
-  byCategory: Record<string, { total: number; passed: number; routingAccuracy: number }>;
-  results: EvalResult[];
-}
+// Re-export grading function
+export { scoreWithJudge } from './grading';
+
+// Re-export report formatting
+export { formatReport } from './report';
 
 async function createServices(settings: Settings): Promise<{
   llm: LLMClient;
@@ -89,104 +64,6 @@ async function createServices(settings: Settings): Promise<{
     pickedModels: bundle.pickedModels,
     datasetMetadata: metadata,
   };
-}
-
-function gradeRouting(result: EvalResult): boolean {
-  return result.actualSource === result.expectedSource;
-}
-
-function computeRecallAtK(relevant: number, total: number): number {
-  if (total === 0) return 1;
-  return Math.min(1, relevant / total);
-}
-
-/**
- * Tokenize text into lowercase alphanumeric tokens.
- */
-function tokenize(text: string): string[] {
-  return text.toLowerCase().split(/\W+/).filter(t => t.length > 0);
-}
-
-/**
- * Compute lexical overlap score between two texts.
- * Uses weighted Jaccard similarity: intersection weight / union weight.
- * Weight of each token is 1 / (1 + log(total_frequency)) to downweight common tokens.
- * Returns a score between 0 and 1.
- */
-export function computeLexicalOverlap(generated: string, golden: string): number {
-  const genTokens = tokenize(generated);
-  const goldTokens = tokenize(golden);
-
-  if (genTokens.length === 0 && goldTokens.length === 0) return 1;
-  if (genTokens.length === 0 || goldTokens.length === 0) return 0;
-
-  // Count frequencies
-  const genFreq = new Map<string, number>();
-  const goldFreq = new Map<string, number>();
-
-  for (const t of genTokens) genFreq.set(t, (genFreq.get(t) ?? 0) + 1);
-  for (const t of goldTokens) goldFreq.set(t, (goldFreq.get(t) ?? 0) + 1);
-
-  // Compute weighted intersection and union
-  let intersectionWeight = 0;
-  let unionWeight = 0;
-
-  const allTokens = new Set([...genFreq.keys(), ...goldFreq.keys()]);
-  for (const token of allTokens) {
-    const genCount = genFreq.get(token) ?? 0;
-    const goldCount = goldFreq.get(token) ?? 0;
-    const totalCount = genCount + goldCount;
-    const weight = 1 / (1 + Math.log(totalCount));
-
-    if (genCount > 0 && goldCount > 0) {
-      intersectionWeight += weight * Math.min(genCount, goldCount);
-    }
-    unionWeight += weight * Math.max(genCount, goldCount);
-  }
-
-  return unionWeight === 0 ? 0 : intersectionWeight / unionWeight;
-}
-
-/**
- * Score an answer against a golden answer using LLM-as-judge.
- * Returns a score 0-1 and a one-line rationale.
- */
-export async function scoreWithJudge(
-  llm: { invoke: (req: { system?: string; messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>; jsonMode?: boolean; temperature?: number; model?: string }) => Promise<{ content: string; usage?: { totalTokens?: number } }> },
-  model: string,
-  question: string,
-  generated: string,
-  golden: string
-): Promise<{ score: number; rationale: string }> {
-  const prompt = `Question: ${question}
-
-Golden Answer: ${golden}
-
-Generated Answer: ${generated}
-
-Score the generated answer on factual coverage of the golden answer (0.0 to 1.0).
-Consider: Does the generated answer contain the key facts from the golden answer? Are there hallucinations or missing critical information?
-Return JSON: {"score": 0.0-1.0, "rationale": "one-line explanation"}`;
-
-  try {
-    const resp = await llm.invoke({
-      system: 'You are an expert evaluator. Score factual coverage accurately and concisely.',
-      messages: [{ role: 'user', content: prompt }],
-      jsonMode: true,
-      temperature: 0,
-      model,
-    });
-
-    const parsed = JSON.parse(resp.content || '{}');
-    const score = Math.max(0, Math.min(1, Number.isFinite(parsed.score) ? parsed.score : 0));
-    const rationale = String(parsed.rationale ?? '').slice(0, 200);
-    return { score, rationale };
-  } catch (e) {
-    if (import.meta.env.DEV) {
-      console.warn('[eval] Judge scoring failed:', e);
-    }
-    return { score: 0, rationale: 'Judge scoring failed' };
-  }
 }
 
 /**
@@ -391,48 +268,4 @@ export function gradeQuestionSet(
     byCategory,
     results,
   };
-}
-
-export function formatReport(summary: EvalSummary): string {
-  const lines: string[] = [];
-  lines.push('# Clay Eval Report');
-  lines.push('');
-  lines.push(`**Total Questions:** ${summary.total}`);
-  lines.push(`**Passed:** ${summary.passed} / ${summary.total} (${((summary.passed / summary.total) * 100).toFixed(1)}%)`);
-  lines.push(`**Routing Accuracy:** ${(summary.routingAccuracy * 100).toFixed(1)}%`);
-  lines.push(`**Avg Recall@K:** ${(summary.avgRecallAtK * 100).toFixed(1)}%`);
-  lines.push(`**Avg Answer Score:** ${(summary.avgAnswerScore * 100).toFixed(1)}%`);
-  lines.push(`**Avg Judge Score:** ${(summary.avgJudgeScore * 100).toFixed(1)}%`);
-  lines.push(`**Avg Latency:** ${summary.avgLatencyMs.toFixed(0)}ms`);
-  lines.push('');
-
-  lines.push('## By Category');
-  lines.push('');
-  for (const [cat, stats] of Object.entries(summary.byCategory)) {
-    lines.push(`- **${cat}**: ${stats.passed}/${stats.total} passed, routing ${(stats.routingAccuracy * 100).toFixed(1)}%`);
-  }
-  lines.push('');
-
-  lines.push('## Per-Question Results');
-  lines.push('');
-  for (const r of summary.results) {
-    const status = r.error ? '❌ ERROR' : (r.routingCorrect && r.recallAtK >= 0.5 ? '✅ PASS' : '❌ FAIL');
-    lines.push(`### ${r.questionId} ${status}`);
-    lines.push(`- **Question**: ${r.question}`);
-    lines.push(`- **Category**: ${r.category}`);
-    lines.push(`- **Expected Source**: ${r.expectedSource}`);
-    lines.push(`- **Actual Source**: ${r.actualSource ?? '—'}`);
-    lines.push(`- **Routing**: ${r.routingCorrect ? '✅' : '❌'}`);
-    lines.push(`- **Retrieved Chunks**: ${r.retrievedChunks}`);
-    lines.push(`- **Relevant Chunks**: ${r.relevantChunks}`);
-    lines.push(`- **Recall@K**: ${(r.recallAtK * 100).toFixed(1)}%`);
-    lines.push(`- **Answer Score**: ${((r.answerScore ?? 0) * 100).toFixed(1)}%`);
-    if (r.judgeScore !== undefined) lines.push(`- **Judge Score**: ${(r.judgeScore * 100).toFixed(1)}%`);
-    lines.push(`- **Latency**: ${r.latencyMs}ms`);
-    if (r.error) lines.push(`- **Error**: ${r.error}`);
-    lines.push(`- **Answer Preview**: ${r.answer.slice(0, 200)}...`);
-    lines.push('');
-  }
-
-  return lines.join('\n');
 }

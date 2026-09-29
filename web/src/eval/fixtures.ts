@@ -2,7 +2,7 @@
 // eval test file and the golden-summary gate cannot drift apart.
 import type { Settings } from '../lib/types';
 import { generateEvalQuestions } from './dynamicQuestions';
-import type { EvalQuestion } from './runner';
+import type { EvalQuestion } from './types';
 
 export const TEST_SETTINGS: Settings = {
   provider: 'openrouter',

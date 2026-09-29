@@ -2,7 +2,7 @@
 // Generates relevant evaluation questions based on actual loaded datasets and documents
 
 import type { DatasetSummary, DocumentSummary } from '../lib/exampleQueries';
-import type { EvalQuestion } from './runner';
+import type { EvalQuestion } from './types';
 
 /**
  * Generate data analysis questions based on actual dataset schemas.
