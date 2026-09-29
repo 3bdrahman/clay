@@ -1,60 +1,21 @@
 import type { Document, ChunkMetadata } from './types';
 import type { EmbeddingsClient } from './embeddings';
-import { estimateTokens } from './tokens';
-import { openIDB, wrapIDBStore, type IDBStore } from './idb';
+import { type IDBStore } from './idb';
 import { createHnswIndex, type HnswIndex } from './hnsw';
 import {
   VectorStoreCorruptedError,
   VectorStoreQuotaExceededError,
   classifyError,
 } from './errors';
+import { _resetWriteQueue } from './vectorWriteQueue';
+import { LEGACY_EMBEDDING_MODEL_ID } from './vectorLegacyMigration';
+import { searchPipeline, type SearchPipelineDeps } from './vectorSearch';
+import { doLoad, load as loadVectorStore, type LoadResult } from './vectorLoad';
+import { addEntries, removeBySource, clear, type MutationDeps, type MutationConfig } from './vectorMutations';
+import { getSourceHashes, listSources } from './vectorQueries';
 
-/**
- * Module-level write coordinator.
- *
- * Why: `addEntries` is synchronous (returns void) but IndexedDB writes are
- * inherently async. Multiple VectorStore instances may exist in tests (and
- * could exist in production during HMR / store resets). When instance A
- * writes an entry and instance B is constructed and loads, B must see A's
- * write — but B's `load()` has no knowledge of A's in-flight IDB operations.
- *
- * Fix: every IDB write is registered on a shared writeQueue promise.
- * Every `load()` awaits writeQueue before reading. Once any `load()`
- * resolves, all writes issued before that load() call have landed in IDB.
- */
-let writeQueue: Promise<void> = Promise.resolve();
-let writeQueueFailed = false;
-let writeQueueFailure: Error | null = null;
-
-function enqueueWrite(op: () => Promise<unknown>): void {
-  writeQueue = writeQueue.then<void>(() => op().then(() => undefined, (e: unknown) => {
-    writeQueueFailed = true;
-    writeQueueFailure = e instanceof Error ? e : new Error(String(e));
-    if (import.meta.env.DEV) console.error('[vectorstore] async op failed:', e);
-  }));
-}
-
-export function _resetWriteQueue(): void {
-  writeQueue = Promise.resolve();
-}
-
-const LEGACY_KEY = 'clay-vector-entries-v1';
-export const VECTOR_DB_NAME = 'clay-vector-db';
-export const VECTOR_DB_VERSION = 2;
-const STORE_NAME = 'entries';
-
-/**
- * Sentinel model ID stamped on entries migrated from the legacy localStorage
- * store AND on entries added via a VectorStore whose config omitted
- * `embeddingModel`. The service bundle (clayServices.ts) always passes
- * the picked embedding model; this sentinel exists so model-mismatch
- * detection (`entry.metadata.modelId !== currentEmbeddingModel`) treats
- * legacy/unknown entries as "needs re-embedding" instead of incorrectly
- * matching whatever string we picked. The literal `'legacy'` is intentionally
- * distinct from any real provider model id (which always contain a vendor
- * prefix or namespace separator).
- */
-const LEGACY_EMBEDDING_MODEL_ID = 'legacy';
+export { VECTOR_DB_NAME, VECTOR_DB_VERSION } from './idb';
+export { _resetWriteQueue } from './vectorWriteQueue';
 
 /**
  * Default retrieval configuration values.
@@ -116,118 +77,6 @@ export interface VectorStore {
   readonly persistenceAvailable: boolean;
 }
 
-function isFiniteNumberArray(vals: unknown[]): vals is number[] {
-  return vals.every((n) => typeof n === 'number' && Number.isFinite(n));
-}
-
-function coerceLegacyEmbedding(v: unknown): number[] | null {
-  const candidate: unknown[] | null = Array.isArray(v)
-    ? v
-    : v && typeof v === 'object'
-      ? Object.values(v as Record<string, unknown>)
-      : null;
-  if (!candidate || !isFiniteNumberArray(candidate)) return null;
-  // An all-zero vector scores 0 against every query, so a migrated entry
-  // could never match anything. Reject it like any other invalid embedding;
-  // when no valid entries remain, readLegacy's zero-valid-entries path clears
-  // the legacy key instead of re-attempting migration on every load.
-  if (candidate.every((n) => n === 0)) return null;
-  return candidate;
-}
-
-function readLegacy(embeddingModel: string): VectorEntry[] | null {
-  try {
-    const raw = localStorage.getItem(LEGACY_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return null;
-    const modelId = embeddingModel || LEGACY_EMBEDDING_MODEL_ID;
-    const out: VectorEntry[] = [];
-    parsed.forEach((e: unknown, i: number) => {
-      if (!e || typeof e !== 'object') return;
-      const r = e as Record<string, unknown>;
-      if (typeof r.id !== 'string' || typeof r.text !== 'string' || typeof r.source !== 'string') return;
-      const emb = coerceLegacyEmbedding(r.embedding);
-      if (!emb) return;
-      out.push({
-        id: r.id,
-        text: r.text,
-        embedding: Float32Array.from(emb),
-        metadata: {
-          source: r.source,
-          sourceHash: '',
-          page: typeof r.page === 'number' ? r.page : undefined,
-          charStart: 0,
-          charEnd: r.text.length,
-          chunkIndex: i,
-          tokenCount: estimateTokens(r.text),
-          modelId,
-          updatedAt: Date.now(),
-        },
-      });
-    });
-    return out;
-  } catch (e) {
-    if (import.meta.env.DEV) {
-      console.warn('[vectorstore] readLegacy: localStorage parse failed (treating as no migration):', e);
-    }
-    return null;
-  }
-}
-
-function normalize(v: number[]): Float32Array {
-  if (v.length === 0) {
-    throw new VectorStoreCorruptedError('empty embedding vector');
-  }
-  let sum = 0;
-  for (const n of v) {
-    if (!Number.isFinite(n)) {
-      throw new VectorStoreCorruptedError('embedding contains non-finite values');
-    }
-    sum += n * n;
-  }
-  const norm = Math.sqrt(sum);
-  if (norm === 0) {
-    throw new VectorStoreCorruptedError('embedding is the zero vector');
-  }
-  const out = new Float32Array(v.length);
-  for (let i = 0; i < v.length; i++) out[i] = v[i]! / norm;
-  return out;
-}
-
-function cosineUnit(a: Float32Array, b: Float32Array): number {
-  if (a.length !== b.length) return 0;
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i]! * b[i]!;
-  return dot; // both unit-norm
-}
-
-interface ScoredCandidate { id: string; score: number; }
-
-function mmrSelect(candidates: ScoredCandidate[], embeddings: Map<string, Float32Array>, k: number, lambda: number): string[] {
-  const selected: string[] = [];
-  const remaining = candidates.slice();
-  while (selected.length < k && remaining.length > 0) {
-    let bestIdx = 0;
-    let bestScore = -Infinity;
-    for (let i = 0; i < remaining.length; i++) {
-      const c = remaining[i] as ScoredCandidate;
-      const relevance = c.score;
-      let diversity = 0;
-      for (const sid of selected) {
-        const a = embeddings.get(c.id);
-        const b = embeddings.get(sid);
-        if (a && b) diversity = Math.max(diversity, cosineUnit(a, b));
-      }
-      const mmr = lambda * relevance - (1 - lambda) * diversity;
-      if (mmr > bestScore) { bestScore = mmr; bestIdx = i; }
-    }
-    const picked = remaining.splice(bestIdx, 1)[0];
-    if (picked) selected.push(picked.id);
-  }
-  return selected;
-}
-
 /**
  * Classify IndexedDB DOMException into typed vector store errors.
  */
@@ -250,24 +99,6 @@ function classifyIDBError(error: unknown, operation: string): Error {
   }
   return classifyError(error, 'vectorstore', operation);
 }
-
-/**
- * The shared upgrade for the clay vector DB: creates the vector entries store
- * AND the sandbox csv store, so whichever connection opens first (both use
- * VECTOR_DB_VERSION) leaves both stores present regardless of open order.
- */
-export function clayDBUpgrade(db: IDBDatabase): void {
-  if (!db.objectStoreNames.contains(STORE_NAME)) {
-    const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-    store.createIndex('source', 'metadata.source', { unique: false });
-    store.createIndex('modelId', 'metadata.modelId', { unique: false });
-  }
-  if (!db.objectStoreNames.contains(SANDBOX_STORE_NAME)) {
-    db.createObjectStore(SANDBOX_STORE_NAME, { keyPath: 'name' });
-  }
-}
-
-const SANDBOX_STORE_NAME = 'sandbox';
 
 export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorStoreConfig): VectorStore {
   const cfg = {
@@ -300,15 +131,6 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     return index;
   }
 
-  function bruteForceCandidates(queryEmbedding: Float32Array, poolK: number): ScoredCandidate[] {
-    const scored: ScoredCandidate[] = [];
-    for (const e of memory.values()) {
-      scored.push({ id: e.id, score: cosineUnit(queryEmbedding, e.embedding) });
-    }
-    scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, poolK);
-  }
-
   function warnFallbackOnce(cause?: unknown): void {
     if (warnOnce) return;
     warnOnce = true;
@@ -317,60 +139,27 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
     }
   }
 
-  async function doLoad(): Promise<void> {
-    try {
-      const idb = await openIDB(VECTOR_DB_NAME, VECTOR_DB_VERSION, clayDBUpgrade);
-      db = wrapIDBStore<VectorEntry>(idb, STORE_NAME);
-      if (pendingAdds.length > 0) {
-        const toFlush = pendingAdds.splice(0, pendingAdds.length);
-        for (const e of toFlush) await db.put(e);
-      }
-      const existing = await db.getAll();
-      if (existing.length === 0) {
-        const legacy = readLegacy(cfg.embeddingModel);
-        if (legacy && legacy.length > 0) {
-          await db.putMany(legacy);
-          localStorage.removeItem(LEGACY_KEY);
-          for (const e of legacy) memory.set(e.id, e);
-        } else if (legacy !== null) {
-          // Corruption path: parsed OK but zero valid entries. Still clear the legacy key
-          // so we don't re-attempt migration on every load. User's data was unreadable; no
-          // further recovery possible.
-          localStorage.removeItem(LEGACY_KEY);
-        }
-      } else {
-        for (const e of existing) {
-          // Entries written before the Float32Array representation load as
-          // number[]; normalize the in-memory representation so every entry
-          // is uniform for the scan and index paths.
-          memory.set(e.id, { ...e, embedding: Float32Array.from(e.embedding) });
-        }
-      }
-    } catch (e) {
-      warnFallbackOnce(e);
-      db = null;
-      persistenceAvailable = false;
-      // Don't throw here - allow fallback to in-memory mode
-    }
-    loaded = true;
-    if (db !== null) persistenceAvailable = true;
+  async function doLoadWrapper(): Promise<LoadResult> {
+    return doLoad(
+      { embeddingModel: cfg.embeddingModel },
+      pendingAdds,
+      warnFallbackOnce
+    );
   }
 
   async function load(): Promise<void> {
-    if (loaded) return;
-    if (loadingPromise) return loadingPromise;
-    loadingPromise = (async () => {
-      await writeQueue;
-      if (writeQueueFailed && writeQueueFailure) {
-        throw writeQueueFailure;
-      }
-      await doLoad();
-      await writeQueue;
-      if (writeQueueFailed && writeQueueFailure) {
-        throw writeQueueFailure;
-      }
-    })();
-    return loadingPromise;
+    return loadVectorStore(
+      loaded,
+      loadingPromise,
+      doLoadWrapper,
+      (v) => { loaded = v; },
+      (v) => { loadingPromise = v; },
+      (v) => { persistenceAvailable = v; },
+      (v) => { memory.clear(); for (const [k, val] of v) memory.set(k, val); },
+      (v) => { db = v; },
+      (v) => { knownDimension = v; },
+      (v) => { pendingAdds.length = 0; pendingAdds.push(...v); }
+    );
   }
 
   async function ensureLoaded(): Promise<void> {
@@ -379,184 +168,69 @@ export function createVectorStore(embeddings: EmbeddingsClient, config?: VectorS
 
   async function similaritySearch(query: string, k?: number): Promise<Document[]> {
     await ensureLoaded();
-    const topK = k ?? cfg.topK;
-    if (memory.size === 0) return [];
-    let queryEmbeddingRaw: number[][];
-    try {
-      queryEmbeddingRaw = await embeddings.embed(query);
-    } catch (e) {
-      throw classifyError(e, 'embeddings', 'similaritySearch');
-    }
-    const queryRaw = queryEmbeddingRaw[0];
-    if (!queryRaw) return [];
-    const queryEmbedding = Float32Array.from(queryRaw);
-
-    // Candidate pool: the ANN index at or above the engage threshold
-    // (sub-linear, approximate recall), brute-force cosine below it (exact).
-    const poolK = Math.max(topK * DENSE_TOP_K_MULTIPLIER, 6);
-    let denseCandidates: ScoredCandidate[];
-    if (memory.size >= cfg.annThreshold) {
-      const index = ensureAnnIndex();
-      denseCandidates = index
-        ? index
-            .search(queryEmbedding, poolK, Math.max(poolK, cfg.annEfSearch))
-            .map(f => ({ id: f.label, score: f.score }))
-        : bruteForceCandidates(queryEmbedding, poolK);
-    } else {
-      denseCandidates = bruteForceCandidates(queryEmbedding, poolK);
-    }
-
-    const filtered = denseCandidates.filter((c) => c.score >= cfg.scoreThreshold);
-
-    let chosen: string[];
-    if (cfg.useMMR) {
-      const embMap = new Map<string, Float32Array>();
-      for (const id of new Set(filtered.map((f) => f.id))) {
-        const e = memory.get(id);
-        if (e) embMap.set(id, e.embedding);
-      }
-      chosen = mmrSelect(filtered, embMap, topK, cfg.mmrLambda);
-    } else {
-      chosen = filtered.slice(0, topK).map((c) => c.id);
-    }
-
-    const scoreLookup = new Map(denseCandidates.map((m) => [m.id, m.score]));
-    const results: Document[] = [];
-    for (const id of chosen) {
-      const e = memory.get(id);
-      if (!e) continue;
-      const score = scoreLookup.get(id) ?? 0;
-      const doc: Document = {
-        id: e.id,
-        content: e.text,
-        source: e.metadata.source,
-        page: e.metadata.page,
-        score,
-        metadata: e.metadata as unknown as Record<string, unknown>,
-      };
-      results.push(doc);
-    }
-    return results;
+    const searchConfig = {
+      topK: k ?? cfg.topK,
+      scoreThreshold: cfg.scoreThreshold,
+      useMMR: cfg.useMMR,
+      mmrLambda: cfg.mmrLambda,
+      annThreshold: cfg.annThreshold,
+      annEfSearch: cfg.annEfSearch,
+      denseTopKMultiplier: DENSE_TOP_K_MULTIPLIER,
+    };
+    const deps: SearchPipelineDeps = {
+      memory,
+      knownDimension,
+      annIndex,
+      ensureAnnIndex,
+      embeddings,
+      config: searchConfig,
+    };
+    return searchPipeline(query, deps);
   }
 
-  function addEntries(newEntries: Array<{ id: string; text: string; source: string; sourceHash?: string; page?: number; embedding: number[] }>): void {
-    if (!loaded && !loadingPromise) void load();
+  const mutationDeps: MutationDeps = {
+    memory,
+    get db() { return db; },
+    get annIndex() { return annIndex; },
+    pendingAdds,
+    get knownDimension() { return knownDimension; },
+    setKnownDimension: (v) => { knownDimension = v; },
+    setAnnIndex: (v) => { annIndex = v; },
+    load,
+    get loaded() { return loaded; },
+    get loadingPromise() { return loadingPromise; },
+  };
 
-    for (const e of newEntries) {
-      const emb = normalize(e.embedding);
-      if (knownDimension === null) {
-        knownDimension = emb.length;
-      } else if (emb.length !== knownDimension) {
-        throw new VectorStoreCorruptedError(
-          `embedding dimension mismatch: stored ${knownDimension}, got ${emb.length}`
-        );
-      }
-      const entry: VectorEntry = {
-        id: e.id,
-        text: e.text,
-        embedding: emb,
-        metadata: {
-          source: e.source,
-          sourceHash: e.sourceHash ?? '',
-          page: e.page,
-          charStart: 0,
-          charEnd: e.text.length,
-          chunkIndex: memory.size,
-          tokenCount: estimateTokens(e.text),
-          modelId: entryModelId,
-          updatedAt: Date.now(),
-        },
-      };
-      memory.set(entry.id, entry);
-      if (annIndex !== null) annIndex.insert(entry.id, entry.embedding);
-      pendingAdds.push(entry);
-      if (db) {
-        const capture = db;
-        enqueueWrite(async () => {
-          try {
-            await capture.put(entry);
-          } catch (e) {
-            throw classifyIDBError(e, 'put');
-          }
-        });
-      } else if (!loaded && !loadingPromise) {
-        void load();
-      }
-    }
+  const mutationConfig: MutationConfig = { entryModelId };
+
+  function addEntriesWrapper(newEntries: Array<{ id: string; text: string; source: string; sourceHash?: string; page?: number; embedding: number[] }>): void {
+    addEntries(newEntries, mutationDeps, mutationConfig, classifyIDBError);
   }
 
-  function removeBySource(source: string): number {
-    const before = memory.size;
-    const removedIds: string[] = [];
-    for (const [id, e] of memory) {
-      if (e.metadata.source === source) {
-        memory.delete(id);
-        removedIds.push(id);
-      }
-    }
-    if (annIndex !== null) {
-      for (const id of removedIds) annIndex.markDeleted(id);
-    }
-    if (db) enqueueWrite(async () => {
-      try {
-        await db!.deleteByIndex('source', source);
-      } catch (e) {
-        throw classifyIDBError(e, 'deleteByIndex');
-      }
-    });
-    return before - memory.size;
+  function removeBySourceWrapper(source: string): number {
+    return removeBySource(source, mutationDeps, classifyIDBError);
   }
 
-  function clear(): void {
-    memory.clear();
-    knownDimension = null;
-    annIndex = null;
-    try {
-      localStorage.removeItem(LEGACY_KEY);
-    } catch (e) {
-      // localStorage may be disabled (private mode) or the key may be denied
-      // by storage isolation. We're clearing anyway; suppressing is correct.
-      if (import.meta.env.DEV) {
-        console.warn('[vectorstore] clear(): localStorage.removeItem failed:', e);
-      }
-    }
-    if (db) enqueueWrite(async () => {
-      try {
-        await db!.clear();
-      } catch (e) {
-        throw classifyIDBError(e, 'clear');
-      }
-    });
+  function clearWrapper(): void {
+    clear(mutationDeps, classifyIDBError);
   }
 
-  function getSourceHashes(source: string): Set<string> {
-    const hashes = new Set<string>();
-    for (const entry of memory.values()) {
-      if (entry.metadata.source === source && entry.metadata.sourceHash) {
-        hashes.add(entry.metadata.sourceHash);
-      }
-    }
-    return hashes;
+  function getSourceHashesWrapper(source: string): Set<string> {
+    return getSourceHashes(source, memory);
   }
 
-  function listSources(): Array<{ source: string; entryCount: number }> {
-    const counts = new Map<string, number>();
-    for (const entry of memory.values()) {
-      counts.set(entry.metadata.source, (counts.get(entry.metadata.source) ?? 0) + 1);
-    }
-    return [...counts.entries()]
-      .map(([source, entryCount]) => ({ source, entryCount }))
-      .sort((a, b) => a.source.localeCompare(b.source));
+  function listSourcesWrapper(): Array<{ source: string; entryCount: number }> {
+    return listSources(memory);
   }
 
   return {
     load,
     similaritySearch,
-    addEntries,
-    removeBySource,
-    clear,
-    getSourceHashes,
-    listSources,
+    addEntries: addEntriesWrapper,
+    removeBySource: removeBySourceWrapper,
+    clear: clearWrapper,
+    getSourceHashes: getSourceHashesWrapper,
+    listSources: listSourcesWrapper,
     get stats() {
       return { entries: memory.size };
     },

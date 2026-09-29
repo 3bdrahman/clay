@@ -1,35 +1,18 @@
-import { RagError, RagErrorCode } from './errors';
-import type { ToolDefinition } from './types';
+import { AnalysisToolError } from './errors/analysisErrors';
+import type { AnalysisToolContext } from './types';
+import { quantile, pearson, spearman, isFiniteNumber, coerceNumber } from './statistics';
+import { MAX_FILTER_LIMIT, DEFAULT_FILTER_LIMIT } from './analysisToolSchemas';
 
-export interface AnalysisToolContext {
-  datasets: Map<string, unknown>;
-  metadata: Record<string, { columns: string[]; rowCount: number }>;
-}
+// Re-export public API
+export type { AnalysisToolContext } from './types';
+export { AnalysisToolError } from './errors/analysisErrors';
+export { quantile, pearson, spearman } from './statistics';
+export { TOOL_SCHEMAS, MAX_FILTER_LIMIT, DEFAULT_FILTER_LIMIT } from './analysisToolSchemas';
+export { executeToolCall } from './analysisToolDispatch';
 
-export class AnalysisToolError extends RagError {
-  constructor(tool: string, problem: string, cause?: Error) {
-    super({
-      code: RagErrorCode.UNKNOWN_ERROR,
-      message: `Analysis tool "${tool}" failed: ${problem}`,
-      cause,
-      retryable: false,
-      context: { tool, problem },
-    });
-  }
-}
-
-const MAX_FILTER_LIMIT = 50;
-const DEFAULT_FILTER_LIMIT = 5;
-
-function isFiniteNumber(v: unknown): v is number {
-  return typeof v === 'number' && Number.isFinite(v);
-}
-
-function coerceNumber(v: unknown): number | undefined {
-  if (isFiniteNumber(v)) return v;
-  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
-  return undefined;
-}
+// ============================================================================
+// Internal helpers (not re-exported)
+// ============================================================================
 
 export function rowsOf(table: unknown): Array<Record<string, unknown>> {
   const t = table as { objects?: () => unknown[] } | undefined;
@@ -51,66 +34,6 @@ export function columnOf(table: unknown, column: string): unknown[] {
   return rows.map(r => r[column]);
 }
 
-export function quantile(sortedValues: number[], p: number): number {
-  const n = sortedValues.length;
-  if (n === 0) return NaN;
-  const idx = p * (n - 1);
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  if (lo === hi) return sortedValues[lo]!;
-  return sortedValues[lo]! + (sortedValues[hi]! - sortedValues[lo]!) * (idx - lo);
-}
-
-export function pearson(xs: number[], ys: number[]): number {
-  const n = xs.length;
-  if (n < 2 || n !== ys.length) return 0;
-  let sumX = 0;
-  let sumY = 0;
-  for (let i = 0; i < n; i++) {
-    sumX += xs[i]!;
-    sumY += ys[i]!;
-  }
-  const meanX = sumX / n;
-  const meanY = sumY / n;
-  let num = 0;
-  let denX = 0;
-  let denY = 0;
-  for (let i = 0; i < n; i++) {
-    const dx = xs[i]! - meanX;
-    const dy = ys[i]! - meanY;
-    num += dx * dy;
-    denX += dx * dx;
-    denY += dy * dy;
-  }
-  if (denX === 0 || denY === 0) return 0;
-  return num / Math.sqrt(denX * denY);
-}
-
-function rankWithAverageTies(values: number[]): number[] {
-  const n = values.length;
-  const indexed = values.map((v, i) => ({ v, i }));
-  indexed.sort((a, b) => a.v - b.v);
-  const ranks = new Array<number>(n);
-  let i = 0;
-  while (i < n) {
-    let j = i;
-    while (j < n && indexed[j]!.v === indexed[i]!.v) j++;
-    const avgRank = (i + 1 + j) / 2;
-    for (let k = i; k < j; k++) {
-      ranks[indexed[k]!.i] = avgRank;
-    }
-    i = j;
-  }
-  return ranks;
-}
-
-export function spearman(xs: number[], ys: number[]): number {
-  if (xs.length !== ys.length) return 0;
-  const rx = rankWithAverageTies(xs);
-  const ry = rankWithAverageTies(ys);
-  return pearson(rx, ry);
-}
-
 function getTable(ctx: AnalysisToolContext, dataset: string): unknown {
   const table = ctx.datasets.get(dataset);
   if (!table) {
@@ -122,6 +45,10 @@ function getTable(ctx: AnalysisToolContext, dataset: string): unknown {
 function getColumnValues(table: unknown, column: string): unknown[] {
   return columnOf(table, column);
 }
+
+// ============================================================================
+// Tool implementations
+// ============================================================================
 
 export function listDatasetsTool(ctx: AnalysisToolContext): Array<{ name: string; rowCount: number; columns: string[] }> {
   const result: Array<{ name: string; rowCount: number; columns: string[] }> = [];
@@ -351,192 +278,4 @@ export function correlateTool(
 
 export async function runCodeTool(args: { code: string }, executor: (code: string) => Promise<unknown>): Promise<unknown> {
   return executor(args.code);
-}
-
-export const TOOL_SCHEMAS: ToolDefinition[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'list_datasets',
-      description: 'List all available datasets with their row counts and column names',
-      parameters: {
-        type: 'object',
-        properties: {},
-        required: [],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'profile_column',
-      description: 'Get statistical profile of a single column (numeric or categorical)',
-      parameters: {
-        type: 'object',
-        properties: {
-          dataset: { type: 'string', description: 'Dataset name' },
-          column: { type: 'string', description: 'Column name' },
-        },
-        required: ['dataset', 'column'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'aggregate',
-      description: 'Group rows by a column and compute aggregate measures',
-      parameters: {
-        type: 'object',
-        properties: {
-          dataset: { type: 'string', description: 'Dataset name' },
-          groupBy: { type: 'string', description: 'Column to group by' },
-          measures: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                column: { type: 'string' },
-                fn: { type: 'string', enum: ['sum', 'mean', 'count', 'min', 'max'] },
-                as: { type: 'string' },
-              },
-              required: ['column', 'fn'],
-            },
-            minItems: 1,
-          },
-        },
-        required: ['dataset', 'groupBy', 'measures'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'filter_sample',
-      description: 'Filter rows and return a sample (default 5, max 50)',
-      parameters: {
-        type: 'object',
-        properties: {
-          dataset: { type: 'string', description: 'Dataset name' },
-          where: {
-            type: 'object',
-            properties: {
-              column: { type: 'string' },
-              op: { type: 'string', enum: ['eq', 'contains', 'gt', 'lt'] },
-              value: {},
-            },
-            required: ['column', 'op', 'value'],
-          },
-          limit: { type: 'number', minimum: 1, maximum: MAX_FILTER_LIMIT },
-        },
-        required: ['dataset'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'correlate',
-      description: 'Compute correlation between two numeric columns',
-      parameters: {
-        type: 'object',
-        properties: {
-          dataset: { type: 'string', description: 'Dataset name' },
-          columnA: { type: 'string', description: 'First column' },
-          columnB: { type: 'string', description: 'Second column' },
-          method: { type: 'string', enum: ['pearson', 'spearman'], default: 'pearson' },
-        },
-        required: ['dataset', 'columnA', 'columnB'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'run_code',
-      description: 'Execute arbitrary Arquero code in the sandbox',
-      parameters: {
-        type: 'object',
-        properties: {
-          code: { type: 'string', description: 'Arquero code to execute' },
-        },
-        required: ['code'],
-      },
-    },
-  },
-];
-
-export async function executeToolCall(
-  ctx: AnalysisToolContext,
-  name: string,
-  args: Record<string, unknown>,
-  executor?: (code: string) => Promise<unknown>
-): Promise<unknown> {
-  switch (name) {
-    case 'list_datasets':
-      return listDatasetsTool(ctx);
-    case 'profile_column': {
-      if (!args.dataset || typeof args.dataset !== 'string') {
-        throw new AnalysisToolError('executeToolCall', 'profile_column requires dataset string');
-      }
-      if (!args.column || typeof args.column !== 'string') {
-        throw new AnalysisToolError('executeToolCall', 'profile_column requires column string');
-      }
-      return profileColumnTool(ctx, { dataset: args.dataset, column: args.column });
-    }
-    case 'aggregate': {
-      if (!args.dataset || typeof args.dataset !== 'string') {
-        throw new AnalysisToolError('executeToolCall', 'aggregate requires dataset string');
-      }
-      if (!args.groupBy || typeof args.groupBy !== 'string') {
-        throw new AnalysisToolError('executeToolCall', 'aggregate requires groupBy string');
-      }
-      if (!Array.isArray(args.measures) || args.measures.length === 0) {
-        throw new AnalysisToolError('executeToolCall', 'aggregate requires non-empty measures array');
-      }
-      return aggregateTool(ctx, {
-        dataset: args.dataset,
-        groupBy: args.groupBy,
-        measures: args.measures as Array<{ column: string; fn: 'sum' | 'mean' | 'count' | 'min' | 'max'; as?: string }>,
-      });
-    }
-    case 'filter_sample': {
-      if (!args.dataset || typeof args.dataset !== 'string') {
-        throw new AnalysisToolError('executeToolCall', 'filter_sample requires dataset string');
-      }
-      return filterSampleTool(ctx, {
-        dataset: args.dataset,
-        where: args.where as { column: string; op: 'eq' | 'contains' | 'gt' | 'lt'; value: unknown } | undefined,
-        limit: typeof args.limit === 'number' ? args.limit : undefined,
-      });
-    }
-    case 'correlate': {
-      if (!args.dataset || typeof args.dataset !== 'string') {
-        throw new AnalysisToolError('executeToolCall', 'correlate requires dataset string');
-      }
-      if (!args.columnA || typeof args.columnA !== 'string') {
-        throw new AnalysisToolError('executeToolCall', 'correlate requires columnA string');
-      }
-      if (!args.columnB || typeof args.columnB !== 'string') {
-        throw new AnalysisToolError('executeToolCall', 'correlate requires columnB string');
-      }
-      return correlateTool(ctx, {
-        dataset: args.dataset,
-        columnA: args.columnA,
-        columnB: args.columnB,
-        method: args.method as 'pearson' | 'spearman' | undefined,
-      });
-    }
-    case 'run_code': {
-      if (!args.code || typeof args.code !== 'string' || args.code.trim() === '') {
-        throw new AnalysisToolError('executeToolCall', 'run_code requires non-empty code string');
-      }
-      if (!executor) {
-        throw new AnalysisToolError('executeToolCall', 'run_code requires executor function');
-      }
-      return runCodeTool({ code: args.code }, executor);
-    }
-    default:
-      throw new AnalysisToolError('executeToolCall', `unknown tool: ${name}`);
-  }
 }

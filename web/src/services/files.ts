@@ -1,5 +1,5 @@
 import type { ColumnTable } from 'arquero';
-import { extractPdfText, type ExtractedPage } from './pdf';
+import type { ExtractedPage } from './pdf';
 import { chunkText, type Chunk, type ChunkContext } from './chunker';
 import type { EmbeddingsClient } from '../lib/embeddings';
 import { hashText } from '../lib/hash';
@@ -90,6 +90,9 @@ async function processText(file: File): Promise<ProcessedDocument> {
 }
 
 async function processPdf(file: File): Promise<ProcessedDocument> {
+  // Dynamic import: pdf.ts (and the pdfjs-dist it pulls) must stay out of the
+  // eager graph — they are only needed when a PDF is actually dropped.
+  const { extractPdfText } = await import('./pdf');
   const buffer = await file.arrayBuffer();
   const pages: ExtractedPage[] = await extractPdfText(buffer);
   const fullText = pages.map((p) => p.text).join('\n');

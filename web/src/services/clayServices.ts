@@ -15,7 +15,7 @@ import { resolveModels } from '../lib/models';
 import { resolveProviderEndpoint } from '../lib/providers';
 import type { LLMClient } from '../lib/llm';
 import { createLLMClient } from '../lib/llm';
-import { createEmbeddingsClient } from '../lib/embeddings';
+import { createEmbeddingsClient, getSharedEmbeddingCache } from '../lib/embeddings';
 import type { EmbeddingsClient } from '../lib/embeddings';
 import { createVectorStore } from '../lib/vectorstore';
 import type { VectorStore } from '../lib/vectorstore';
@@ -32,6 +32,12 @@ export interface ClayServiceBundle {
   webSearch: WebSearchClient;
   analyzer: DataAnalyzer;
   pickedModels: PickedModels;
+  /**
+   * Tear down worker-backed services (embeddings, analyzer sandbox) once
+   * pending work drains. Adapters call this when they replace the bundle so
+   * recreated clients do not leak workers.
+   */
+  dispose: () => void;
 }
 
 export interface ClayServiceBundleInput {
@@ -52,7 +58,9 @@ export function createClayServiceBundle(input: ClayServiceBundleInput): ClayServ
   // so an adapter can never pick a model that is missing from its own catalog.
   const { picked } = resolveModels({ ...settings, localCatalog: catalog }, catalog);
 
-  const embeddings = createEmbeddingsClient();
+  // The shared session cache survives bundle recreation: re-creating the
+  // bundle on settings/catalog/dataset changes must not drop cache warmth.
+  const embeddings = createEmbeddingsClient({ cache: getSharedEmbeddingCache() });
   // Entries and queries embed under the same fixed local model — the model
   // never changes across adapters, so stored vectors always match queries.
   // MMR reranking ships off deliberately (useMMR defaults false): the dense
@@ -82,5 +90,10 @@ export function createClayServiceBundle(input: ClayServiceBundleInput): ClayServ
     maxToolLoopTokens: settings.maxToolLoopTokens,
   });
 
-  return { llm, embeddings, vectorstore, webSearch, analyzer, pickedModels: picked };
+  const dispose = (): void => {
+    embeddings.dispose?.();
+    analyzer.dispose();
+  };
+
+  return { llm, embeddings, vectorstore, webSearch, analyzer, pickedModels: picked, dispose };
 }

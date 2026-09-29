@@ -25,6 +25,8 @@ export interface DataAnalyzer {
   analyze(question: string, signal?: AbortSignal, hooks?: AnalyzerHooks, previousContext?: string): Promise<DataAnalysisResult>;
   listDatasets(): DatasetSummary[];
   getDatasetSummary(name: string): DatasetSummary | undefined;
+  /** Tear down the sandbox executor's worker once pending executions drain. */
+  dispose(): void;
 }
 
 export interface DataAnalyzerDeps {
@@ -180,5 +182,5 @@ export function createDataAnalyzer(deps: DataAnalyzerDeps): DataAnalyzer {
       .filter((s): s is DatasetSummary => !!s);
   }
 
-  return { analyze, listDatasets, getDatasetSummary };
+  return { analyze, listDatasets, getDatasetSummary, dispose: () => executeUserCode.dispose() };
 }

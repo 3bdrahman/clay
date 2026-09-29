@@ -5,14 +5,20 @@
 // repeated queries and re-indexed documents skip inference. The interface is
 // one method, one parameter: embed(input) → L2-normalized vectors.
 
-import { createEmbeddingCache, type EmbeddingCache } from './embeddingCache';
+import { createEmbeddingCache, getSharedEmbeddingCache, type EmbeddingCache } from './embeddingCache';
 import { hashText } from './hash';
 import { EMBEDDING_MODEL_ID } from './embeddingModel';
 
-export { EMBEDDING_MODEL_ID };
+export { EMBEDDING_MODEL_ID, getSharedEmbeddingCache };
 
 export interface EmbeddingsClient {
   embed(input: string | string[]): Promise<number[][]>;
+  /**
+   * Terminate the underlying worker once pending embeds drain. A no-op when
+   * no worker was ever spawned. The service bundle calls this when it is
+   * replaced so recreated clients do not leak workers.
+   */
+  dispose?(): void;
 }
 
 export interface EmbedWorkerRequest {
@@ -29,6 +35,8 @@ export type EmbeddingWorkerLike = {
   postMessage(msg: EmbedWorkerRequest): void;
   addEventListener(type: 'message', listener: (ev: MessageEvent<EmbedWorkerResponse>) => void): void;
   addEventListener(type: 'error', listener: (ev: ErrorEvent) => void): void;
+  /** Optional: real workers expose terminate(); test fakes legitimately omit it. */
+  terminate?(): void;
 };
 
 function defaultWorkerFactory(): Worker {
@@ -38,8 +46,9 @@ function defaultWorkerFactory(): Worker {
 /**
  * Create the local embeddings client. Accepts an injectable worker factory
  * and cache for tests; production uses the bundled worker and a fresh LRU.
- * A worker 'error' event (script failed to load) rejects pending embeds and
- * spawns a fresh worker so the next embed can retry instead of hanging.
+ * The worker spawns lazily on the first embed. A worker 'error' event (script
+ * failed to load) rejects pending embeds and clears the worker so the next
+ * embed spawns a fresh one instead of hanging or respawning in a loop.
  */
 export function createEmbeddingsClient(options?: {
   workerFactory?: () => EmbeddingWorkerLike;
@@ -49,7 +58,24 @@ export function createEmbeddingsClient(options?: {
 
   let nextId = 1;
   const pending = new Map<number, { resolve: (v: number[][]) => void; reject: (e: Error) => void }>();
-  let worker: EmbeddingWorkerLike;
+  let worker: EmbeddingWorkerLike | null = null;
+  let doomed = false;
+
+  function ensureWorker(): EmbeddingWorkerLike {
+    if (worker === null) {
+      doomed = false;
+      worker = spawn();
+    }
+    return worker;
+  }
+
+  function terminateIfDrained(): void {
+    if (!doomed || pending.size > 0 || worker === null) return;
+    const w = worker;
+    worker = null;
+    doomed = false;
+    w.terminate?.();
+  }
 
   function isEmbedResponse(v: unknown): v is EmbedWorkerResponse {
     if (typeof v !== 'object' || v === null) return false;
@@ -76,21 +102,23 @@ export function createEmbeddingsClient(options?: {
       } else {
         entry.reject(new Error(msg.message));
       }
+      terminateIfDrained();
     });
 
     // The worker 'error' event fires when the script fails to load — no
     // message is posted, so without this listener every pending embed hangs.
+    // The worker is cleared, not respawned here: respawning inside the error
+    // handler would loop endlessly when the script keeps failing to load
+    // (e.g. an asset 404 under a wrong base path). The next embed spawns.
     w.addEventListener('error', (ev: ErrorEvent) => {
       const message = ev.message || 'embedding worker failed';
       for (const entry of pending.values()) entry.reject(new Error(message));
       pending.clear();
-      worker = spawn();
+      worker = null;
     });
 
     return w;
   }
-
-  worker = spawn();
 
   async function embed(input: string | string[]): Promise<number[][]> {
     const inputs = Array.isArray(input) ? input : [input];
@@ -114,7 +142,7 @@ export function createEmbeddingsClient(options?: {
       nextId += 1;
       const vectors = await new Promise<number[][]>((resolve, reject) => {
         pending.set(id, { resolve, reject });
-        worker.postMessage({ type: 'embed', id, texts: toEmbed });
+        ensureWorker().postMessage({ type: 'embed', id, texts: toEmbed });
       });
       for (let j = 0; j < toEmbed.length; j += 1) {
         const vec = vectors[j];
@@ -129,5 +157,10 @@ export function createEmbeddingsClient(options?: {
     return results;
   }
 
-  return { embed };
+  function dispose(): void {
+    doomed = true;
+    terminateIfDrained();
+  }
+
+  return { embed, dispose };
 }

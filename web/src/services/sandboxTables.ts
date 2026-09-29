@@ -6,9 +6,9 @@ import type { ColumnTable } from 'arquero';
 import type { DatasetMeta } from './analyzer';
 import type { SandboxDataset } from '../store';
 import { parseCsvNormalized } from './csvNormalize';
-import { openIDB, wrapIDBStore, type IDBStore } from '../lib/idb';
-import { VECTOR_DB_NAME, VECTOR_DB_VERSION, clayDBUpgrade } from '../lib/vectorstore';
+import { openIDB, wrapIDBStore, type IDBStore, VECTOR_DB_NAME, VECTOR_DB_VERSION, clayDBUpgrade } from '../lib/idb';
 import { VectorStoreQuotaExceededError } from '../lib/errors';
+import { hashText } from '../lib/hash';
 
 const SANDBOX_STORE_NAME = 'sandbox';
 
@@ -112,6 +112,7 @@ export function registerSandboxTable(name: string, table: ColumnTable): void {
 
 export function unregisterSandboxTable(name: string): void {
   tables.delete(name);
+  parsedMemo.delete(name);
 }
 
 export function getSandboxTable(name: string): ColumnTable | undefined {
@@ -124,6 +125,7 @@ export function listSandboxTableNames(): string[] {
 
 export function clearSandboxTables(): void {
   tables.clear();
+  parsedMemo.clear();
 }
 
 export interface RehydratedSandbox {
@@ -139,12 +141,24 @@ export interface RehydratedSandbox {
  * empty tables, so the analyzer reports their absence instead of querying
  * garbage.
  */
+// Parse memo: the service bundle is recreated on every settings/catalog/
+// dataset change and each recreation re-runs rehydrateSandboxTables — without
+// this, every CSV re-parses through Arquero each time. Keyed by dataset name
+// and guarded by the csv hash (FNV-1a, the same hash-cache pattern as the
+// embeddings LRU), so a re-upload under the same name re-parses instead of
+// serving a stale table.
+const parsedMemo = new Map<string, { csvHash: string; table: ColumnTable }>();
+
 export function rehydrateSandboxTables(datasets: readonly SandboxDataset[]): RehydratedSandbox {
   const rehydrated: Map<string, unknown> = new Map();
   const metadata: DatasetMeta = {};
   for (const d of datasets) {
     if (d.csv === undefined) continue;
-    rehydrated.set(d.name, parseCsvNormalized(d.csv));
+    const csvHash = hashText(d.csv);
+    const memoed = parsedMemo.get(d.name);
+    const table = memoed && memoed.csvHash === csvHash ? memoed.table : parseCsvNormalized(d.csv);
+    parsedMemo.set(d.name, { csvHash, table });
+    rehydrated.set(d.name, table);
     metadata[d.name] = { columns: d.columns, rowCount: d.rowCount };
   }
   return { tables: rehydrated, metadata };

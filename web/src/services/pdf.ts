@@ -1,7 +1,30 @@
-import * as pdfjs from 'pdfjs-dist';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import type * as PdfjsModule from 'pdfjs-dist';
 
-pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+// pdfjs-dist (~1.3MB worker + wasm) is only needed when a PDF is dropped.
+// Loading it dynamically keeps it out of the eager graph: the module is
+// pulled once, memoized, and the worker URL is wired before first use. A
+// failed load resets the memo so a later extraction retries instead of
+// every subsequent call rejecting off a memoized failure.
+let pdfjsPromise: Promise<typeof PdfjsModule> | null = null;
+
+async function getPdfjs(): Promise<typeof PdfjsModule> {
+  if (pdfjsPromise === null) {
+    pdfjsPromise = (async () => {
+      try {
+        const [lib, worker] = await Promise.all([
+          import('pdfjs-dist'),
+          import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+        ]);
+        lib.GlobalWorkerOptions.workerSrc = worker.default;
+        return lib;
+      } catch (e) {
+        pdfjsPromise = null;
+        throw e;
+      }
+    })();
+  }
+  return pdfjsPromise;
+}
 
 export interface ExtractedPage {
   pageNumber: number;
@@ -96,6 +119,7 @@ function renderPage(items: PdfTextItem[]): { text: string; heading?: string } {
 }
 
 export async function extractPdfText(buffer: ArrayBuffer): Promise<ExtractedPage[]> {
+  const pdfjs = await getPdfjs();
   const loadingTask = pdfjs.getDocument({ data: buffer });
   const pdf = await loadingTask.promise;
   const pages: ExtractedPage[] = [];

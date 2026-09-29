@@ -66,3 +66,16 @@ export function createEmbeddingCache(maxEntries: number = DEFAULT_MAX_ENTRIES): 
     },
   };
 }
+
+let shared: EmbeddingCache | null = null;
+
+/**
+ * Session-wide cache shared by every embeddings client. The service bundle is
+ * recreated on every settings/catalog/dataset change; without this, each
+ * recreation starts a cold cache and repeated queries re-embed. Tests that
+ * need isolation pass their own cache to createEmbeddingsClient instead.
+ */
+export function getSharedEmbeddingCache(): EmbeddingCache {
+  if (shared === null) shared = createEmbeddingCache();
+  return shared;
+}

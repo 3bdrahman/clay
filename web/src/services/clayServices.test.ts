@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as aq from 'arquero';
 import { createClayServiceBundle } from './clayServices';
+import { getSharedEmbeddingCache } from '../lib/embeddings';
 import { resolveProviderEndpoint } from '../lib/providers';
 import { ModelNotFoundError } from '../lib/errors';
 import { EMBEDDING_MODEL_ID } from '../lib/embeddingModel';
@@ -92,7 +93,7 @@ describe('createClayServiceBundle', () => {
       analyzerMetadata: { employees: { columns: ['a'], rowCount: 1 } },
     });
 
-    expect(createEmbeddingsClientMock).toHaveBeenCalledWith();
+    expect(createEmbeddingsClientMock).toHaveBeenCalledWith({ cache: getSharedEmbeddingCache() });
     expect(createVectorStoreMock).toHaveBeenCalledWith(embeddingsStub, {
       embeddingModel: EMBEDDING_MODEL_ID,
     });
@@ -168,7 +169,7 @@ describe('createClayServiceBundle', () => {
       analyzerMetadata: {},
     });
 
-    expect(createEmbeddingsClientMock).toHaveBeenCalledWith();
+    expect(createEmbeddingsClientMock).toHaveBeenCalledWith({ cache: getSharedEmbeddingCache() });
     expect(createVectorStoreMock).toHaveBeenCalledWith(embeddingsStub, {
       embeddingModel: EMBEDDING_MODEL_ID,
     });

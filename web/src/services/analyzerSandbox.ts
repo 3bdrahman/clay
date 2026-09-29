@@ -97,15 +97,32 @@ function assertCodeSafe(code: string): void {
 
 const CLIENT_EXECUTION_TIMEOUT_MS = 15_000;
 
+/**
+ * Callable sandbox executor plus its teardown. `dispose` terminates the
+ * worker once pending executions drain; a no-op when no worker was spawned.
+ */
+export type UserCodeExecutor = ((code: string) => Promise<unknown>) & {
+  dispose: () => void;
+};
+
 export function createUserCodeExecutor(
   datasets: Map<string, unknown>,
   options?: { workerFactory?: () => Worker },
-): (code: string) => Promise<unknown> {
+): UserCodeExecutor {
   const hasWorker = typeof Worker !== 'undefined';
 
   let worker: Worker | null = null;
+  let doomed = false;
   let nextId = 1;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+
+  function terminateIfDrained(): void {
+    if (!doomed || pending.size > 0 || worker === null) return;
+    const w = worker;
+    worker = null;
+    doomed = false;
+    w.terminate();
+  }
 
   function spawnWorker(): Worker {
     const w = options?.workerFactory
@@ -131,6 +148,7 @@ export function createUserCodeExecutor(
           retryable: msg.kind === 'runtime',
         }));
       }
+      terminateIfDrained();
     });
 
     // The worker 'error' event fires when the script fails to load — no
@@ -201,6 +219,7 @@ export function createUserCodeExecutor(
             new Error('sandbox worker round-trip timed out'),
             { code, retryable: false },
           ));
+          terminateIfDrained();
         }
       }, CLIENT_EXECUTION_TIMEOUT_MS);
     });
@@ -208,5 +227,10 @@ export function createUserCodeExecutor(
     return rows;
   }
 
-  return executeUserCode;
+  function dispose(): void {
+    doomed = true;
+    terminateIfDrained();
+  }
+
+  return Object.assign(executeUserCode, { dispose });
 }

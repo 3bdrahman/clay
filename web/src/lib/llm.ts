@@ -9,6 +9,8 @@ import {
   ModelNotFoundError,
   classifyError,
 } from './errors';
+import { buildMessages } from './llmMessages';
+import { streamOpenAICompatible } from './llmStream';
 
 export { ProviderUnreachableError } from './errors';
 
@@ -87,29 +89,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
   }
 
   async function sendChatRequest(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
-    const messages: Array<Record<string, unknown>> = [];
-    if (req.system) messages.push({ role: 'system', content: req.system });
-    for (const m of req.messages) {
-      if (m.role === 'assistant' && m.toolCalls) {
-        messages.push({
-          role: 'assistant',
-          content: m.content,
-          tool_calls: m.toolCalls.map(c => ({
-            id: c.id,
-            type: 'function',
-            function: { name: c.function.name, arguments: c.function.arguments },
-          })),
-        });
-      } else if (m.role === 'tool') {
-        messages.push({
-          role: 'tool',
-          content: m.content,
-          tool_call_id: m.toolCallId,
-        });
-      } else {
-        messages.push({ role: m.role, content: m.content });
-      }
-    }
+    const messages = buildMessages(req);
 
     const body: Record<string, unknown> = {
       model: req.model,
@@ -257,213 +237,20 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     }
   }
 
-  async function streamOpenAICompatible(
-    req: LLMRequest,
-    onToken: (token: string) => void,
-    signal?: AbortSignal,
-  ): Promise<LLMResponse> {
-    const messages: Array<Record<string, unknown>> = [];
-    if (req.system) messages.push({ role: 'system', content: req.system });
-    for (const m of req.messages) {
-      if (m.role === 'assistant' && m.toolCalls) {
-        messages.push({
-          role: 'assistant',
-          content: m.content,
-          tool_calls: m.toolCalls.map(c => ({
-            id: c.id,
-            type: 'function',
-            function: { name: c.function.name, arguments: c.function.arguments },
-          })),
-        });
-      } else if (m.role === 'tool') {
-        messages.push({
-          role: 'tool',
-          content: m.content,
-          tool_call_id: m.toolCallId,
-        });
-      } else {
-        messages.push({ role: m.role, content: m.content });
-      }
-    }
-
-    const body: Record<string, unknown> = {
-      model: req.model,
-      messages,
-      temperature: req.temperature ?? defaultTemperature,
-      stream: true,
-    };
-    if (req.maxTokens) body.max_tokens = req.maxTokens;
-    if (req.jsonMode) body.response_format = { type: 'json_object' };
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    };
-    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-
-    // Each abort listener added here is detached in the finally below: a
-    // tool loop makes many calls per question against one external signal,
-    // and a listener left behind would pin every call's closure to it.
-    const combinedController = new AbortController();
-    const onExternalAbort = () => combinedController.abort();
-    const onTimeoutAbort = () => combinedController.abort();
-    const { controller, cleanup, didTimeout } = createAbortControllerWithTimeout();
-    controller.signal.addEventListener('abort', onTimeoutAbort);
-    if (signal) {
-      signal.addEventListener('abort', onExternalAbort);
-    }
-
-    // If external signal is already aborted, throw immediately — a live
-    // combined signal does not fire listeners for an abort that already
-    // happened before they were added.
-    if (signal?.aborted) {
-      cleanup();
-      controller.signal.removeEventListener('abort', onTimeoutAbort);
-      if (signal) {
-        signal.removeEventListener('abort', onExternalAbort);
-      }
-      throw new StreamInterruptedError(providerLabel, '', new Error('Aborted'));
-    }
-
-    try {
-      let resp: Response;
-      try {
-        resp = await fetch(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-          signal: combinedController.signal,
-        });
-      } catch (e) {
-        // Network error, user abort, or timeout
-        if (signal?.aborted) {
-          throw new StreamInterruptedError(providerLabel, '', e instanceof Error ? e : new Error(String(e)));
-        }
-        if (didTimeout()) {
-          throw new ProviderTimeoutError(providerLabel, timeoutMs, e instanceof Error ? e : new Error(String(e)));
-        }
-        if (e instanceof DOMException) {
-          throw new StreamInterruptedError(providerLabel, '', e instanceof Error ? e : new Error(String(e)));
-        }
-        throw classifyError(e, providerLabel, 'stream');
-      }
-
-      if (!resp.ok) {
-        await handleResponseError(resp, 'stream', req.model);
-      }
-
-      const reader = resp.body?.getReader();
-      if (!reader) throw new GenerationFailedError(providerLabel, new Error('No response body'));
-
-      const decoder = new TextDecoder();
-      let fullContent = '';
-      let usage: LLMResponse['usage'] = undefined;
-      let model: string | undefined;
-      // A `data:` JSON line can split across network chunks; without carrying
-      // the partial tail forward, the remainder (which no longer carries the
-      // `data: ` prefix) is silently skipped and the token is lost.
-      let sseBuffer = '';
-
-      try {
-        while (true) {
-          let readResult;
-          try {
-            readResult = await reader.read();
-          } catch (e) {
-            if (signal?.aborted) {
-              throw new StreamInterruptedError(providerLabel, fullContent, e instanceof Error ? e : new Error(String(e)));
-            }
-            if (didTimeout()) {
-              // The timeout stays active through the read phase: a server
-              // that stalls mid-stream surfaces as a typed timeout carrying
-              // the budget in its message, instead of hanging silently
-              // until the user presses Esc.
-              throw new ProviderTimeoutError(providerLabel, timeoutMs, e instanceof Error ? e : new Error(String(e)));
-            }
-            throw classifyError(e, providerLabel, 'stream-read');
-          }
-
-          const { done, value } = readResult;
-          if (done) break;
-
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split('\n');
-          sseBuffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') continue;
-
-            try {
-              const parsed = JSON.parse(data);
-              const choice = parsed.choices?.[0];
-              if (!choice) continue;
-
-              if (choice.delta?.content) {
-                const token = choice.delta.content;
-                fullContent += token;
-                onToken(token);
-              }
-
-              if (choice.finish_reason) {
-                usage = parsed.usage
-                  ? {
-                      promptTokens: parsed.usage.prompt_tokens,
-                      completionTokens: parsed.usage.completion_tokens,
-                      totalTokens: parsed.usage.total_tokens,
-                    }
-                  : undefined;
-                model = parsed.model;
-              }
-            } catch (e) {
-              // A partial line is never handed to JSON.parse (the buffer keeps
-              // it), so a parse failure here is a genuinely malformed chunk —
-              // skipping is correct. DEV-only log so loud providers still surface.
-              if (import.meta.env.DEV) {
-                console.warn('[llm] stream(): partial SSE chunk parse skipped:', e);
-              }
-            }
-          }
-        }
-        if (sseBuffer.startsWith('data: ') && !sseBuffer.includes('[DONE]')) {
-          try {
-            const parsed = JSON.parse(sseBuffer.slice(6).trim());
-            const token = parsed.choices?.[0]?.delta?.content;
-            if (token) {
-              fullContent += token;
-              onToken(token);
-            }
-          } catch (e) {
-            if (import.meta.env.DEV) {
-              console.warn('[llm] stream(): final SSE line parse skipped:', e);
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-      }
-
-      if (signal?.aborted) {
-        throw new StreamInterruptedError(providerLabel, fullContent, new Error('Aborted'));
-      }
-
-      return { content: fullContent, usage, model };
-    } finally {
-      cleanup();
-      controller.signal.removeEventListener('abort', onTimeoutAbort);
-      if (signal) {
-        signal.removeEventListener('abort', onExternalAbort);
-      }
-    }
-  }
+  const streamConfig = {
+    baseUrl,
+    apiKey,
+    providerLabel,
+    defaultTemperature,
+    timeoutMs,
+  };
 
   return {
     async invoke(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
       return callOpenAICompatible(req, signal);
     },
     async stream(req: LLMRequest, onToken: (token: string) => void, signal?: AbortSignal): Promise<LLMResponse> {
-      return streamOpenAICompatible(req, onToken, signal);
+      return streamOpenAICompatible(streamConfig, req, onToken, signal);
     },
   };
 }

@@ -1,5 +1,3 @@
-// Core type definitions for Clay
-
 import type { RagErrorCode } from './errors';
 
 export interface ToolDefinition {
@@ -189,16 +187,6 @@ export interface LLMResponse {
   finishReason?: string;
 }
 
-export interface EmbeddingRequest {
-  input: string | string[];
-  model?: string;
-}
-
-export interface EmbeddingResponse {
-  embeddings: number[][];
-  model?: string;
-}
-
 /** Structural + provenance metadata for a single chunk, used as the cache key and citation source. */
 export interface ChunkMetadata {
   source: string;
@@ -211,30 +199,6 @@ export interface ChunkMetadata {
   tokenCount: number;
   modelId: string;
   updatedAt?: number;
-}
-
-/** LLM-as-judge relevance verdict for a single retrieved document. */
-export interface GradeResult {
-  docId: string;
-  relevant: boolean;
-  score?: number;
-}
-
-/** Per-question evaluation metrics with per-stage latency breakdown (v2 eval harness). */
-export interface EvalResultV2 {
-  questionId: string;
-  nDCGAtK: number;
-  MRR: number;
-  recallAtK: number;
-  latencyMs: number;
-  stageLatencies: {
-    retrieveMs: number;
-    gradeMs: number;
-    generateMs: number;
-    evaluateMs: number;
-  };
-  routingCorrect: boolean;
-  error?: string;
 }
 
 export interface ToolCall {
@@ -251,4 +215,9 @@ export interface Insight {
   evidence: string;
   confidence: 'high' | 'medium' | 'low';
   implication?: string;
+}
+
+export interface AnalysisToolContext {
+  datasets: Map<string, unknown>;
+  metadata: Record<string, { columns: string[]; rowCount: number }>;
 }

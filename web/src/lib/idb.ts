@@ -1,4 +1,7 @@
 /** Hand-rolled async IndexedDB wrapper. No npm deps. */
+export const VECTOR_DB_NAME = 'clay-vector-db';
+export const VECTOR_DB_VERSION = 2;
+
 export interface IDBStore<T> {
   put(value: T): Promise<void>;
   putMany(values: T[], batchSize?: number): Promise<void>;
@@ -72,4 +75,23 @@ export function wrapIDBStore<T>(db: IDBDatabase, storeName: string): IDBStore<T>
       db.close();
     },
   };
+}
+
+export const SANDBOX_STORE_NAME = 'sandbox';
+export const VECTOR_STORE_NAME = 'entries';
+
+/**
+ * The shared upgrade for the clay vector DB: creates the vector entries store
+ * AND the sandbox csv store, so whichever connection opens first (both use
+ * VECTOR_DB_VERSION) leaves both stores present regardless of open order.
+ */
+export function clayDBUpgrade(db: IDBDatabase): void {
+  if (!db.objectStoreNames.contains(VECTOR_STORE_NAME)) {
+    const store = db.createObjectStore(VECTOR_STORE_NAME, { keyPath: 'id' });
+    store.createIndex('source', 'metadata.source', { unique: false });
+    store.createIndex('modelId', 'metadata.modelId', { unique: false });
+  }
+  if (!db.objectStoreNames.contains(SANDBOX_STORE_NAME)) {
+    db.createObjectStore(SANDBOX_STORE_NAME, { keyPath: 'name' });
+  }
 }

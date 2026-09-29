@@ -32,20 +32,19 @@ export interface WebSearchClient {
   search(query: string, k?: number): Promise<WebResult[]>;
 }
 
-// Order matters: the ampersand entity is decoded LAST so entity text
-// produced by an earlier decode is never double-decoded.
 /**
  * Decode common HTML entities to plain text.
- * Order matters: the ampersand entity must be decoded last.
+ * Order matters: the ampersand entity must be decoded last so entity text
+ * produced by an earlier decode is never double-decoded.
  */
 export function decodeHtmlEntities(s: string): string {
   return s
-    .replace(/\u0026lt;/g, '<')
-    .replace(/\u0026gt;/g, '>')
-    .replace(/\u0026quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/\u0026apos;/g, "'")
-    .replace(/\u0026amp;/g, '&');
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
 }
 
 /**
@@ -127,12 +126,11 @@ export function createWebSearchClient(settings: Settings): WebSearchClient {
       throw new WebSearchProviderError('serper', `Network error: ${error.message}`, error, { retryable: true });
     }
 
-    if (!resp.ok) {
+if (!resp.ok) {
       if (resp.status === 401 || resp.status === 403) {
         throw new WebSearchProviderError('serper', `Invalid API key (${resp.status})`, undefined, { retryable: false });
       }
-if (resp.status === 429) {
-        resp.headers.get('retry-after');
+      if (resp.status === 429) {
         throw new WebSearchProviderError('serper', `Rate limited (${resp.status})`, undefined, { retryable: true });
       }
       // 500 errors are not retryable for web search

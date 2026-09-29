@@ -11,16 +11,24 @@ import type { VectorStore } from '../lib/vectorstore';
 import type { WebSearchClient } from '../lib/websearch';
 import type { DataAnalyzer } from './analyzer';
 import { ROUTER_INSTRUCTIONS } from './orchestratorPrompts';
-import { RagError, RagErrorCode, isRetryable, getUserMessage, GenerationFailedError } from '../lib/errors';
+import { RagError, RagErrorCode, GenerationFailedError } from '../lib/errors';
 import {
   NODE_LABELS,
   EVAL_TEMPERATURE,
   type OrchestratorStepContext,
-  rewriteQuestionForSource,
   runPath,
   generate,
   evaluate,
+  rewriteQuestionForSource,
 } from './orchestratorSteps';
+import {
+  VALID_SOURCE_TYPES,
+  ROUTER_CONFIDENCE_THRESHOLD,
+  buildRouterContext,
+  nextUntriedSource,
+} from './orchestratorRouter';
+import { withRetry } from './orchestratorRetry';
+import { createStepManager } from './orchestratorStepManager';
 
 export interface WorkflowOrchestrator {
   run(signal?: AbortSignal): Promise<WorkflowState>;
@@ -43,61 +51,6 @@ export interface OrchestratorDeps {
   previousAnalysis?: DataAnalysisResult;
 }
 
-const VALID_SOURCE_TYPES: SourceType[] = ['vectorstore', 'python', 'websearch'];
-
-const ROUTER_CONFIDENCE_THRESHOLD = 0.6;
-const MAX_STEP_RETRIES = 2;
-const BASE_RETRY_DELAY_MS = 1000;
-
-function webSearchAvailability(settings: Settings): string {
-  if (settings.webSearchProvider === 'none') return 'disabled by the user — never route here';
-  if (settings.webSearchProvider === 'serper') {
-    return settings.serperApiKey
-      ? 'available (Serper API key configured)'
-      : 'selected but no Serper API key configured — requests would fail';
-  }
-  return import.meta.env.DEV
-    ? 'available (DuckDuckGo via the dev proxy)'
-    : 'DEGRADED: DuckDuckGo cannot be reached from browser deployments in production (no CORS headers) — route here only for general-knowledge questions the sources above cannot answer';
-}
-
-function buildRouterContext(deps: OrchestratorDeps): string {
-  const lines: string[] = [];
-
-  const datasets = deps.analyzer.listDatasets();
-  if (datasets.length > 0) {
-    const dsLines = datasets.slice(0, 8).map(d => {
-      const cols = (d.columns ?? []).slice(0, 12).join(', ');
-      return `- ${d.name} (${d.rowCount} rows): [${cols}]`;
-    });
-    lines.push(`Datasets available for data analysis (source "python"):\n${dsLines.join('\n')}`);
-  } else {
-    lines.push('Datasets: none loaded — data analysis cannot answer anything');
-  }
-
-  const sources = deps.vectorstore.listSources();
-  if (sources.length > 0) {
-    const docLines = sources.slice(0, 8).map(s => `- ${s.source} (${s.entryCount} chunks)`);
-    lines.push(`Documents available for vector search (source "vectorstore"):\n${docLines.join('\n')}`);
-  } else {
-    lines.push('Documents: none uploaded — vector search cannot answer anything');
-  }
-
-  lines.push(`Web search (source "websearch"): ${webSearchAvailability(deps.settings)}`);
-
-  return lines.join('\n\n');
-}
-
-function nextUntriedSource(tried: SourceType[]): SourceType {
-  // Prefer the richest untried source: the real data beats documents beats
-  // the open web, and web search is CORS-degraded in production deployments.
-  const richness: SourceType[] = ['python', 'vectorstore', 'websearch'];
-  for (const s of richness) {
-    if (!tried.includes(s)) return s;
-  }
-  return 'vectorstore';
-}
-
 export function createWorkflowOrchestrator(
   question: string,
   deps: OrchestratorDeps,
@@ -112,130 +65,14 @@ export function createWorkflowOrchestrator(
     steps: [],
     startedAt: Date.now(),
   };
-  let steps: StepTrace[] = [];
 
-  function beginStep(node: string, label: string): void {
-    const step: StepTrace = {
-      id: `${node}-${crypto.randomUUID()}`,
-      node,
-      label,
-      status: 'running',
-      startedAt: Date.now(),
-    };
-    steps.push(step);
-    emitSteps();
-  }
+  const stepManager = createStepManager(state, callbacks);
+  const { steps, beginStep, endStep, setError, endAllRunningSteps, emitSteps } = stepManager;
 
-  function endStep(node: string, opts: { status?: 'done' | 'error'; detail?: string; meta?: Record<string, unknown> } = {}): void {
-    for (let i = steps.length - 1; i >= 0; i--) {
-      const step = steps[i];
-      if (step && step.node === node && step.status === 'running') {
-        step.status = opts.status ?? 'done';
-        step.finishedAt = Date.now();
-        step.durationMs = step.finishedAt - (step.startedAt || step.finishedAt);
-        if (opts.detail) step.detail = opts.detail;
-        if (opts.meta) step.meta = opts.meta;
-        emitSteps();
-        return;
-      }
-    }
-  }
-
-  function setError(err: Error, step: string): void {
-    const message = getUserMessage(err);
-    const code = err instanceof RagError ? err.code : RagErrorCode.UNKNOWN_ERROR;
-    const retryable = isRetryable(err);
-
-    state.error = {
-      code,
-      message,
-      step,
-      retryable,
-    };
-
-    callbacks.onError?.(err);
-    emitSteps();
-  }
-
-  function endAllRunningSteps(detail: string): void {
-    const now = Date.now();
-    for (const step of steps) {
-      if (step.status === 'running') {
-        step.status = 'skipped';
-        step.finishedAt = now;
-        step.durationMs = now - (step.startedAt || now);
-        step.detail = detail;
-      }
-    }
-    emitSteps();
-  }
-
-  let emitScheduled = false;
-  function emitSteps(): void {
-    state.steps = [...steps];
-    callbacks.onStepUpdate?.(state.steps);
-    if (!emitScheduled) {
-      emitScheduled = true;
-      requestAnimationFrame(() => {
-        emitScheduled = false;
-        callbacks.onPartialUpdate?.({ ...state });
-      });
-    }
-  }
-
-  async function withRetry<T>(
-    stepName: string,
-    fn: () => Promise<T>,
-    signal?: AbortSignal
-  ): Promise<T> {
-    let lastError: Error | null = null;
-    for (let attempt = 0; attempt <= MAX_STEP_RETRIES; attempt++) {
-      if (signal?.aborted) {
-        throw new GenerationFailedError('orchestrator', new Error('Aborted'), { retryable: false });
-      }
-      try {
-        return await fn();
-      } catch (e) {
-        lastError = e instanceof Error ? e : new Error(String(e));
-
-        // Don't retry on abort or non-retryable errors
-        if (signal?.aborted || !isRetryable(lastError)) {
-          if (lastError instanceof RagError) {
-            throw lastError.withStep(stepName);
-          }
-          throw new GenerationFailedError('orchestrator', lastError, {
-            retryable: false,
-          }).withStep(stepName);
-        }
-
-        // Retry with exponential backoff
-        if (attempt < MAX_STEP_RETRIES) {
-          const delay = BASE_RETRY_DELAY_MS * Math.pow(2, attempt);
-          // Record retry event in the currently-running step (last step with status 'running')
-          for (let i = steps.length - 1; i >= 0; i--) {
-            const step = steps[i];
-            if (step.status === 'running') {
-              if (!step.retries) step.retries = [];
-              step.retries.push({ attempt: attempt + 1, error: lastError.message, delayMs: delay });
-              emitSteps();
-              break;
-            }
-          }
-          await new Promise(r => setTimeout(r, delay));
-          if (import.meta.env.DEV) {
-            console.warn(`[orchestrator] Retrying ${stepName} (attempt ${attempt + 1}/${MAX_STEP_RETRIES}):`, lastError.message);
-          }
-        }
-      }
-    }
-    if (lastError instanceof RagError) {
-      throw lastError.withStep(stepName);
-    }
-    throw new GenerationFailedError('orchestrator', lastError!, { retryable: false }).withStep(stepName);
-  }
+  const retryCtx = { steps, emitSteps };
 
   async function run(signal?: AbortSignal): Promise<WorkflowState> {
-    steps = [];
+    steps.length = 0;
     emitSteps();
 
     try {
@@ -248,7 +85,8 @@ export function createWorkflowOrchestrator(
         beginStep,
         endStep,
         emitSteps,
-        withRetry,
+        withRetry: <T>(stepName: string, fn: () => Promise<T>, sig?: AbortSignal) =>
+          withRetry<T>(stepName, fn, retryCtx, sig),
       };
 
       beginStep('route', NODE_LABELS.route);
@@ -263,6 +101,7 @@ export function createWorkflowOrchestrator(
           temperature: EVAL_TEMPERATURE,
           model: deps.pickedModels.chat,
         }),
+        retryCtx,
         signal
       );
       let source: SourceType;

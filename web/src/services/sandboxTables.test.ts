@@ -120,6 +120,38 @@ describe('rehydrateSandboxTables', () => {
     expect(tables.has('legacy')).toBe(false);
     expect(metadata.legacy).toBeUndefined();
   });
+
+  it('reuses the parsed table across rehydrations when the csv is unchanged', () => {
+    const dataset: SandboxDataset = {
+      name: 'memo-stable',
+      fileName: 'memo.csv',
+      columns: ['a', 'b'],
+      rowCount: 1,
+      loadedAt: 0,
+      csv: 'a,b\n1,2',
+    };
+
+    const first = rehydrateSandboxTables([dataset]);
+    const second = rehydrateSandboxTables([dataset]);
+
+    expect(second.tables.get('memo-stable')).toBe(first.tables.get('memo-stable'));
+  });
+
+  it('re-parses when the csv changes under the same name (no stale table)', () => {
+    const base: SandboxDataset = {
+      name: 'memo-changed',
+      fileName: 'memo.csv',
+      columns: ['a', 'b'],
+      rowCount: 1,
+      loadedAt: 0,
+      csv: 'a,b\n1,2',
+    };
+
+    const first = rehydrateSandboxTables([base]);
+    const second = rehydrateSandboxTables([{ ...base, csv: 'a,b\n3,4' }]);
+
+    expect(second.tables.get('memo-changed')).not.toBe(first.tables.get('memo-changed'));
+  });
 });
 
 describe('sandbox csv persistence', () => {

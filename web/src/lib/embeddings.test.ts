@@ -8,6 +8,7 @@ function fakeWorkerFactory() {
   const listeners: Array<(ev: MessageEvent) => void> = [];
   const errorListeners: Array<(ev: ErrorEvent) => void> = [];
   const sent: EmbedWorkerRequest[] = [];
+  let terminateCalls = 0;
   const worker: EmbeddingWorkerLike = {
     postMessage: (msg) => {
       sent.push(msg);
@@ -15,6 +16,9 @@ function fakeWorkerFactory() {
     addEventListener: (type, listener) => {
       if (type === 'error') errorListeners.push(listener as (ev: ErrorEvent) => void);
       else listeners.push(listener);
+    },
+    terminate: () => {
+      terminateCalls += 1;
     },
   } as EmbeddingWorkerLike;
   return {
@@ -25,6 +29,9 @@ function fakeWorkerFactory() {
     },
     fail: (message: string) => {
       for (const listener of errorListeners) listener({ message } as ErrorEvent);
+    },
+    get terminateCalls() {
+      return terminateCalls;
     },
   };
 }
@@ -153,11 +160,16 @@ describe('createEmbeddingsClient', () => {
     expect(fake.sent).toHaveLength(1);
   });
 
-  it('the worker factory is the seam', async () => {
+  it('the worker factory is the seam: spawns lazily on the first embed', async () => {
     const fake = fakeWorkerFactory();
     const workerFactory = vi.fn(() => fake.worker);
-    createEmbeddingsClient({ workerFactory });
+    const client = createEmbeddingsClient({ workerFactory });
+    expect(workerFactory).not.toHaveBeenCalled();
+
+    const promise = client.embed('hello');
     expect(workerFactory).toHaveBeenCalledTimes(1);
+    fake.respond({ type: 'result', id: fake.sent[0].id, embeddings: [[1, 0]] });
+    await expect(promise).resolves.toEqual([[1, 0]]);
   });
 
   it('a worker error event rejects the pending embed and the next embed spawns a fresh worker', async () => {
@@ -174,6 +186,49 @@ describe('createEmbeddingsClient', () => {
     const retry = client.embed('retry text');
     secondFake.respond({ type: 'result', id: secondFake.sent[0].id, embeddings: [[3]] });
     await expect(retry).resolves.toEqual([[3]]);
+  });
+
+  it('a worker error event does not respawn immediately (no respawn storm)', () => {
+    const fake = fakeWorkerFactory();
+    const workerFactory = vi.fn(() => fake.worker);
+    const client = createEmbeddingsClient({ workerFactory });
+    const promise = client.embed('doomed text');
+    fake.fail('worker module failed to load');
+    void promise.catch(() => {});
+
+    expect(workerFactory).toHaveBeenCalledTimes(1);
+  });
+
+  it('dispose terminates the worker once pending embeds drain', async () => {
+    const fake = fakeWorkerFactory();
+    const client = createEmbeddingsClient({ workerFactory: () => fake.worker });
+
+    const promise = client.embed('hello');
+    fake.respond({ type: 'result', id: fake.sent[0].id, embeddings: [[1, 0]] });
+    await promise;
+
+    client.dispose();
+    expect(fake.terminateCalls).toBe(1);
+  });
+
+  it('dispose with an in-flight embed waits for the drain before terminating', async () => {
+    const fake = fakeWorkerFactory();
+    const client = createEmbeddingsClient({ workerFactory: () => fake.worker });
+
+    const promise = client.embed('in-flight');
+    client.dispose();
+    expect(fake.terminateCalls).toBe(0);
+
+    fake.respond({ type: 'result', id: fake.sent[0].id, embeddings: [[2, 0]] });
+    await expect(promise).resolves.toEqual([[2, 0]]);
+    expect(fake.terminateCalls).toBe(1);
+  });
+
+  it('dispose is a no-op when no worker was ever spawned', () => {
+    const workerFactory = vi.fn(() => fakeWorkerFactory().worker);
+    const client = createEmbeddingsClient({ workerFactory });
+    client.dispose();
+    expect(workerFactory).not.toHaveBeenCalled();
   });
 
   it('rejects when the worker returns an empty vector for a text', async () => {

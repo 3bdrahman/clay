@@ -94,7 +94,7 @@ export function createHnswIndex(config: HnswConfig): HnswIndex {
   function distance(query: Float32Array, vector: Float32Array): number {
     let dot = 0;
     const len = Math.min(query.length, vector.length);
-    for (let i = 0; i < len; i++) dot += query[i]! * vector[i]!;
+    for (let i = 0; i < len; i++) dot += query[i] * vector[i];
     return 1 - dot;
   }
 
@@ -116,7 +116,7 @@ export function createHnswIndex(config: HnswConfig): HnswIndex {
     while (candidates.length > 0) {
       const closest = candidates.shift()!;
       const furthest = results[results.length - 1];
-      if (results.length >= ef && furthest && closest.score > furthest.score) break;
+      if (results.length >= ef && closest.score > furthest.score) break;
       const node = nodes.get(closest.id);
       if (!node) continue;
       const layerNeighbors = node.neighbors[layer] ?? [];
@@ -129,7 +129,7 @@ export function createHnswIndex(config: HnswConfig): HnswIndex {
         insertAscending(candidates, { id: nbId, score });
         if (deleted.has(nbId)) continue;
         const currentFurthest = results[results.length - 1];
-        if (results.length < ef || (currentFurthest && score < currentFurthest.score)) {
+        if (results.length < ef || score < currentFurthest.score) {
           insertAscending(results, { id: nbId, score });
           if (results.length > ef) results.pop();
         }
@@ -165,7 +165,7 @@ export function createHnswIndex(config: HnswConfig): HnswIndex {
     }
     while (kept.length < m && pruned.length > 0) {
       const backfill = pruned.shift()!;
-      if (nodes.has(backfill.id)) kept.push(backfill);
+      kept.push(backfill);
     }
     return kept;
   }
@@ -206,12 +206,10 @@ export function createHnswIndex(config: HnswConfig): HnswIndex {
       const candidates = searchLayer(vector, ep, efConstruction, lc);
       if (candidates.length === 0) continue;
       const selected = selectNeighbors(candidates, M);
-      const node = nodes.get(id);
-      if (!node) continue;
+      const node = nodes.get(id)!;
       for (const s of selected) {
         node.neighbors[lc].push(s.id);
-        const nbNode = nodes.get(s.id);
-        if (!nbNode) continue;
+        const nbNode = nodes.get(s.id)!;
         nbNode.neighbors[lc].push(id);
         const maxM = lc === 0 ? M0 : M;
         if (nbNode.neighbors[lc].length > maxM) {
@@ -240,9 +238,7 @@ export function createHnswIndex(config: HnswConfig): HnswIndex {
     const out: HnswSearchResult[] = [];
     for (const r of results) {
       if (out.length >= k) break;
-      if (deleted.has(r.id)) continue;
-      const node = nodes.get(r.id);
-      if (!node) continue;
+      const node = nodes.get(r.id)!;
       out.push({ label: node.label, score: 1 - r.score });
     }
     return out;

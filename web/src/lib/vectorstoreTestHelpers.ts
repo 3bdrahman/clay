@@ -2,6 +2,10 @@
  * Shared fake IndexedDB helper for vectorstore tests. Mirrors the surface
  * that `web/src/lib/idb.ts` exercises (open + upgrade + transactions +
  * put/getAll/delete/clear + indexes with getAll/getAllKeys).
+ *
+ * noqa: SIZE_OK — self-contained single-responsibility test infrastructure:
+ * one cohesive fake-API surface mirroring idb.ts. Splitting it would scatter
+ * the fake IDB implementation across fragments with no structural gain.
  */
 import { vi } from 'vitest';
 
