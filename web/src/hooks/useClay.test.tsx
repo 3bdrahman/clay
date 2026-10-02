@@ -105,10 +105,10 @@ describe('useClay', () => {
     return result;
   }
 
-  it('requires configuration when no API key is set', async () => {
+  it('initializes local ingest services while marking chat as needing configuration when no API key is set', async () => {
     const r = render();
     await flush(6);
-    expect(r.current.services).toBeNull();
+    expect(r.current.services?.ready).toBe(true);
     expect(r.current.needsConfiguration).toBe(true);
     expect(r.current.loading).toBe(false);
     expect(r.current.error).toBeNull();
@@ -344,6 +344,32 @@ describe('useClay', () => {
     const doc = docs.find(d => d.fileName === 'notes.txt');
     expect(doc).toBeDefined();
     expect(doc?.chunkCount).toBeGreaterThan(0);
+    expect(sv!.vectorstore.stats.entries).toBeGreaterThan(0);
+  });
+
+  it('addFiles processes local documents without a cloud API key', async () => {
+    const r = render();
+    await flush(6);
+    const sv = r.current.services as ClayServices | undefined;
+    expect(sv?.ready).toBe(true);
+    expect(r.current.needsConfiguration).toBe(true);
+
+    (sv!.embeddings.embed as unknown) = vi.fn(async (input: string | string[]) => {
+      const arr = Array.isArray(input) ? input : [input];
+      return arr.map(() => new Array(8).fill(0.1));
+    });
+
+    const text =
+      'Local ingest should work before a cloud chat model is configured. '.repeat(20) +
+      'The uploaded document must be available to the same vector store immediately. '.repeat(20);
+    const file = new File([text], 'local-notes.txt', { type: 'text/plain' });
+
+    await act(async () => {
+      await r.current.addFiles([file]);
+    });
+    await flush(3);
+
+    expect(useAppStore.getState().sandboxDocuments.some(d => d.fileName === 'local-notes.txt')).toBe(true);
     expect(sv!.vectorstore.stats.entries).toBeGreaterThan(0);
   });
 

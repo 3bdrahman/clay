@@ -8,10 +8,12 @@
 // concurrently. No re-implementation is involved.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createRoot } from 'react-dom/client';
+import { useState } from 'react';
 import { act } from 'react';
 import { ChatPanel } from './ChatPanel';
 import { useAppStore } from '../store';
 import type { ChatMessage } from '../lib/types';
+import type { UseClayResult } from '../hooks/useClay';
 
 const { mockLLM, mockVectorstore } = vi.hoisted(() => {
   const fakeDoc = {
@@ -27,23 +29,31 @@ const { mockLLM, mockVectorstore } = vi.hoisted(() => {
   };
 });
 
-vi.mock('../hooks/useClay', () => ({
-  useClay: () => ({
+function mockClay(overrides: Partial<UseClayResult> = {}): UseClayResult {
+  return {
     services: {
       llm: mockLLM,
       embeddings: { embed: vi.fn(async () => [[0.1, 0.2, 0.3]]) },
-      vectorstore: mockVectorstore,
+      vectorstore: mockVectorstore as never,
       webSearch: { search: vi.fn(async () => []) },
-      analyzer: { analyze: vi.fn(), listDatasets: vi.fn(() => []), getDatasetSummary: vi.fn() },
+      analyzer: { analyze: vi.fn(), listDatasets: vi.fn(() => []), getDatasetSummary: vi.fn(), dispose: vi.fn() },
       ready: true,
+      dispose: vi.fn(),
     },
     loading: false,
     error: null,
     needsConfiguration: false,
+    persistenceAvailable: true,
     loadSampleData: vi.fn(async () => {}),
     pickedModels: { chat: 'mock-model' },
-  }),
-}));
+    refreshModels: vi.fn(async () => {}),
+    addFiles: vi.fn(async () => {}),
+    clearSandboxData: vi.fn(),
+    removeSandboxDocument: vi.fn(),
+    removeSandboxDataset: vi.fn(),
+    ...overrides,
+  };
+}
 
 // Registration order must match call order: the first invoke of each
 // pipeline is the route call (parked on a deferred), the second invoke of
@@ -80,7 +90,7 @@ describe('ChatPanel — per-conversation concurrent pipelines', () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
       const root = createRoot(container);
-      root.render(<ChatPanel onOpenData={() => {}} onOpenSettings={() => {}} />);
+      root.render(<ChatPanel clay={mockClay()} onOpenData={() => {}} onOpenSettings={() => {}} />);
       unmount = () => {
         act(() => root.unmount());
         container.remove();
@@ -228,5 +238,94 @@ describe('ChatPanel — per-conversation concurrent pipelines', () => {
     expect(messages).toHaveLength(2);
     expect(messages[1].streaming).toBe(false);
     expect(messages[1].workflow?.error).toBeDefined();
+  });
+});
+
+describe('ChatPanel — onboarding sample loading', () => {
+  let unmount: (() => void) | null = null;
+
+  beforeEach(() => {
+    localStorage.clear();
+    useAppStore.getState().resetAll();
+  });
+
+  afterEach(() => {
+    unmount?.();
+    unmount = null;
+  });
+
+  it('lets LandingHero report sample loading failures instead of announcing success', async () => {
+    const clay = mockClay({
+      needsConfiguration: true,
+      pickedModels: { chat: undefined },
+      loadSampleData: vi.fn(async () => {
+        throw new Error('sample index is unavailable');
+      }),
+    });
+
+    await act(async () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      root.render(<ChatPanel clay={clay} onOpenData={() => {}} onOpenSettings={() => {}} />);
+      unmount = () => {
+        act(() => root.unmount());
+        container.remove();
+      };
+    });
+
+    const button = Array.from(document.querySelectorAll('button')).find(element =>
+      element.textContent?.includes('Load Sample Data'),
+    ) as HTMLButtonElement | undefined;
+    expect(button).toBeDefined();
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('sample index is unavailable');
+    expect(document.body.textContent).not.toContain('Sample data loaded');
+  });
+
+  it('keeps LandingHero mounted so partial-load warnings survive a local service refresh', async () => {
+    function Probe() {
+      const [clay, setClay] = useState<UseClayResult>(() => mockClay({
+        needsConfiguration: true,
+        pickedModels: { chat: undefined },
+        loadSampleData: vi.fn(async () => {
+          setClay(current => ({ ...current, loading: true }));
+          await Promise.resolve();
+          throw new Error('Sample data partially loaded. 1 OK, 1 failed: missing.csv (HTTP 404).');
+        }),
+      }));
+
+      return <ChatPanel clay={clay} onOpenData={() => {}} onOpenSettings={() => {}} />;
+    }
+
+    await act(async () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      root.render(<Probe />);
+      unmount = () => {
+        act(() => root.unmount());
+        container.remove();
+      };
+    });
+
+    const button = Array.from(document.querySelectorAll('button')).find(element =>
+      element.textContent?.includes('Load Sample Data'),
+    ) as HTMLButtonElement | undefined;
+    expect(button).toBeDefined();
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('missing.csv');
+    expect(document.body.textContent).not.toContain('Loading Clay');
   });
 });

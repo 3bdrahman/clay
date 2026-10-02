@@ -86,6 +86,8 @@ describe('loadSampleDatasets', () => {
     const err = caught as SampleDatasetLoadError;
     expect(err.failedFiles).toEqual(['bad1', 'bad2']);
     expect(err.succeededFiles).toEqual(['ok']);
+    expect(err.partialResult.tables.has('ok')).toBe(true);
+    expect(err.partialResult.rawCsv.ok).toContain('1,2');
     expect(err.message).toMatch(/bad1/);
     expect(err.message).toMatch(/bad2/);
   });

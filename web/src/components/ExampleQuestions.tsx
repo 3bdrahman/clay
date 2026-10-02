@@ -2,19 +2,23 @@
 
 import { useAppStore } from '../store';
 import { deriveDataQueries, deriveDocumentQueries, deriveWebQueries } from '../lib/exampleQueries';
+import { getWebSearchAvailability } from '../lib/websearch';
 
 interface Props {
   onSelect: (q: string) => void;
   onLoadSample?: () => void;
+  onOpenSettings?: () => void;
 }
 
-export function ExampleQuestions({ onSelect, onLoadSample }: Props) {
+export function ExampleQuestions({ onSelect, onLoadSample, onOpenSettings }: Props) {
   const sandboxDatasets = useAppStore(s => s.sandboxDatasets);
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
+  const settings = useAppStore(s => s.settings);
   const hasData = sandboxDatasets.length > 0;
   const hasDocs = sandboxDocuments.length > 0;
   const dataQuestions = deriveDataQueries(sandboxDatasets);
-  const webQuestions = deriveWebQueries();
+  const webAvailability = getWebSearchAvailability(settings);
+  const webQuestions = webAvailability.available ? deriveWebQueries() : [];
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -59,13 +63,31 @@ export function ExampleQuestions({ onSelect, onLoadSample }: Props) {
         />
       )}
 
-      <Group
-        category="Web Search"
-        color="text-amber-600 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400"
-        icon="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"
-        questions={webQuestions}
-        onSelect={onSelect}
-      />
+      {webAvailability.available ? (
+        <Group
+          category="Web Search"
+          color="text-amber-600 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400"
+          icon="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"
+          questions={webQuestions}
+          onSelect={onSelect}
+        />
+      ) : (
+        <div className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-amber-900 dark:text-amber-100">
+            {webAvailability.message}
+          </p>
+          {onOpenSettings && (
+            <button
+              type="button"
+              data-testid="examples-configure-web"
+              onClick={onOpenSettings}
+              className="text-xs text-amber-900 dark:text-amber-100 hover:underline font-medium shrink-0"
+            >
+              Configure
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

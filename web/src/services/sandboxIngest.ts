@@ -4,7 +4,7 @@ import {
   registerSandboxTable,
   persistSandboxCsv,
 } from '../services/sandboxTables';
-import { loadSampleDatasets } from '../services/datasets';
+import { loadSampleDatasets, SampleDatasetLoadError, type SampleLoadResult } from '../services/datasets';
 import { useAppStore, type SandboxDataset, type SandboxProcessing } from '../store';
 
 export interface SandboxIngestDeps {
@@ -26,7 +26,7 @@ export async function addFiles(
   if (arr.length === 0) return;
   const sv = deps.services;
   if (!sv) {
-    throw new Error('Services not ready — add an API key first');
+    throw new Error('Your workspace is still loading. Try adding the files again in a moment.');
   }
 
   const initial: SandboxProcessing[] = arr.map(f => ({
@@ -34,6 +34,7 @@ export async function addFiles(
     status: 'processing',
   }));
   deps.setSandboxProcessing([...deps.getSandboxProcessing(), ...initial]);
+  const pendingDatasets: SandboxDataset[] = [];
 
   for (const file of arr) {
     try {
@@ -46,7 +47,7 @@ export async function addFiles(
       if (processed.dataset) {
         const csv = await file.text();
         registerSandboxTable(processed.dataset.name, processed.dataset.table);
-        deps.addSandboxDataset({
+        const dataset: SandboxDataset = {
           name: processed.dataset.name,
           fileName: file.name,
           columns: processed.dataset.columns,
@@ -54,8 +55,9 @@ export async function addFiles(
           loadedAt: Date.now(),
           csv,
           isSample: false,
-        });
+        };
         await persistSandboxCsv(processed.dataset.name, csv);
+        pendingDatasets.push(dataset);
         deps.updateSandboxProcessingItem(file.name, { status: 'done' });
         continue;
       }
@@ -101,17 +103,20 @@ export async function addFiles(
     }
   }
 
+  pendingDatasets.forEach(dataset => {
+    deps.addSandboxDataset(dataset);
+  });
+
   setTimeout(() => {
     useAppStore.setState(state => ({
       sandboxProcessing: state.sandboxProcessing.filter(
-        p => p.status === 'processing' || p.status === 'embedding',
+        p => p.status !== 'done',
       ),
     }));
   }, 3000);
 }
 
-export async function loadSampleData(deps: SandboxIngestDeps): Promise<void> {
-  const sample = await loadSampleDatasets();
+async function commitSampleData(sample: SampleLoadResult, deps: SandboxIngestDeps): Promise<void> {
   sample.tables.forEach((table, name) => {
     registerSandboxTable(name, table);
   });
@@ -135,4 +140,15 @@ export async function loadSampleData(deps: SandboxIngestDeps): Promise<void> {
     ...newDatasets,
   ]);
   await Promise.all(newDatasets.flatMap(d => (d.csv !== undefined ? [persistSandboxCsv(d.name, d.csv)] : [])));
+}
+
+export async function loadSampleData(deps: SandboxIngestDeps): Promise<void> {
+  try {
+    await commitSampleData(await loadSampleDatasets(), deps);
+  } catch (e) {
+    if (e instanceof SampleDatasetLoadError && e.partialResult.tables.size > 0) {
+      await commitSampleData(e.partialResult, deps);
+    }
+    throw e;
+  }
 }

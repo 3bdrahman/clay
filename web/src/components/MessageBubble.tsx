@@ -23,6 +23,8 @@ export function MessageBubble({ message }: Props) {
     (workflowError.code === 'CORS_BLOCKED' || 
      String(workflowError.message).includes('CORS'));
   const wf = message.workflow;
+  const hasSources = !!wf && ((wf.citations?.length ?? 0) > 0 || (wf.documents?.length ?? 0) > 0 || (wf.webResults?.length ?? 0) > 0 || !!wf.dataAnalysis);
+  const hasSteps = (wf?.steps?.length ?? 0) > 0;
   const isStreaming = !!message.streaming && !isError && !isWorkflowError;
 
   if (isUser) {
@@ -93,7 +95,7 @@ export function MessageBubble({ message }: Props) {
                 />
               )}
 
-              {wf && (wf.steps?.length ?? 0) > 0 && (
+              {wf && (hasSteps || hasSources) && (
                 <div className="mt-3 pt-3 border-t border-ink-100 dark:border-ink-700 space-y-2">
                   <div className="flex gap-2 flex-wrap items-center">
                     {wf.routing && (
@@ -115,15 +117,17 @@ export function MessageBubble({ message }: Props) {
                   </div>
 
                   <div className="flex gap-1.5">
-                    <button
+                    {hasSteps && <button
                       onClick={() => setShowWorkflow(s => !s)}
+                      aria-expanded={showWorkflow}
                       className="text-[11px] px-2 py-1 rounded bg-ink-100 dark:bg-ink-700 hover:bg-ink-200 dark:hover:bg-ink-600 text-ink-700 dark:text-ink-200 font-medium"
                     >
                       {showWorkflow ? 'Hide' : 'Show'} workflow
-                    </button>
-                    {((wf.documents?.length ?? 0) > 0 || (wf.webResults?.length ?? 0) > 0 || wf.dataAnalysis) && (
+                    </button>}
+                    {hasSources && (
                       <button
                         onClick={() => setShowSources(s => !s)}
+                        aria-expanded={showSources}
                         className="text-[11px] px-2 py-1 rounded bg-ink-100 dark:bg-ink-700 hover:bg-ink-200 dark:hover:bg-ink-600 text-ink-700 dark:text-ink-200 font-medium"
                       >
                         {showSources ? 'Hide' : 'Show'} sources ({wf.citations?.length ?? 0})
@@ -131,7 +135,7 @@ export function MessageBubble({ message }: Props) {
                     )}
                   </div>
 
-                  {showSources && ((wf.documents?.length ?? 0) > 0 || (wf.webResults?.length ?? 0) > 0 || wf.dataAnalysis) && (
+                  {showSources && hasSources && (
                     <div className="mt-2">
                       <CitationPanel
                         documents={wf.documents ?? []}

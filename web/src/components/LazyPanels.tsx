@@ -94,6 +94,7 @@ export const ChartRendererLazy = lazyWithRetry(() => import('./ChartRenderer'));
  * <Suspense fallback={…}> ceremony at every site.
  */
 export function SettingsPanelSuspense(props: React.ComponentProps<typeof SettingsPanelLazy>) {
+  if (!props.open) return null;
   return (
     <Suspense fallback={<PanelFallback />}>
       <SettingsPanelLazy {...props} />
@@ -102,6 +103,7 @@ export function SettingsPanelSuspense(props: React.ComponentProps<typeof Setting
 }
 
 export function DataSandboxSuspense(props: React.ComponentProps<typeof DataSandboxLazy>) {
+  if (!props.open) return null;
   return (
     <Suspense fallback={<PanelFallback />}>
       <DataSandboxLazy {...props} />

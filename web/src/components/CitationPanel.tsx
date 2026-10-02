@@ -24,7 +24,7 @@ export function CitationPanel({ documents, webResults, analysis, citations }: Pr
   const [tab, setTab] = useState<Tab>(defaultTab);
   const tablistId = useId();
 
-  if (docCount + webCount + (analysis ? 1 : 0) === 0) {
+  if (docCount + webCount + citations.length + (analysis ? 1 : 0) === 0) {
     return (
       <div className="text-center text-sm text-ink-400 dark:text-ink-500 py-8" role="status">
         No sources for this query.

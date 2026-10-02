@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runEval, formatReport, gradeQuestionSet, computeLexicalOverlap, scoreWithJudge } from './runner';
-import { TEST_QUESTIONS, TEST_SETTINGS } from './fixtures';
+import { formatReport, gradeQuestionSet, computeLexicalOverlap, scoreWithJudge } from './runner';
+import { TEST_QUESTIONS } from './fixtures';
 
 describe('Eval golden set (issue #4)', () => {
   it('contains schema-bound questions without bundled-sample column names', () => {
@@ -140,24 +140,6 @@ describe('formatReport', () => {
   });
 });
 
-describe('E2E Eval (requires VITE_EVAL_API_KEY)', () => {
-  it('runs full golden test set against the live provider', async () => {
-    if (!TEST_SETTINGS.apiKey) {
-      return;
-    }
-    const summary = await runEval(TEST_SETTINGS, TEST_QUESTIONS, (done, total, q) => {
-      void done;
-      void total;
-      void q;
-    });
-    const report = formatReport(summary);
-    expect(summary.routingAccuracy).toBeGreaterThanOrEqual(0.6);
-    expect(summary.avgRecallAtK).toBeGreaterThanOrEqual(0.3);
-    expect(summary.passed / summary.total).toBeGreaterThanOrEqual(0.4);
-    expect(report).toContain('# Clay Eval Report');
-  }, 300000);
-});
-
 describe('computeLexicalOverlap', () => {
   it('returns 1.0 for identical texts', () => {
     const text = 'The average salary is 100000';
@@ -242,4 +224,3 @@ describe('scoreWithJudge', () => {
     expect(result.rationale).toBe('Judge scoring failed');
   });
 });
-

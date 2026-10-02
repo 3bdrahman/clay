@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { deriveDataQueries, deriveDocumentQueries } from './exampleQueries';
 
 describe('deriveDataQueries', () => {
+  it('suggests real measures instead of aggregating identifier columns', () => {
+    expect(deriveDataQueries([
+      { name: 'staff', columns: ['id', 'employee_id', 'department', 'annual_salary', 'hire_date'], rowCount: 10 },
+    ])).toEqual([
+      'Average annual_salary by department',
+      'Total annual_salary',
+      'Trend of annual_salary over hire_date',
+    ]);
+  });
+
+  it('offers inspection rather than totals for identifier-only data', () => {
+    expect(deriveDataQueries([
+      { name: 'records', columns: ['id', 'record_id', 'accountId'], rowCount: 10 },
+    ])).toEqual(['Summarize records', 'Show the first rows of records']);
+  });
+
   it('returns an empty list when no datasets are loaded', () => {
     expect(deriveDataQueries([])).toEqual([]);
   });

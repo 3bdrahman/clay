@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import type { ChatMessage, WorkflowState } from '../lib/types';
 import { useAppStore } from '../store';
 import { useShallow } from 'zustand/shallow';
-import { useClay } from '../hooks/useClay';
+import type { UseClayResult } from '../hooks/useClay';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { ExampleQuestions } from './ExampleQuestions';
@@ -14,7 +14,15 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 
 const STREAMING_STORE_THROTTLE_MS = 500;
 
-export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => void; onOpenSettings: () => void }) {
+export function ChatPanel({
+  clay,
+  onOpenData,
+  onOpenSettings,
+}: {
+  clay: UseClayResult;
+  onOpenData: () => void;
+  onOpenSettings: () => void;
+}) {
   const messages = useAppStore(
     useShallow(s => {
       const conv = s.conversations.find(c => c.id === s.activeConversationId);
@@ -23,11 +31,12 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
   ) as ChatMessage[];
   const addMessage = useAppStore(s => s.addMessage);
   const updateMessage = useAppStore(s => s.updateMessage);
-  const { services, loading, error, needsConfiguration, loadSampleData, pickedModels } = useClay();
-  const canSubmit = !!services && !!pickedModels.chat && !loading;
+  const { services, loading, error, needsConfiguration, loadSampleData, pickedModels } = clay;
+  const canSubmit = !!services && !!pickedModels.chat && !loading && !needsConfiguration;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [streamingContent, setStreamingContent] = useState('');
+  const [sampleLoadError, setSampleLoadError] = useState<string | null>(null);
   const streamingMessageIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -40,6 +49,15 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
   }, []);
+
+  const handleLoadSample = useCallback(async () => {
+    setSampleLoadError(null);
+    try {
+      await loadSampleData();
+    } catch (e) {
+      setSampleLoadError(e instanceof Error ? e.message : String(e));
+    }
+  }, [loadSampleData]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -203,7 +221,7 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
   };
 
   const showExamples = messages.length === 0 && !isRunning;
-  const showLanding = messages.length === 0 && needsConfiguration && !loading && !error;
+  const showLanding = messages.length === 0 && needsConfiguration && !error;
 
   let content: React.ReactNode;
   if (showLanding) {
@@ -211,6 +229,7 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       <LandingHero
         onLoadSample={loadSampleData}
         onAddData={onOpenData}
+        onOpenSettings={onOpenSettings}
         onExampleSelect={handleSubmit}
       />
     );
@@ -225,7 +244,15 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
         </div>
       );
     } else if (services) {
-      content = <div className="pt-8"><ExampleQuestions onSelect={handleSubmit} /></div>;
+      content = (
+        <div className="pt-8">
+          <ExampleQuestions
+            onSelect={handleSubmit}
+            onLoadSample={handleLoadSample}
+            onOpenSettings={onOpenSettings}
+          />
+        </div>
+      );
     } else if (error) {
       content = (
         <div className="pt-8">
@@ -258,6 +285,11 @@ export function ChatPanel({ onOpenData, onOpenSettings }: { onOpenData: () => vo
       >
         <div className="max-w-4xl mx-auto space-y-5">
           {content}
+          {sampleLoadError && (
+            <div role="alert" className="text-sm text-rose-600 dark:text-rose-400 text-center">
+              {sampleLoadError}
+            </div>
+          )}
           {isRunning && !showExamples && !showLanding && (
             <div className="flex justify-start">
               <div className="bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-2xl rounded-tl-sm px-4 py-2.5 shadow-sm">

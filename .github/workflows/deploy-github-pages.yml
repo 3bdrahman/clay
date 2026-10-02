@@ -17,6 +17,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,15 +33,14 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install dependencies
-        run: cd web && npm ci
+        run: npm ci
 
-      - name: Build
-        run: |
-          cd web
-          GITHUB_REPOSITORY=${{ github.repository }} \
-          DEPLOY_TARGET=github-pages \
-          VITE_DEPLOY_URL=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }} \
-          npm run build
+      - name: Verify and build
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DEPLOY_TARGET: github-pages
+          VITE_DEPLOY_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: npm run verify
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

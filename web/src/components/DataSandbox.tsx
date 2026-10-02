@@ -21,6 +21,7 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
   const sandboxDocuments = useAppStore(s => s.sandboxDocuments);
   const sandboxProcessing = useAppStore(s => s.sandboxProcessing);
   const [isDragOver, setIsDragOver] = useState(false), [isWorking, setIsWorking] = useState(false), [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [sampleStatus, setSampleStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null), [confirm, renderConfirmDialog] = useConfirm(), { dialogRef, stopBackdrop } = useModalFocus(open);
 
   const handleFiles = useCallback(
@@ -68,11 +69,15 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
 
   const handleLoadSample = async () => {
     setIsWorking(true);
+    setErrorMsg(null);
+    setSampleStatus('Loading sample data');
     try {
       await loadSampleData();
+      setSampleStatus('Sample data loaded');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setErrorMsg(msg);
+      setSampleStatus(null);
     } finally {
       setIsWorking(false);
     }
@@ -126,8 +131,14 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
 
         <div className="px-6 py-4 space-y-5">
           {errorMsg && (
-            <div className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 rounded px-3 py-2">
+            <div role="alert" className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 rounded px-3 py-2">
               {errorMsg}
+           </div>
+          )}
+
+          {sampleStatus && (
+            <div role="status" className="text-xs text-ink-600 dark:text-ink-300 bg-ink-50 dark:bg-ink-800/50 rounded px-3 py-2">
+              {sampleStatus}
            </div>
           )}
 
@@ -187,39 +198,43 @@ export function DataSandbox({ open, onClose, addFiles, loadSampleData, clearSand
           {sandboxProcessing.length > 0 && (
             <div className="space-y-1.5">
               {sandboxProcessing.map(p => (
-                <div
-                  key={p.fileName}
-                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-ink-200 dark:border-ink-700 text-xs"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    {p.status === 'processing' || p.status === 'embedding' ? (
-                      <svg className="w-3.5 h-3.5 animate-spin text-brand-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
-                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
-                        <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
-                     </svg>
-                    ) : p.status === 'error' ? (
-                      <svg className="w-3.5 h-3.5 text-rose-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                     </svg>
-                    ) : (
-                      <svg className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                     </svg>
-                    )}
-                    <span className="font-mono truncate">{p.fileName}</span>
+                <div key={p.fileName}>
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-ink-200 dark:border-ink-700 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {p.status === 'processing' || p.status === 'embedding' ? (
+                        <svg className="w-3.5 h-3.5 animate-spin text-brand-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+                          <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+                       </svg>
+                      ) : p.status === 'error' ? (
+                        <svg className="w-3.5 h-3.5 text-rose-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                       </svg>
+                      ) : (
+                        <svg className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                       </svg>
+                      )}
+                      <span className="font-mono truncate">{p.fileName}</span>
+                   </div>
+                    <span
+                      className={`text-[10px] font-semibold uppercase flex-shrink-0 ${
+                        p.status === 'error'
+                          ? 'text-rose-600 dark:text-rose-400'
+                          : p.status === 'done'
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-brand-600 dark:text-brand-400'
+                      }`}
+                    >
+                      {p.status === 'embedding' ? 'embedding' : p.status}
+                   </span>
                  </div>
-                  <span
-                    className={`text-[10px] font-semibold uppercase flex-shrink-0 ${
-                      p.status === 'error'
-                        ? 'text-rose-600 dark:text-rose-400'
-                        : p.status === 'done'
-                        ? 'text-emerald-600 dark:text-emerald-400'
-                        : 'text-brand-600 dark:text-brand-400'
-                    }`}
-                  >
-                    {p.status === 'embedding' ? 'embedding' : p.status}
-                 </span>
-               </div>
+                  {p.status === 'error' && p.error && (
+                    <p className="mt-1 pl-5 text-[11px] text-rose-600 dark:text-rose-400">
+                      {p.error}
+                   </p>
+                  )}
+                </div>
               ))}
            </div>
           )}

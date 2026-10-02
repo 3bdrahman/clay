@@ -50,12 +50,16 @@ const CONFIDENCE = {
   CARDINALITY_RATIO: 0.5,
 } as const;
 
+function normalizeColumnName(columnName: string): string {
+  return columnName.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toLowerCase();
+}
+
 /**
  * Detect column type from name patterns (fallback when no samples available).
  * Returns confidence based on pattern specificity.
  */
 function detectTypeFromName(columnName: string): { type: ColumnType; confidence: number } {
-  const lower = columnName.toLowerCase();
+  const lower = normalizeColumnName(columnName);
 
   // Numeric patterns - high confidence for explicit numeric terms
   if (/\b(price|amount|revenue|salary|count|total|budget|qty|quantity|score|rating|units|sales|spent|cost|fees|sum|avg|mean|min|max|balance|income|expense|profit|margin)\b/i.test(lower)) {
@@ -190,14 +194,17 @@ const DEFAULT_TEMPORAL_PATTERN =
 export function deriveDataQueries(datasets: DatasetSummary[]): string[] {
   if (datasets.length === 0) return [];
   const first = datasets[0];
-  const cols = first?.columns ?? [];
+  const cols = first.columns.filter(column =>
+    !/(?:^|\s)(?:id|uuid|guid|identifier)$/.test(normalizeColumnName(column)),
+  );
+  const queryDataset = { ...first, columns: cols };
 
   // Use intelligent type detection
-  const numericCol = getBestColumn(first, 'numeric')?.name ?? 
+  const numericCol = getBestColumn(queryDataset, 'numeric')?.name ??
     cols.find(c => DEFAULT_NUMERIC_PATTERN.test(c));
-  const categoricalCol = getBestColumn(first, 'categorical')?.name ?? 
+  const categoricalCol = getBestColumn(queryDataset, 'categorical')?.name ??
     cols.find(c => DEFAULT_CATEGORICAL_PATTERN.test(c));
-  const temporalCol = getBestColumn(first, 'temporal')?.name ?? 
+  const temporalCol = getBestColumn(queryDataset, 'temporal')?.name ??
     cols.find(c => DEFAULT_TEMPORAL_PATTERN.test(c));
 
   const out: string[] = [];

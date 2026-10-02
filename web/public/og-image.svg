@@ -1,52 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none">
-  <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0b1220" />
-      <stop offset="100%" stop-color="#1a2238" />
-  </linearGradient>
-    <linearGradient id="logo" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#3da3ff" />
-      <stop offset="100%" stop-color="#1e5fa8" />
-  </linearGradient>
-    <linearGradient id="chip" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1184e7" />
-      <stop offset="100%" stop-color="#0e3a6f" />
-  </linearGradient>
-</defs>
-
-  <rect width="1200" height="630" fill="url(#bg)" />
-
-  <g transform="translate(80, 140)">
-    <rect width="80" height="80" rx="18" fill="url(#chip)" />
-    <path d="M28 32h40M28 48h28M28 64h34" stroke="#fff" stroke-width="5" stroke-linecap="round" />
-    <circle cx="68" cy="64" r="4" fill="#fff" />
-</g>
-
-  <text x="180" y="195" font-family="system-ui, -apple-system, sans-serif" font-size="76" font-weight="800" fill="#fff">Clay</text>
-  <text x="180" y="245" font-family="system-ui, -apple-system, sans-serif" font-size="32" font-weight="500" fill="#94a3b8">RAG Assistant</text>
-
-  <g transform="translate(80, 310)">
-    <rect width="500" height="64" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1" />
-    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">chat:       one model you pick (BYOK)</text>
-</g>
-  <g transform="translate(80, 386)">
-    <rect width="500" height="64" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1" />
-    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">embedding:  auto-picked from the catalog</text>
-</g>
-  <g transform="translate(80, 462)">
-    <rect width="500" height="64" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1" />
-    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">tools:      6 analysis tools + insights</text>
-</g>
-  <g transform="translate(80, 538)">
-    <rect width="500" height="64" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1" />
-    <text x="24" y="40" font-family="ui-monospace, monospace" font-size="20" fill="#3da3ff">eval:       LLM-as-judge self-correction</text>
-</g>
-
-  <text x="620" y="340" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Runs in your browser</text>
-  <text x="620" y="372" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Bring your own key</text>
-  <text x="620" y="404" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Drop your own data</text>
-  <text x="620" y="436" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Live workflow visualization</text>
-  <text x="620" y="468" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#cbd5e1">Self-correcting with retries</text>
-
-  <text x="80" y="600" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="500" fill="#64748b">github.com/3bdrahman/clay</text>
+  <rect width="1200" height="630" fill="#0b1220" />
+  <rect x="64" y="64" width="68" height="68" rx="16" fill="#1184e7" />
+  <path d="M83 87h30M83 99h24M83 111h17" stroke="white" stroke-width="4" stroke-linecap="round" />
+  <text x="156" y="114" font-family="system-ui, sans-serif" font-size="52" font-weight="700" fill="#f8fafc">Clay</text>
+  <text x="64" y="250" font-family="system-ui, sans-serif" font-size="58" font-weight="700" fill="#f8fafc">Ask your data.</text>
+  <text x="64" y="324" font-family="system-ui, sans-serif" font-size="58" font-weight="700" fill="#3da3ff">Inspect the answer.</text>
+  <text x="64" y="394" font-family="system-ui, sans-serif" font-size="27" fill="#cbd5e1">Document retrieval, CSV analysis, and visible sources.</text>
+  <path d="M64 454h1072" stroke="#334155" />
+  <text x="64" y="506" font-family="system-ui, sans-serif" font-size="24" fill="#cbd5e1">Browser workspace · Local embeddings · Your choice of model</text>
+  <text x="64" y="572" font-family="ui-monospace, monospace" font-size="20" fill="#94a3b8">github.com/3bdrahman/clay</text>
 </svg>

@@ -34,7 +34,7 @@ export interface ClayServices {
   dispose: () => void;
 }
 
-export function useClay(): {
+export interface UseClayResult {
   services: ClayServices | null;
   loading: boolean;
   error: string | null;
@@ -47,7 +47,9 @@ export function useClay(): {
   clearSandboxData: () => void;
   removeSandboxDocument: (fileName: string) => void;
   removeSandboxDataset: (name: string) => void;
-} {
+}
+
+export function useClay(): UseClayResult {
   const settings = useAppStore(s => s.settings);
   const availableModels = useAppStore(s => s.availableModels);
   const modelsFetchedAt = useAppStore(s => s.modelsFetchedAt);
@@ -88,25 +90,19 @@ export function useClay(): {
 
   useEffect(() => {
     let cancelled = false;
+    let ownedServices: ClayServices | null = null;
 
     async function init() {
       try {
         setLoading(true);
         setError(null);
         setNeedsConfiguration(false);
+        setPersistenceAvailable(true);
 
         const endpoint = resolveProviderEndpoint(settings);
         const isLocal = settings.provider === 'local';
-        const hasValidConfig = isLocal
-          ? endpoint.baseUrl.length > 0
-          : endpoint.apiKey.trim().length > 0;
-
-        if (!hasValidConfig) {
-          setNeedsConfiguration(true);
-          setServices(null);
-          setLoading(false);
-          return;
-        }
+        const needsChatConfiguration = endpoint.baseUrl.length === 0 || (!isLocal && endpoint.apiKey.trim().length === 0);
+        setNeedsConfiguration(needsChatConfiguration);
 
         let catalog = availableModels;
         if (settings.provider === 'local') {
@@ -128,29 +124,34 @@ export function useClay(): {
         );
         const { tables, metadata } = rehydrateSandboxTables(hydratedDatasets);
 
+        const settingsForBundle = settings.provider === 'local'
+          ? { ...settings, localCatalog: catalog }
+          : settings;
+
         const bundle = createClayServiceBundle({
-          settings,
+          settings: settingsForBundle,
           catalog,
           analyzerTables: tables,
           analyzerMetadata: metadata,
         });
 
-        bundle.vectorstore
-          .load()
-          .then(() => {
-            if (cancelled) return;
-            if (!bundle.vectorstore.persistenceAvailable) setPersistenceAvailable(false);
-          })
-          .catch((e: unknown) => {
-            if (cancelled) return;
-            setPersistenceAvailable(false);
-            const msg = e instanceof Error ? e.message : String(e);
-            if (import.meta.env.DEV) {
-              console.warn('[useClay] vectorstore persistence unavailable:', msg);
-            }
-          });
+        let nextPersistenceAvailable = true;
+        try {
+          await bundle.vectorstore.load();
+          nextPersistenceAvailable = bundle.vectorstore.persistenceAvailable;
+        } catch (e: unknown) {
+          nextPersistenceAvailable = false;
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!cancelled && import.meta.env.DEV) {
+            console.warn('[useClay] vectorstore persistence unavailable:', msg);
+          }
+        }
 
-        if (cancelled) return;
+        if (cancelled) {
+          bundle.dispose();
+          return;
+        }
+        setPersistenceAvailable(nextPersistenceAvailable);
 
         const newServices: ClayServices = {
           llm: bundle.llm,
@@ -161,6 +162,7 @@ export function useClay(): {
           ready: true,
           dispose: bundle.dispose,
         };
+        ownedServices = newServices;
         servicesRef.current = newServices;
         setServices(newServices);
       } catch (e) {
@@ -180,7 +182,10 @@ export function useClay(): {
       // The bundle is replaced on every settings/catalog/dataset change and
       // on unmount. Without this teardown, every recreation leaks the
       // embeddings worker and (after the first analysis) the sandbox worker.
-      servicesRef.current?.dispose();
+      ownedServices?.dispose();
+      if (servicesRef.current === ownedServices) {
+        servicesRef.current = null;
+      }
     };
   }, [settings, availableModels, sandboxDatasets, fetchNimModels, fetchLocalModels]);
 

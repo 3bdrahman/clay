@@ -43,6 +43,7 @@ function cspPlugin() {
 
       const extraConnectSrc = process.env.VITE_CSP_EXTRA_CONNECT_SRC?.trim();
       const deployUrl = process.env.VITE_DEPLOY_URL?.trim();
+      let deploymentUrl: URL | undefined;
 
       const connectSrc = [
         "'self'",
@@ -63,7 +64,14 @@ function cspPlugin() {
       if (deployUrl) {
         try {
           const url = new URL(deployUrl);
+          if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+            throw new Error('Deployment URL must use http or https');
+          }
           connectSrc.push(url.origin);
+          url.pathname = `${url.pathname.replace(/\/+$/, '')}/`;
+          url.search = '';
+          url.hash = '';
+          deploymentUrl = url;
         } catch (e) {
           console.warn(
             `[vite] Ignoring invalid VITE_DEPLOY_URL "${deployUrl}":`,
@@ -78,10 +86,22 @@ function cspPlugin() {
 
       const csp = `default-src 'self'; connect-src ${connectSrc.join(' ')}; script-src ${scriptSrc}; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; manifest-src 'self'; base-uri 'self'; form-action 'self'`;
 
-      return html.replace(
+      let result = html.replace(
         '<meta http-equiv="Content-Security-Policy" content="%CSP%" />',
         `<meta http-equiv="Content-Security-Policy" content="${csp}" />`
       );
+      if (deploymentUrl) {
+        const imageUrl = new URL('og-image.png', deploymentUrl).href;
+        result = result.replace(
+          /(<meta (?:property="og:image"|name="twitter:image") content=")[^"]*("\s*\/>)/g,
+          (_, prefix: string, suffix: string) => `${prefix}${imageUrl}${suffix}`,
+        );
+        result = result.replace(
+          '<meta property="og:type"',
+          `<meta property="og:url" content="${deploymentUrl.href}" />\n    <meta property="og:type"`,
+        );
+      }
+      return result;
     },
   };
 }

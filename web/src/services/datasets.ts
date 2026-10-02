@@ -23,10 +23,12 @@ export interface SampleLoadResult {
 export class SampleDatasetLoadError extends RagError {
   public readonly failedFiles: ReadonlyArray<string>;
   public readonly succeededFiles: ReadonlyArray<string>;
+  public readonly partialResult: SampleLoadResult;
 
   constructor(
     failed: ReadonlyArray<{ name: string; cause: Error }>,
     succeeded: ReadonlyArray<string>,
+    partialResult: SampleLoadResult,
   ) {
     const failedNames = failed.map(f => f.name);
     const detail = failed
@@ -51,6 +53,7 @@ export class SampleDatasetLoadError extends RagError {
     this.name = 'SampleDatasetLoadError';
     this.failedFiles = failedNames;
     this.succeededFiles = succeeded;
+    this.partialResult = partialResult;
   }
 }
 
@@ -107,9 +110,8 @@ export async function loadSampleDatasets(): Promise<SampleLoadResult> {
   );
 
   if (failures.length > 0) {
-    throw new SampleDatasetLoadError(failures, successes);
+    throw new SampleDatasetLoadError(failures, successes, { tables, metadata, rawCsv, arquero: aq });
   }
 
   return { tables, metadata, rawCsv, arquero: aq };
 }
-

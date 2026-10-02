@@ -1,27 +1,7 @@
 // Shared eval fixtures — one definition for the golden-set inputs so the
 // eval test file and the golden-summary gate cannot drift apart.
-import type { Settings } from '../lib/types';
 import { generateEvalQuestions } from './dynamicQuestions';
 import type { EvalQuestion } from './types';
-
-export const TEST_SETTINGS: Settings = {
-  provider: 'openrouter',
-  openrouterApiKey: import.meta.env.VITE_EVAL_API_KEY ?? '',
-  groqApiKey: '',
-  apiKey: '',
-  webSearchProvider: 'duckduckgo',
-  serperApiKey: '',
-  temperature: 0,
-  maxRetries: 3,
-  theme: 'system',
-  localServerUrl: '',
-  localModels: { chat: '' },
-  localCatalog: [],
-  localCatalogFetchedAt: 0,
-  pickedModelsOverride: {
-    chatModel: '',
-  },
-};
 
 export const TEST_DATASETS = [
   {

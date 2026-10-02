@@ -16,7 +16,8 @@ export default function App() {
   const [dataOpen, setDataOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const settings = useAppStore(s => s.settings);
-  const { pickedModels, refreshModels, addFiles, loadSampleData, clearSandboxData, removeSandboxDocument, removeSandboxDataset } = useClay();
+  const clay = useClay();
+  const { pickedModels, refreshModels, addFiles, loadSampleData, clearSandboxData, removeSandboxDocument, removeSandboxDataset, persistenceAvailable } = clay;
   const settingsProvider = settings.provider;
   const resetAll = useAppStore(s => s.resetAll);
 
@@ -66,10 +67,18 @@ export default function App() {
           pickedModels={pickedModels}
           provider={settingsProvider}
         />
+        {!persistenceAvailable && (
+          <div
+            role="status"
+            className="px-4 py-2 text-center text-sm text-amber-800 bg-amber-50 border-b border-amber-200 dark:text-amber-200 dark:bg-amber-950/40 dark:border-amber-900"
+          >
+            Data may be lost on reload.
+          </div>
+        )}
         <div className="flex-1 flex min-h-0">
           <ConversationSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
           <div className="flex-1 flex min-h-0">
-            <ChatPanel onOpenData={openData} onOpenSettings={openSettings} />
+            <ChatPanel clay={clay} onOpenData={openData} onOpenSettings={openSettings} />
           </div>
         </div>
         <SettingsPanelSuspense

@@ -1,291 +1,133 @@
-# Clay — RAG Assistant
+# Clay
 
-> A browser-based Retrieval-Augmented Generation assistant. Drop your own CSVs, PDFs, or text files and query them with natural language.
+**Ask questions about your files, then inspect the sources and analysis behind the answer.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg)](https://www.typescriptlang.org/)
-[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
-[![Vite](https://img.shields.io/badge/Vite-8.0-646CFF.svg)](https://vitejs.dev/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-06B6D4.svg)](https://tailwindcss.com/)
-[![Tests](https://img.shields.io/badge/Tests-589_passing-brightgreen.svg)](https://github.com/3bdrahman/clay/actions)
-[![Deploy](https://img.shields.io/badge/Deploy-GitHub_Pages-121013.svg?logo=github&logoColor=white)](https://3bdrahman.github.io/clay/)
+[Live demo](https://3bdrahman.github.io/clay/) · [Architecture](#architecture) · [Run locally](#run-locally)
 
-Clay combines three retrieval paths behind a single chat surface:
+[![CI](https://github.com/3bdrahman/clay/actions/workflows/ci.yml/badge.svg)](https://github.com/3bdrahman/clay/actions/workflows/ci.yml)
+[![Deploy](https://github.com/3bdrahman/clay/actions/workflows/deploy-github-pages.yml/badge.svg)](https://github.com/3bdrahman/clay/actions/workflows/deploy-github-pages.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-- **Vector search** over uploaded documents (PDFs, markdown, text)
-- **Data analysis** over uploaded CSV datasets via Arquero (pandas-like, in-browser)
-- **Web search** for current facts and general knowledge
+Clay is a browser application for document retrieval and structured data analysis. It routes questions to uploaded documents, CSV analysis, or an optional web-search provider, then shows the answer alongside citations and an inspectable execution trace.
 
-The orchestrator routes each question to the right source, runs an LLM-as-judge self-correction loop, and renders the entire pipeline in real time.
+React, TypeScript, and Vite power the interface. Local embeddings, IndexedDB, and a worker-isolated analysis engine let the application run on a static host. Answer generation uses your chosen OpenRouter, Groq, or local OpenAI-compatible model.
 
-All processing runs in the browser. Bring your own key (BYOK) for **OpenRouter** or **Groq**, or point Clay at a **local OpenAI-compatible server** (Ollama, LM Studio, vLLM, llama.cpp). Switch in Settings. Web search is optional and also runs client-side via DuckDuckGo or Serper API.
+![Clay workspace with the optional sample datasets loaded](docs/images/workspace.png)
 
----
+## Try the demo
 
-## Live Demo
+1. Open [Clay](https://3bdrahman.github.io/clay/). Load the sample data or open **Data** to add your own files. Loading files requires no model API key.
+2. Open **Settings**, choose **OpenRouter** or **Groq**, add your key, and select a chat model. Alternatively, configure a running **Local server** and select one of its models.
+3. With the sample data loaded, ask **“How many employees are in each department?”** Choose a model that supports tools to inspect the data through the analysis tools.
+4. Expand **Show workflow** to inspect routing, tool calls, retries, and timing. The sources panel shows retrieved passages or analysis results; citation excerpts remain available after a reload.
 
-**Try it now:** [https://3bdrahman.github.io/clay/](https://3bdrahman.github.io/clay/)
+The demo has no shared API key and does not serve prerecorded answers. Model requests use your provider account and may incur charges. You can explore the interface and load data before connecting a model.
 
-Add your own API key in **Settings** — OpenRouter ([openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)) or Groq ([console.groq.com/keys](https://console.groq.com/keys)) — or configure a local OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp) to use the full AI capabilities.
+| Input | What Clay does |
+| --- | --- |
+| CSV | Parses a table, infers column types, and makes it available for filtering, aggregation, joins, statistics, and charts. |
+| PDF, Markdown, text, JSON | Extracts text, chunks it, embeds it locally, and retrieves relevant passages. JSON is treated as document text. |
+| Web search | Uses Serper with your key, or DuckDuckGo through a configured proxy. The hosted demo needs a Serper key for web search. |
 
----
-
-## What this project demonstrates
-
-- **Production-tier RAG architecture** — route → retrieve → grade → generate → evaluate, with retries
-- **Multi-source synthesis** — documents, structured data, and the open web in one answer
-- **Live workflow visualization** — every step (with timing) is shown as it runs
-- **Self-correcting quality loop** — LLM-as-judge hallucination check + answer-usefulness grading
-- **Single-model architecture** — one user-chosen chat model drives every LLM step (explicit cost control); embeddings are local (transformers.js) and never user-selected
-- **Local in-browser embeddings** — documents are embedded by `all-MiniLM-L6-v2` running in a Web Worker via transformers.js; document text never leaves the machine
-- **Agentic analysis tools** — the model inspects your actual data (column profiles, distributions, correlations, sample rows) through function-calling tools, then delivers structured insights with evidence and a confidence level
-- **Bring-your-own-data** — no forced scenario; drop any CSV/PDF/MD/TXT/JSON and start querying
-- **Runs entirely in your browser** — no backend server required, deploy anywhere as static files
-- **Privacy-first** — your data and its embeddings never leave your browser; only chat queries go to your configured LLM provider
-
----
-
-## Getting Started
-
-```bash
-cd web
-npm install
-npm run dev          # http://localhost:5173
-```
-
-The app starts **empty**. Click **Data** in the header and either:
-
-1. Drop your own files (CSV → Arquero table; PDF/MD/TXT/JSON → chunked + embedded), or
-2. Click **Load sample data** for a tiny 3-table demo dataset
-
-Then add your provider key in **Settings** (or connect a local server) and ask away.
-
-### Production build
-
-```bash
-npm run build        # → web/dist/ (static files, ready to deploy)
-```
-
-The site deploys to **GitHub Pages** via [`.github/workflows/deploy-github-pages.yml`](.github/workflows/deploy-github-pages.yml): every push to `master` builds with `DEPLOY_TARGET=github-pages` (Vite `base` becomes `/<repo>/` automatically) and publishes `web/dist`. Any other static host works too — set `BASE_PATH` if you deploy under a sub-path.
-
-| Build-time env var | Purpose |
-|---|---|
-| `DEPLOY_TARGET=github-pages` | Sets Vite `base` to `/<repo-name>/` for GitHub Pages |
-| `BASE_PATH` | Overrides the Vite `base` for other sub-path hosts (default `./`) |
-| `VITE_DEPLOY_URL` | Injects the deploy origin into the CSP `connect-src` |
-| `VITE_CSP_EXTRA_CONNECT_SRC` | Appends extra origins to the CSP `connect-src` |
-| `VITE_OPENROUTER_REFERER` | Overrides the OpenRouter `Referer` fallback (defaults to the GitHub Pages origin) |
-
----
+PDFs need extractable text; OCR is not included. The embedding model downloads on the first document upload, so the first import needs network access and takes longer. File size and analysis capacity depend on the browser and device.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Browser (client-side app)                 │
-│                                                             │
-│   ┌─────────────┐    ┌──────────────────┐                  │
-│   │  React UI   │◄──►│  Zustand Store   │◄──► localStorage │
-│   └─────────────┘    └──────────────────┘                  │
-│           │                    │                           │
-│           ▼                    ▼                           │
-│   ┌─────────────────────────────────────────┐               │
-│   │     Workflow Orchestrator (FSM)         │               │
-│   │                                         │               │
-│   │  ┌────────┐  ┌─────────┐  ┌─────────┐   │               │
-│   │  │ Route  │→ │Retrieve │→ │ Grade   │   │               │
-│   │  └────────┘  └─────────┘  └─────────┘   │               │
-│   │       │           │             │       │               │
-│   │       ▼           ▼             ▼       │               │
-│   │  ┌────────┐  ┌─────────┐  ┌─────────┐   │               │
-│   │  │VectorDB│  │Analyzer │  │ Web     │   │               │
-│   │  │(cosine)│  │(Arquero)│  │ Search  │   │               │
-│   │  └────────┘  └─────────┘  └─────────┘   │               │
-│   │       │           │             │       │               │
-│   │       └───────────┴─────────────┘       │               │
-│   │                   ▼                     │               │
-│   │           ┌──────────────┐              │               │
-│   │           │  Generate    │              │               │
-│   │           │  + Evaluate  │◄─ retry loop │               │
-│   │           └──────────────┘              │               │
-│   └─────────────────────────────────────────┘               │
-│                       │                                     │
-│                       ▼  (outbound LLM calls)                │
-│   ┌─────────────────────────────────────────┐               │
-│   │  OpenRouter / Groq / Local  │                   │
-│   │  one chat model · local embeddings     │               │
-│   └─────────────────────────────────────────┘               │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    UI[React interface] --> Shared[Shared application services]
+    Files[Uploaded files] --> Ingest[Parse and chunk]
+    Ingest --> Tables[Arquero tables]
+    Ingest --> Embeddings[Local embeddings worker]
+    Embeddings --> Index[Vector index / IndexedDB]
+    Shared --> Router[Question router]
+    Router --> Index
+    Router --> Tools[Analysis tools / QuickJS worker]
+    Tables --> Tools
+    Router --> Search[Optional search provider]
+    Index --> Answer[Generate and evaluate]
+    Tools --> Answer
+    Search --> Answer
+    Answer <--> Model[Your configured model endpoint]
+    Answer --> View[Answer / sources / workflow trace]
 ```
 
-### Tech Stack
+| Responsibility | Implementation |
+| --- | --- |
+| Application lifecycle | [`useClay`](web/src/hooks/useClay.ts) owns a shared service bundle for uploads and chat; [`clayServices`](web/src/services/clayServices.ts) assembles clients and disposes their workers. |
+| Routing and recovery | [`orchestrator`](web/src/services/orchestrator.ts) routes against the loaded data, retrieves context, generates an answer, and evaluates it with bounded retries. Successful context survives a retry through another source. |
+| Document retrieval | [`vectorstore`](web/src/lib/vectorstore.ts) persists chunks in IndexedDB. Embeddings use the fixed local `all-MiniLM-L6-v2` model; similarity search uses exact cosine search for smaller indexes and HNSW for larger ones. |
+| Data analysis | [`analyzer`](web/src/services/analyzer.ts) exposes dataset inspection, statistics, aggregation, sampling, correlation, and code execution. Models without tool support use an explicit single-request analysis path. |
+| Generated-code isolation | [`realmExecutor`](web/src/services/realmExecutor.ts) creates a fresh QuickJS context inside a dedicated worker, with time and memory limits and no browser storage or network APIs. |
+| UI and persistence | [`components`](web/src/components) render conversations, sources, charts, and workflow steps. [`store`](web/src/store.ts) persists settings and compact conversation history. |
 
-- **Vite + React 19 + TypeScript** (strict mode)
-- **Tailwind CSS** — utility-first styling, dark mode
-- **Zustand** — state with `localStorage` persistence
-- **Arquero** — pandas-like DataFrame library for in-browser data analysis
-- **Recharts** — declarative charts
-- **Marked + DOMPurify** — safe markdown rendering
-- **pdfjs-dist** — client-side PDF text extraction
-- **OpenRouter / Groq / local server** — OpenAI-compatible LLM providers (BYOK)
+One selected chat model handles routing, analysis, generation, and evaluation. This makes model choice explicit, but a question can still require several provider calls. Evaluation and retries improve recovery; they do not guarantee a correct answer.
 
----
+## Data and privacy
 
-## Design decisions
+- Files are parsed in the browser. CSV data, document chunks, and vectors are stored in IndexedDB; settings, API keys, and conversation history use localStorage.
+- **Your model receives more than the question.** Requests can include retrieved document passages, dataset names and schemas, sampled rows, analysis results, and previous analysis context. Use data appropriate for the provider you select.
+- Embedding inference runs locally. Model files download from Hugging Face on first use and are cached by the browser.
+- Search queries go to the selected search provider or configured proxy. A provider failure is surfaced rather than silently sending the query to another provider.
+- Browser storage is not an encrypted credential vault. Clear keys in Settings on a shared device. **Reset everything** removes the application's settings, conversations, and loaded data; browser-managed model caches are separate.
 
-| Decision | Rationale | Code |
-|---|---|---|
-| Reflection rides each tool-loop iteration | A separate critique turn would double the token spend per analysis; the model's own per-iteration summary is mandatory and visible at zero extra cost | `analyzer.ts` (`onIteration` hook) |
-| Plan on the first iteration | The model's first tool-call response opens with a `PLAN:` line — a visible strategy without a separate planning phase (another round trip + tokens) | `analyzerPrompts.ts` `buildSystemPrompt` |
-| Generated code runs in a QuickJS realm | A fresh QuickJS context per execution has no page globals by construction — the prompt-injection escape class `new Function` could not close is eliminated; the realm runs in a dedicated Web Worker with an interrupt handler (5s wall clock) and a memory limit | `services/analyzerSandbox.ts`, `services/realmExecutor.ts`, `workers/analysisSandboxWorker.ts` |
-| Single user-chosen chat model | With BYOK you pay per token — the cost decision stays with you; embeddings are local (transformers.js) and never user-selected | `lib/models.ts` |
-| Budgets enforced mid-loop | Each LLM call gets `max_tokens` derived from the remaining budget, so one huge response can't blow the loop's token budget | `analyzerToolLoop.ts` `runToolLoop`, `analyzerBudget.ts` |
-| Eval grades answers, not just routing | Lexical overlap + LLM-as-judge scores against the golden set, with aggregates — quality claims are measurable | `eval/runner.ts` |
-| Retrieval-only query rewriting | On eval failure the question is rewritten for the retried source; the answer still answers the original question | `orchestrator.ts` retry loop |
-| Final synthesis rides the loop's last response | A separate streaming synthesis call would add a round trip per analysis; live visibility comes from sub-steps + reflections | `analyzerToolLoop.ts` `runToolLoop` |
-| MMR reranking ships off | The dense path fetches 3× top-K and HyDE supplies diversity upstream; MMR trades top-1 relevance for diversity, and near-duplicate chunks rarely hurt the judge's grounded-answer check. Enable per-store when eval baseline data supports it | `vectorstore.ts` (`useMMR`), `clayServices.ts` |
+## Run locally
 
----
-
-## Data flow
-
-When you drop a CSV, it's parsed into a real `ColumnTable` through a shared normalized parse path (currency amounts, percentages, and numeric strings become real numbers, empty cells become nulls) and registered as a variable the LLM-generated analysis tools can query. When you drop a PDF/MD/TXT/JSON, it's chunked at ~512 tokens with sentence-boundary alignment and ~64 tokens of overlap, then embedded locally — `all-MiniLM-L6-v2` runs in a Web Worker via transformers.js, downloads from the HuggingFace CDN on first use, and is cached by the browser afterwards — then added to the vector store (IndexedDB-persisted, alongside the sandbox's raw CSVs).
-
-The sandbox is your workspace — there's no preloaded scenario. The next question routes against whatever you've loaded. Your data stays in your browser; only the question and relevant context are sent to your LLM provider.
-
----
-
-## Configuration
-
-Open **Settings** and pick a provider. API keys are stored in browser `localStorage` and sent only to the matching provider's endpoint — never anywhere else.
-
-### Cloud providers (BYOK)
-
-| Provider | Get a key | Endpoint used |
-|---|---|---|
-| OpenRouter | [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) | `https://openrouter.ai/api/v1` |
-| Groq | [console.groq.com/keys](https://console.groq.com/keys) | `https://api.groq.com/openai/v1` |
-
-### Local server (private)
-
-Pick **Local server** in Settings and point Clay at any OpenAI-compatible endpoint. No API key required (some servers, like LM Studio, accept a key — paste it if yours does).
-
-| Server | Default URL |
-|---|---|
-| Ollama | `http://localhost:11434/v1` |
-| LM Studio | `http://localhost:1234/v1` |
-| vLLM | `http://localhost:8000/v1` |
-| llama.cpp server | `http://localhost:8080/v1` |
-
-Click **Discover** to fetch the model catalog, then pick your chat model. Embeddings are local — nothing to pick. For Ollama, you may need to enable CORS:
+Use **Node.js 22** and npm, matching CI.
 
 ```bash
-OLLAMA_ORIGINS="*" ollama serve
+git clone https://github.com/3bdrahman/clay.git
+cd clay/web
+npm ci
+npm run dev
 ```
 
-### Model selection
+Open the URL printed by Vite, normally `http://localhost:5173`. Provider keys are entered in the app; do not put secrets in `VITE_*` variables, which are exposed to the client bundle.
 
-- **Chat model — you pick it.** One model drives routing, code generation, answering, evaluation, and self-correction. There is no automatic multi-model selection: with BYOK you pay per token, so the cost decision stays with you.
-- **Embeddings — local, nothing to pick.** Document chunks and queries are embedded in your browser by `all-MiniLM-L6-v2` (transformers.js, in a Web Worker). There is no embedding model selection and no embedding API call — document text never leaves the machine.
-- **Analysis — agentic tools.** For data questions, the model calls analysis tools (list_datasets, profile_column with full statistics, aggregate, filter_sample, correlate, run_code) to inspect the real data before answering. It returns structured insights (finding, evidence, confidence, implication) plus a deliberately-chosen chart; every tool call is a live sub-step in the workflow view. Models without tool support fall back to the previous single-shot analysis, clearly labeled.
-- Catalog cache TTL is 1 hour. Click **Refresh** in Settings to refetch.
+For a local model, enter the server's OpenAI-compatible `/v1` URL in Settings, click **Discover**, and select a model. The server must allow requests from Clay's origin. A locally served Clay instance is the most straightforward option when browser restrictions prevent the hosted HTTPS demo from reaching an HTTP model server.
 
----
+## Verify and build
 
-## Privacy & safety notes
+Run these commands from `web/`:
 
-What to know before sharing this app or loading sensitive data into it:
-
-- **API keys live in browser `localStorage`.** They are sent only to the configured provider's endpoint (as `Authorization`/`X-API-KEY` headers) and nowhere else, but any successful XSS could read them. Clear them in Settings when done.
-- **The embedding model downloads from the HuggingFace CDN** (~23MB, q8-quantized) on first use and is cached by the browser afterwards. Document text never leaves the machine, but the model weights themselves are supplied by that CDN.
-- **LLM-generated code runs in a QuickJS realm inside a dedicated Web Worker.** Each execution gets a fresh interpreter context with no page globals by construction (`fetch`, `localStorage`, `document`, `Function`, `eval` are all undefined inside the realm), bounded by an interrupt handler (5s wall clock) and a runtime memory limit. A static scan still rejects known escape vectors before execution as defense-in-depth. Dataset tables cross the boundary only as CSV strings (serialized with Arquero's own `toCSV`) and are re-created inside per execution. The QuickJS wasm bundle (~1MB) loads lazily on the first data-analysis question. Treat uploaded documents and web results as untrusted input.
-- **DuckDuckGo web search does not work from browser deployments in production** (it sends no CORS headers). Use a Serper API key in Settings, or set `VITE_WEBSEARCH_BASE_URL` to an edge proxy at build time. In dev, the Vite server proxies it automatically.
-- **Everything else stays local**: your data, its embeddings, and the sandbox's raw CSVs (IndexedDB) never leave your browser; only chat queries and retrieved context go to your configured LLM provider.
-
----
-
-## Workflow
-
-1. **Routes** the question to one of three sources (vectorstore / data / websearch)
-2. **Retrieves** top-K from the chosen source
-3. **Grades** retrieved docs with an LLM-as-judge (filters irrelevant)
-4. **Generates** a cited answer grounded in the retrieved context
-5. **Evaluates** the answer (hallucination check + question-answer match). If not useful, retries with a different source
-6. **Returns** the answer with sources, workflow trace, and any analysis code
-
-The entire flow is visible in real time — click "Show workflow" on any response.
-
----
-
-## Project Structure
-
-```
-clay/
-├── README.md
-├── CHANGELOG.md
-├── web/                        ← the app (this is what gets deployed)
-│   ├── public/
-│   │   └── data/
-│   │       └── datasets/       ← optional bundled sample CSVs
-│   ├── src/
-│   │   ├── components/         ← React components
-│   │   ├── hooks/              ← React hooks
-│   │   ├── lib/                ← LLM, embeddings, vector store, web search, model picker
-│   │   ├── services/           ← orchestrator, data analyzer, file processor, sandbox tables
-│   │   ├── store.ts            ← Zustand store
-│   │   ├── App.tsx
-│   │   └── main.tsx
-│   ├── vite.config.ts
-│   └── package.json
-└── .github/
-    └── workflows/
-        ├── ci.yml                    ← CI checks
-        └── deploy-github-pages.yml   ← GitHub Pages deployment
+```bash
+npm run verify       # type checking, lint, tests, production build
+npm run test:watch   # focused development loop
+npm run eval         # evaluation-metric and question-set tests (no live model calls)
+npm run preview      # serve the production build locally
 ```
 
----
+The tests cover routing and retries, tool execution, sandbox isolation, retrieval and persistence, provider errors, and UI state transitions. Provider responses are mocked in unit tests; those tests do not establish live model accuracy. The evaluation tests check scoring functions and deterministic question-set consistency, not the factual quality of a deployed model.
 
-## Keyboard Shortcuts
+For a release, also exercise the built app: import a document and query it without reloading; run a sample-data analysis; cancel a response; reload and inspect saved citations; check setup and error states at desktop and mobile widths. Live answers depend on a reachable configured model and must be checked separately from the automated suite.
+
+## Deployment
+
+The application builds to `web/dist`. [GitHub Pages deployment](.github/workflows/deploy-github-pages.yml) runs the complete verification command before uploading the site. [CI](.github/workflows/ci.yml) also validates pull requests using the committed lockfile.
+
+Set build-time variables in the shell or deployment environment:
+
+| Variable | Purpose |
+| --- | --- |
+| `DEPLOY_TARGET=github-pages` | Uses `/<repository>/` as the asset base path. |
+| `BASE_PATH` | Overrides the base for other static hosts; defaults to `./`. |
+| `VITE_DEPLOY_URL` | Canonical deployment URL for social previews and the CSP origin. |
+| `VITE_WEBSEARCH_BASE_URL` | DuckDuckGo proxy URL. Without a proxy, use Serper for hosted web search. |
+| `VITE_CSP_EXTRA_CONNECT_SRC` | Comma-separated additional origins allowed for connections, such as a search proxy or remote model server. |
+| `VITE_OPENROUTER_REFERER` | Optional application URL sent to OpenRouter. |
+
+The CSP permits WebAssembly and Arquero's code generation. Generated analysis code runs in its separate QuickJS worker; static hosting alone does not make untrusted inputs safe in every other application boundary.
+
+## Keyboard shortcuts
 
 | Shortcut | Action |
-|---|---|
-| `/` | Focus input |
+| --- | --- |
+| `/` | Focus the question field |
+| `Enter` / `Shift+Enter` | Send / insert a line break |
 | `Esc` | Stop generation |
-| `Enter` | Send message |
-| `Shift+Enter` | New line |
-| `Cmd/Ctrl+K` | New chat |
-| `Cmd/Ctrl+Shift+C` | Clear chat |
-
----
-
-## Development
-
-```bash
-# Run tests
-npm run test
-
-# Type-check
-npm run type-check
-
-# Lint
-npm run lint
-
-# Full verification (type-check + lint + test + build)
-npm run verify
-```
-
-### Quality measurement in CI
-
-Every push runs the **no-LLM golden-summary gate** (`web/src/eval/goldenSummary.test.ts`): the schema-bound golden question set is regenerated deterministically, and lexical-overlap aggregates (overlap between each question and its golden answer, via the same scoring function the eval runner uses) are compared against a committed baseline (`web/src/eval/goldenBaseline.json`). Aggregates that drop more than 0.03 below the baseline fail the check — golden-set drift (a degraded golden answer, a mispaired question, a template change that hurts coherence) is caught in CI. Regenerate the baseline after intentional golden-set changes:
-
-```bash
-EVAL_UPDATE_BASELINE=1 npx vitest run src/eval/goldenSummary.test.ts
-```
-
-The full LLM-backed eval (`npm run eval`, gated on `VITE_EVAL_API_KEY`) runs the complete golden set against the live provider with routing/judge/latency scoring, but needs a browser-like environment (real Web Worker for embeddings, an HTTP origin for the bundled sample data) that the Node test harness cannot provide — it is not wired into CI. Run it locally against a real key.
-
----
+| `Cmd/Ctrl+K` | New conversation |
+| `Cmd/Ctrl+Shift+C` | Clear the current conversation, with confirmation |
 
 ## License
 
-MIT
+[MIT](LICENSE)

@@ -5,6 +5,7 @@
 
 import type { Settings, SourceType } from '../lib/types';
 import type { OrchestratorDeps } from './orchestrator';
+import { getWebSearchAvailability } from '../lib/websearch';
 
 export const VALID_SOURCE_TYPES: SourceType[] = ['vectorstore', 'python', 'websearch'];
 
@@ -12,14 +13,8 @@ export const ROUTER_CONFIDENCE_THRESHOLD = 0.6;
 
 export function webSearchAvailability(settings: Settings): string {
   if (settings.webSearchProvider === 'none') return 'disabled by the user — never route here';
-  if (settings.webSearchProvider === 'serper') {
-    return settings.serperApiKey
-      ? 'available (Serper API key configured)'
-      : 'selected but no Serper API key configured — requests would fail';
-  }
-  return import.meta.env.DEV
-    ? 'available (DuckDuckGo via the dev proxy)'
-    : 'DEGRADED: DuckDuckGo cannot be reached from browser deployments in production (no CORS headers) — route here only for general-knowledge questions the sources above cannot answer';
+  const { available, message } = getWebSearchAvailability(settings);
+  return available ? `available: ${message}` : `unavailable — never route here. ${message}`;
 }
 
 export function buildRouterContext(deps: OrchestratorDeps): string {
