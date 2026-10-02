@@ -14,38 +14,56 @@ export interface ModelCatalogDeps {
   setModelsLoading: (loading: boolean) => void;
   setModelsError: (error: string | null) => void;
   setLocalCatalog: (models: ModelInfo[]) => void;
+  getSettings: () => Settings;
 }
 
-export function useFetchNimModels(deps: ModelCatalogDeps) {
-  const fetchedKeyRef = useRef<string | null>(null);
-  const { settings, availableModels, modelsFetchedAt, setModels, setModelsLoading, setModelsError } = deps;
+export function useFetchCloudModels(deps: ModelCatalogDeps) {
+  const fetchedEndpointRef = useRef<{ provider: Settings['provider']; baseUrl: string; key: string } | null>(null);
+  const requestIdRef = useRef(0);
+  const { settings, availableModels, modelsFetchedAt, setModels, setModelsLoading, setModelsError, getSettings } = deps;
 
   return useCallback(
     async (key: string, force = false): Promise<ModelInfo[]> => {
+      const provider = settings.provider;
+      const endpoint = resolveProviderEndpoint(settings);
+      const matchesCurrentSettings = () => {
+        const current = getSettings();
+        const currentEndpoint = resolveProviderEndpoint(current);
+        return current.provider === provider && currentEndpoint.baseUrl === endpoint.baseUrl && currentEndpoint.apiKey === key;
+      };
+      if (!matchesCurrentSettings()) return [];
+      if (endpoint.configurationError) {
+        setModelsError(endpoint.configurationError);
+        return [];
+      }
+      const cached = fetchedEndpointRef.current;
       if (
         !force &&
-        fetchedKeyRef.current === key &&
+        cached?.key === key && cached.provider === provider && cached.baseUrl === endpoint.baseUrl &&
         Date.now() - modelsFetchedAt < MODEL_TTL_MS &&
         availableModels.length > 0
       ) {
         return availableModels;
       }
+      const requestId = ++requestIdRef.current;
+      const isCurrent = () => requestId === requestIdRef.current && matchesCurrentSettings();
       setModelsLoading(true);
       setModelsError(null);
       try {
-        const models = await listModels(settings.provider, key);
+        const models = await listModels(provider, key, endpoint.baseUrl);
+        if (!isCurrent()) return [];
         setModels(models);
-        fetchedKeyRef.current = key;
+        fetchedEndpointRef.current = { provider, baseUrl: endpoint.baseUrl, key };
         return models;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        setModelsError(msg);
+        if (isCurrent()) setModelsError(msg);
         return [];
       } finally {
-        setModelsLoading(false);
+        if (isCurrent()) setModelsLoading(false);
       }
     },
-    [availableModels, modelsFetchedAt, setModels, setModelsLoading, setModelsError, settings.provider],
+    [availableModels, modelsFetchedAt, setModels, setModelsLoading, setModelsError, settings, getSettings],
   );
 }
 
@@ -79,7 +97,7 @@ export function useFetchLocalModels(deps: ModelCatalogDeps) {
 
 export function useRefreshModels(
   deps: ModelCatalogDeps,
-  fetchNimModels: ReturnType<typeof useFetchNimModels>,
+  fetchCloudModels: ReturnType<typeof useFetchCloudModels>,
   fetchLocalModels: ReturnType<typeof useFetchLocalModels>,
 ) {
   const { settings } = deps;
@@ -90,7 +108,7 @@ export function useRefreshModels(
       if (url) await fetchLocalModels(url, true);
     } else {
       const endpoint = resolveProviderEndpoint(settings);
-      if (endpoint.apiKey) await fetchNimModels(endpoint.apiKey, true);
+      if (endpoint.apiKey) await fetchCloudModels(endpoint.apiKey, true);
     }
-  }, [settings, fetchNimModels, fetchLocalModels]);
+  }, [settings, fetchCloudModels, fetchLocalModels]);
 }

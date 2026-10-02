@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useAppStore, sanitizeProvider } from './store';
-import { LOCAL_DEFAULT_BASE_URL } from './lib/providers';
+import { LOCAL_DEFAULT_BASE_URL, PROVIDER_REGISTRY } from './lib/providers';
 import type { LocalModelPicks } from './lib/types';
 
 describe('useAppStore.updateSettings', () => {
@@ -9,7 +9,8 @@ describe('useAppStore.updateSettings', () => {
       settings: {
         provider: 'openrouter',
         openrouterApiKey: '',
-        groqApiKey: '',
+        nimApiKey: '',
+        nimBaseUrl: '',
         apiKey: '',
         webSearchProvider: 'duckduckgo',
         serperApiKey: '',
@@ -69,6 +70,119 @@ describe('useAppStore.updateSettings', () => {
     const after = useAppStore.getState().settings;
     expect(after.localServerUrl).toBe('http://localhost:1234/v1');
     expect(after.localCatalog.length).toBe(1);
+  });
+
+  it('clears cloud model state when switching providers while preserving independent keys and local picks', () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        provider: 'openrouter',
+        openrouterApiKey: 'openrouter-key',
+        nimApiKey: 'nim-key',
+        nimBaseUrl: 'https://nim.example.com/v1',
+        pickedModelsOverride: { chatModel: 'openrouter/model' },
+        localModels: { chat: 'llama3.1:8b' },
+      },
+      availableModels: [{ id: 'openrouter/model', ownedBy: 'openrouter', created: 1 }],
+      modelsFetchedAt: 12345,
+      modelsError: 'previous provider failed',
+      modelsLoading: true,
+    });
+
+    useAppStore.getState().updateSettings({ provider: 'nim' });
+
+    const state = useAppStore.getState();
+    expect(state.settings.provider).toBe('nim');
+    expect(state.settings.openrouterApiKey).toBe('openrouter-key');
+    expect(state.settings.nimApiKey).toBe('nim-key');
+    expect(state.settings.nimBaseUrl).toBe('https://nim.example.com/v1');
+    expect(state.settings.localModels).toEqual({ chat: 'llama3.1:8b' });
+    expect(state.settings.pickedModelsOverride).toEqual({ chatModel: '' });
+    expect(state.availableModels).toEqual([]);
+    expect(state.modelsFetchedAt).toBe(0);
+    expect(state.modelsError).toBeNull();
+    expect(state.modelsLoading).toBe(false);
+  });
+
+  it('preserves provider-scoped model state when inactive cloud settings change', () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        provider: 'openrouter',
+        pickedModelsOverride: { chatModel: 'openrouter/model' },
+      },
+      availableModels: [{ id: 'openrouter/model', ownedBy: 'openrouter', created: 1 }],
+      modelsFetchedAt: 12345,
+      modelsError: 'kept until next fetch',
+      modelsLoading: true,
+    });
+
+    useAppStore.getState().updateSettings({ nimApiKey: 'inactive-new-key' });
+
+    const state = useAppStore.getState();
+    expect(state.settings.nimApiKey).toBe('inactive-new-key');
+    expect(state.settings.pickedModelsOverride).toEqual({ chatModel: 'openrouter/model' });
+    expect(state.availableModels).toEqual([{ id: 'openrouter/model', ownedBy: 'openrouter', created: 1 }]);
+    expect(state.modelsFetchedAt).toBe(12345);
+    expect(state.modelsError).toBe('kept until next fetch');
+    expect(state.modelsLoading).toBe(true);
+  });
+
+  it('invalidates cached models while preserving selection when the active cloud API key changes', () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        provider: 'openrouter',
+        openrouterApiKey: 'old-openrouter-key',
+        nimApiKey: 'inactive-nim-key',
+        pickedModelsOverride: { chatModel: 'openrouter/model' },
+      },
+      availableModels: [{ id: 'openrouter/model', ownedBy: 'openrouter', created: 1 }],
+      modelsFetchedAt: 12345,
+      modelsError: 'previous key failed',
+      modelsLoading: true,
+    });
+
+    useAppStore.getState().updateSettings({ openrouterApiKey: 'new-openrouter-key' });
+
+    const state = useAppStore.getState();
+    expect(state.settings.openrouterApiKey).toBe('new-openrouter-key');
+    expect(state.settings.nimApiKey).toBe('inactive-nim-key');
+    expect(state.settings.pickedModelsOverride).toEqual({ chatModel: 'openrouter/model' });
+    expect(state.availableModels).toEqual([]);
+    expect(state.modelsFetchedAt).toBe(0);
+    expect(state.modelsError).toBeNull();
+    expect(state.modelsLoading).toBe(false);
+  });
+
+  it('invalidates cached models and selection when the active NIM base URL changes', () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        provider: 'nim',
+        openrouterApiKey: 'inactive-openrouter-key',
+        nimApiKey: 'nim-key',
+        nimBaseUrl: 'https://old-nim.example.com/v1',
+        pickedModelsOverride: { chatModel: 'meta/llama-3.1-70b-instruct' },
+      },
+      availableModels: [{ id: 'meta/llama-3.1-70b-instruct', ownedBy: 'nvidia', created: 1 }],
+      modelsFetchedAt: 12345,
+      modelsError: 'old endpoint failed',
+      modelsLoading: true,
+    });
+
+    useAppStore.getState().updateSettings({ nimBaseUrl: 'https://new-nim.example.com/v1' });
+
+    const state = useAppStore.getState();
+    expect(state.settings.provider).toBe('nim');
+    expect(state.settings.openrouterApiKey).toBe('inactive-openrouter-key');
+    expect(state.settings.nimApiKey).toBe('nim-key');
+    expect(state.settings.nimBaseUrl).toBe('https://new-nim.example.com/v1');
+    expect(state.settings.pickedModelsOverride).toEqual({ chatModel: '' });
+    expect(state.availableModels).toEqual([]);
+    expect(state.modelsFetchedAt).toBe(0);
+    expect(state.modelsError).toBeNull();
+    expect(state.modelsLoading).toBe(false);
   });
 });
 
@@ -136,6 +250,67 @@ describe('store persist migrate — LocalModelPicks legacy shape → chat-only',
     expect(out.settings.openrouterApiKey).toBe('legacy-key');
   });
 
+  it('migrates removed Groq state to the default provider without leaking legacy key or model selection', () => {
+    const out = migrate()?.(
+      {
+        settings: {
+          provider: 'groq' as never,
+          apiKey: 'legacy-groq-key',
+          groqApiKey: 'named-groq-key',
+          openrouterApiKey: '',
+          nimApiKey: '',
+          pickedModelsOverride: { chatModel: 'llama-3.3-70b-versatile' },
+        },
+      },
+      6,
+    ) as { settings: Record<string, unknown> };
+    expect(out.settings.provider).toBe('openrouter');
+    expect(out.settings.openrouterApiKey).toBe('');
+    expect(out.settings.nimApiKey).toBe('');
+    expect(out.settings.apiKey).toBe('');
+    expect(out.settings.groqApiKey).toBeUndefined();
+    expect(out.settings.pickedModelsOverride).toEqual({ chatModel: '' });
+  });
+
+  it('migrates explicitly matching legacy NIM keys without overwriting a named cleared key', () => {
+    const migratedLegacy = migrate()?.(
+      { settings: { provider: 'nim', apiKey: 'legacy-nim-key' } },
+      6,
+    ) as { settings: Record<string, unknown> };
+    expect(migratedLegacy.settings.provider).toBe('nim');
+    expect(migratedLegacy.settings.nimApiKey).toBe('legacy-nim-key');
+    expect(migratedLegacy.settings.apiKey).toBe('');
+
+    const preservedNamedClear = migrate()?.(
+      { settings: { provider: 'nim', apiKey: 'legacy-nim-key', nimApiKey: '' } },
+      6,
+    ) as { settings: Record<string, unknown> };
+    expect(preservedNamedClear.settings.nimApiKey).toBe('');
+    expect(preservedNamedClear.settings.apiKey).toBe('');
+  });
+
+  it('migrates legacy NIM proxy roots to nimBaseUrl without overwriting explicit nimBaseUrl', () => {
+    const migratedProxyRoot = migrate()?.(
+      { settings: { provider: 'nim', nimProxyUrl: ' https://relay.example.com/ ' } },
+      6,
+    ) as { settings: Record<string, unknown> };
+    expect(migratedProxyRoot.settings.nimBaseUrl).toBe('https://relay.example.com/nim-api/v1');
+    expect(migratedProxyRoot.settings.nimProxyUrl).toBeUndefined();
+
+    const preservedExplicitBase = migrate()?.(
+      {
+        settings: {
+          provider: 'nim',
+          nimProxyUrl: 'https://relay.example.com',
+          nimBaseUrl: 'https://nim.example.com/v1',
+        },
+      },
+      6,
+    ) as { settings: Record<string, unknown> };
+    expect(preservedExplicitBase.settings.nimBaseUrl).toBe('https://nim.example.com/v1');
+    expect(preservedExplicitBase.settings.nimProxyUrl).toBeUndefined();
+  });
+
   it('falls back to openrouter when persisted provider is garbage', () => {
     const out = migrate()?.(
       { settings: { provider: 'does-not-exist' as never } },
@@ -177,6 +352,26 @@ describe('persisted chat selection', () => {
     }, useAppStore.getState());
     expect(result?.settings.pickedModelsOverride).toEqual({ chatModel: '' });
   });
+
+  it('drops removed Groq credentials during same-version rehydration without moving them to active providers', () => {
+    const merge = useAppStore.persist.getOptions().merge;
+    const result = merge?.({
+      settings: {
+        provider: 'groq' as never,
+        apiKey: 'legacy-groq-key',
+        groqApiKey: 'named-groq-key',
+        openrouterApiKey: '',
+        nimApiKey: '',
+        pickedModelsOverride: { chatModel: 'groq-model' },
+      },
+    }, useAppStore.getState()) as { settings: Record<string, unknown> } | undefined;
+    expect(result?.settings.provider).toBe('openrouter');
+    expect(result?.settings.openrouterApiKey).toBe('');
+    expect(result?.settings.nimApiKey).toBe('');
+    expect(result?.settings.apiKey).toBe('');
+    expect(result?.settings.groqApiKey).toBeUndefined();
+    expect(result?.settings.pickedModelsOverride).toEqual({ chatModel: '' });
+  });
 });
 
 describe('sanitizeProvider', () => {
@@ -192,8 +387,18 @@ describe('sanitizeProvider', () => {
 
   it('returns the provider when it is registered', () => {
     expect(sanitizeProvider('openrouter')).toBe('openrouter');
-    expect(sanitizeProvider('groq')).toBe('groq');
+    expect(sanitizeProvider('nim')).toBe('nim');
     expect(sanitizeProvider('local')).toBe('local');
+  });
+
+  it('does not accept provider names inherited from the registry prototype', () => {
+    const originalPrototype = Object.getPrototypeOf(PROVIDER_REGISTRY);
+    try {
+      Object.setPrototypeOf(PROVIDER_REGISTRY, { malicious: { kind: 'malicious' } });
+      expect(sanitizeProvider('malicious')).toBe('openrouter');
+    } finally {
+      Object.setPrototypeOf(PROVIDER_REGISTRY, originalPrototype);
+    }
   });
 });
 

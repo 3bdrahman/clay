@@ -103,10 +103,6 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
           <ProviderSelector
             provider={settings.provider}
             onChange={kind => updateSettings({ provider: kind })}
-            localServerUrl={settings.localServerUrl}
-            urlValidationError={urlValidationError}
-            localCatalogLength={localCatalog.length}
-            refreshModels={refreshModels}
           />
 
           {isLocal ? (
@@ -122,6 +118,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
             />
           ) : (
             <CloudProviderSettings
+              key={settings.provider}
               settings={settings}
               availableModels={availableModels}
               modelsLoading={modelsLoading}
@@ -149,8 +146,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
           <div className="pt-4 border-t border-ink-200 dark:border-ink-700 text-xs text-ink-500 dark:text-ink-400 space-y-1.5">
             <p className="font-semibold">Clay — RAG Assistant</p>
             <p>
-              Runs entirely in your browser. No backend. Your API key never leaves your browser except to your configured
-              provider.
+              The workspace runs in your browser. Provider keys are stored here; NIM keys also pass through the relay you configure.
             </p>
             <p className="text-[10px] opacity-70">
               Built for static deployment on GitHub Pages or any static host.

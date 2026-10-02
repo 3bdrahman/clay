@@ -1,4 +1,4 @@
-import type { LLMRequest, LLMResponse } from './types';
+import type { LLMRequest, LLMResponse, ProviderKind } from './types';
 import {
   ProviderUnreachableError,
   InvalidApiKeyError,
@@ -11,6 +11,7 @@ import {
 } from './errors';
 import { buildMessages } from './llmMessages';
 import { streamOpenAICompatible } from './llmStream';
+import { getApprovedCloudModelIds, isApprovedCloudModel, OPENROUTER_FREE_ROUTING } from './modelPolicy';
 
 export { ProviderUnreachableError } from './errors';
 
@@ -20,6 +21,9 @@ export interface LLMClientConfig {
   temperature?: number;
   providerLabel?: string;
   timeoutMs?: number;
+  configurationError?: string;
+  providerKind?: ProviderKind;
+  supportsJsonMode?: boolean;
 }
 
 /**
@@ -40,6 +44,19 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     throw new ProviderUnreachableError(providerLabel, undefined, {
       isTimeout: false,
     });
+  }
+
+  function requireConfiguredEndpoint(req: LLMRequest): void {
+    if (config.configurationError) {
+      throw new ProviderUnreachableError(providerLabel, undefined, {
+        message: config.configurationError,
+        retryable: false,
+      });
+    }
+    const provider = config.providerKind;
+    if (provider && provider !== 'local' && !isApprovedCloudModel(provider, req.model ?? '')) {
+      throw new ModelNotFoundError(req.model ?? '', getApprovedCloudModelIds(provider));
+    }
   }
 
   function createAbortControllerWithTimeout(): {
@@ -100,6 +117,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     if (req.jsonMode && jsonModeSupported) body.response_format = { type: 'json_object' };
     if (req.tools) body.tools = req.tools;
     if (req.toolChoice) body.tool_choice = req.toolChoice;
+    if (config.providerKind === 'openrouter') body.provider = OPENROUTER_FREE_ROUTING;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -218,7 +236,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     }
   }
 
-  let jsonModeSupported = true;
+  let jsonModeSupported = config.supportsJsonMode !== false;
 
   async function callOpenAICompatible(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
     try {
@@ -243,14 +261,17 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     providerLabel,
     defaultTemperature,
     timeoutMs,
+    providerKind: config.providerKind,
   };
 
   return {
     async invoke(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
+      requireConfiguredEndpoint(req);
       return callOpenAICompatible(req, signal);
     },
     async stream(req: LLMRequest, onToken: (token: string) => void, signal?: AbortSignal): Promise<LLMResponse> {
-      return streamOpenAICompatible(streamConfig, req, onToken, signal);
+      requireConfiguredEndpoint(req);
+      return streamOpenAICompatible({ ...streamConfig, supportsJsonMode: jsonModeSupported }, req, onToken, signal);
     },
   };
 }

@@ -11,6 +11,50 @@ import {
 } from './errors';
 
 describe('createLLMClient', () => {
+  it('rejects incomplete provider setup for invoke and stream before transmitting a key', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const client = createLLMClient({
+      baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'nvapi-test',
+      providerLabel: 'NVIDIA NIM', configurationError: 'Configure a NIM relay first.',
+    });
+    const request = { model: 'test-chat', messages: [{ role: 'user' as const, content: 'Hello' }] };
+    await expect(client.invoke(request)).rejects.toMatchObject({ message: 'Configure a NIM relay first.', retryable: false });
+    await expect(client.stream(request, () => {})).rejects.toMatchObject({ message: 'Configure a NIM relay first.', retryable: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockRestore();
+  });
+
+  it('blocks an unapproved cloud model before either request path can incur cost', async () => {
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'test-key', providerKind: 'openrouter' });
+    const request = { model: 'some/paid-model', messages: [{ role: 'user' as const, content: 'Hello' }] };
+    await expect(client.invoke(request)).rejects.toThrow(ModelNotFoundError);
+    await expect(client.stream(request, () => {})).rejects.toThrow(ModelNotFoundError);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('adds zero-price routing to OpenRouter invoke and stream requests', async () => {
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'test-key', providerKind: 'openrouter' });
+    const request = { model: 'nvidia/nemotron-3-super-120b-a12b:free', messages: [{ role: 'user' as const, content: 'Hello' }] };
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: 'Hello' } }] }) });
+    await client.invoke(request);
+    mockFetch.mockResolvedValueOnce(new Response('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\ndata: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
+    await client.stream(request, () => {});
+    for (const [, init] of mockFetch.mock.calls) {
+      const body = JSON.parse(init.body);
+      expect(body.provider).toEqual({ max_price: { prompt: 0, completion: 0, request: 0 } });
+      expect(body.model).toBe(request.model);
+    }
+  });
+
+  it('omits unsupported response_format for a tool-capable free model on both paths', async () => {
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'test-key', providerKind: 'openrouter', supportsJsonMode: false });
+    const request = { model: 'qwen/qwen3.8-27b:free', jsonMode: true, messages: [{ role: 'user' as const, content: 'Return JSON' }] };
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: '{}' } }] }) });
+    await client.invoke(request);
+    mockFetch.mockResolvedValueOnce(new Response('data: {"choices":[{"delta":{"content":"{}"}}]}\n\ndata: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
+    await client.stream(request, () => {});
+    for (const [, init] of mockFetch.mock.calls) expect(JSON.parse(init.body)).not.toHaveProperty('response_format');
+  });
   const mockFetch = vi.fn();
   const originalFetch = globalThis.fetch;
 

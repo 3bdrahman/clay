@@ -48,7 +48,7 @@ function baseSettings(overrides: Partial<Settings>): Settings {
   return {
     provider: 'openrouter',
     openrouterApiKey: '',
-    groqApiKey: '',
+    nimApiKey: '',
     apiKey: '',
     webSearchProvider: 'duckduckgo',
     serperApiKey: '',
@@ -75,14 +75,17 @@ beforeEach(() => {
 
 describe('createClayServiceBundle', () => {
   const catalog = [
-    { id: 'meta-llama/llama-3.3-70b-instruct', ownedBy: 'meta', created: 1 },
+    { id: 'nvidia/nemotron-3-super-120b-a12b:free', ownedBy: 'nvidia', created: 1,
+      pricing: { prompt: '0', completion: '0', request: '0' },
+      supportedParameters: ['tools', 'tool_choice', 'response_format'],
+    },
     { id: 'text-embedding-3-small', ownedBy: 'openai', created: 2 },
   ];
 
   it('embeddings are local: created with no provider config, vectorstore pinned to the fixed model', () => {
     const settings = baseSettings({
-      apiKey: 'k1',
-      pickedModelsOverride: { chatModel: 'meta-llama/llama-3.3-70b-instruct' },
+      openrouterApiKey: 'k1',
+      pickedModelsOverride: { chatModel: 'nvidia/nemotron-3-super-120b-a12b:free' },
     });
     const endpoint = resolveProviderEndpoint(settings);
 
@@ -102,14 +105,16 @@ describe('createClayServiceBundle', () => {
       apiKey: 'k1',
       temperature: 0.2,
       providerLabel: endpoint.providerLabel,
+      providerKind: 'openrouter',
+      supportsJsonMode: true,
     });
-    expect(bundle.pickedModels).toEqual({ chat: 'meta-llama/llama-3.3-70b-instruct' });
+    expect(bundle.pickedModels).toEqual({ chat: 'nvidia/nemotron-3-super-120b-a12b:free' });
     expect(bundle.vectorstore).toBe(vectorStoreStub);
     expect(bundle.llm).toBe(llmStub);
   });
 
   it("adds the 'aq' namespace to the analyzer datasets alongside the adapter's tables", () => {
-    const settings = baseSettings({ apiKey: 'k1' });
+    const settings = baseSettings({ openrouterApiKey: 'k1' });
 
     createClayServiceBundle({
       settings,
@@ -129,7 +134,7 @@ describe('createClayServiceBundle', () => {
   });
 
   it('passes maxToolLoopTokens through to the analyzer (undefined when unset)', () => {
-    const settings = baseSettings({ apiKey: 'k1', maxToolLoopTokens: 123_456 });
+    const settings = baseSettings({ openrouterApiKey: 'k1', maxToolLoopTokens: 123_456 });
     createClayServiceBundle({
       settings,
       catalog,
@@ -139,7 +144,7 @@ describe('createClayServiceBundle', () => {
     const analyzerArgs = createDataAnalyzerMock.mock.calls[0][0] as { maxToolLoopTokens: number | undefined };
     expect(analyzerArgs.maxToolLoopTokens).toBe(123_456);
 
-    const unsetSettings = baseSettings({ apiKey: 'k1' });
+    const unsetSettings = baseSettings({ openrouterApiKey: 'k1' });
     createClayServiceBundle({
       settings: unsetSettings,
       catalog,

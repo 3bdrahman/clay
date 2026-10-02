@@ -1,16 +1,26 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // DuckDuckGo HTML search returns no CORS headers. Proxying lets the in-browser
 // app reach it. Production needs an edge proxy.
 const DDG_PROXY_PREFIX = '/ddg';
+const NIM_PROXY_PREFIX = '/nim-api';
 
 // In dev, browser-to-localhost requests are allowed by the CSP above and most
 // local servers (LM Studio, vLLM) set permissive CORS. If a user runs a
 // stricter local server they can point localServerUrl at any origin they want;
-const proxyConfig = {
+const proxyConfig: Record<string, ProxyOptions> = {
+  [NIM_PROXY_PREFIX]: {
+    target: 'https://integrate.api.nvidia.com',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (path: string) => path.replace(new RegExp(`^${NIM_PROXY_PREFIX}`), ''),
+    configure(proxy) {
+      proxy.on('proxyReq', outgoing => outgoing.removeHeader('origin'));
+    },
+  },
   [DDG_PROXY_PREFIX]: {
     target: 'https://html.duckduckgo.com',
     changeOrigin: true,
@@ -25,7 +35,7 @@ const repoName = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? 'clay';
 const isGitHubPages = process.env.DEPLOY_TARGET === 'github-pages';
 const base = isGitHubPages ? `/${repoName}/` : (process.env.BASE_PATH || './');
 
-function cspPlugin() {
+function cspPlugin(nimBaseUrl?: string) {
   return {
     name: 'csp-inject',
     transformIndexHtml(html: string, ctx?: { server?: unknown }) {
@@ -50,7 +60,9 @@ function cspPlugin() {
         'http://localhost:*',
         'http://127.0.0.1:*',
         'https://openrouter.ai',
-        'https://api.groq.com',
+        // NIM uses a caller-configured Cloudflare relay. Custom domains can
+        // be supplied through VITE_NIM_BASE_URL or the extra-origin setting.
+        'https://*.workers.dev',
         'https://duckduckgo.com',
         'https://*.duckduckgo.com',
         'https://google.serper.dev',
@@ -60,6 +72,15 @@ function cspPlugin() {
         'https://*.hf.co',
         'https://cdn.jsdelivr.net',
       ];
+
+      const relayBase = nimBaseUrl?.trim();
+      if (relayBase && !relayBase.startsWith('/')) {
+        const relay = new URL(relayBase);
+        if (relay.protocol !== 'https:' && relay.protocol !== 'http:') {
+          throw new Error('VITE_NIM_BASE_URL must be an HTTP(S) relay URL');
+        }
+        connectSrc.push(relay.origin);
+      }
 
       if (deployUrl) {
         try {
@@ -130,8 +151,8 @@ function base404Plugin() {
   } satisfies Plugin;
 }
 
-export default defineConfig({
-  plugins: [react(), cspPlugin(), base404Plugin()],
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), cspPlugin(loadEnv(mode, process.cwd(), 'VITE_').VITE_NIM_BASE_URL), base404Plugin()],
   server: {
     proxy: proxyConfig,
   },
@@ -158,4 +179,4 @@ export default defineConfig({
     },
   },
   base,
-});
+}));

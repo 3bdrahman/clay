@@ -17,12 +17,14 @@ import { useAppStore, type SandboxDataset } from '../store';
 import { pickLocalModels, resolveModels, type PickedModels } from '../lib/models';
 import { resolveProviderEndpoint } from '../lib/providers';
 import {
-  useFetchNimModels,
+  useFetchCloudModels,
   useFetchLocalModels,
   useRefreshModels,
   type ModelCatalogDeps,
 } from './useModelCatalog';
 import { addFiles, loadSampleData, type SandboxIngestDeps } from '../services/sandboxIngest';
+
+const getCurrentSettings = () => useAppStore.getState().settings;
 
 export interface ClayServices {
   llm: LLMClient;
@@ -82,11 +84,12 @@ export function useClay(): UseClayResult {
     setModelsLoading,
     setModelsError,
     setLocalCatalog,
+    getSettings: getCurrentSettings,
   };
 
-  const fetchNimModels = useFetchNimModels(modelCatalogDeps);
+  const fetchCloudModels = useFetchCloudModels(modelCatalogDeps);
   const fetchLocalModels = useFetchLocalModels(modelCatalogDeps);
-  const refreshModels = useRefreshModels(modelCatalogDeps, fetchNimModels, fetchLocalModels);
+  const refreshModels = useRefreshModels(modelCatalogDeps, fetchCloudModels, fetchLocalModels);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,8 +104,9 @@ export function useClay(): UseClayResult {
 
         const endpoint = resolveProviderEndpoint(settings);
         const isLocal = settings.provider === 'local';
-        const needsChatConfiguration = endpoint.baseUrl.length === 0 || (!isLocal && endpoint.apiKey.trim().length === 0);
+        const needsChatConfiguration = !!endpoint.configurationError || endpoint.baseUrl.length === 0 || (!isLocal && endpoint.apiKey.trim().length === 0);
         setNeedsConfiguration(needsChatConfiguration);
+        if (endpoint.configurationError) setModelsError(endpoint.configurationError);
 
         let catalog = availableModels;
         if (settings.provider === 'local') {
@@ -111,8 +115,8 @@ export function useClay(): UseClayResult {
             const local = await fetchLocalModels(url);
             if (local.length > 0) catalog = local;
           }
-        } else if (endpoint.apiKey) {
-          const fresh = await fetchNimModels(endpoint.apiKey);
+        } else if (endpoint.apiKey && !endpoint.configurationError) {
+          const fresh = await fetchCloudModels(endpoint.apiKey);
           if (fresh.length > 0) catalog = fresh;
         }
 
@@ -187,7 +191,7 @@ export function useClay(): UseClayResult {
         servicesRef.current = null;
       }
     };
-  }, [settings, availableModels, sandboxDatasets, fetchNimModels, fetchLocalModels]);
+  }, [settings, availableModels, sandboxDatasets, fetchCloudModels, fetchLocalModels, setModelsError]);
 
   const sandboxIngestDeps = useMemo<SandboxIngestDeps>(() => ({
     services,

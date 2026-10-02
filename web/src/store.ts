@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ChatMessage, Settings, ModelInfo } from './lib/types';
 import { PROVIDER_REGISTRY, LOCAL_DEFAULT_BASE_URL } from './lib/providers';
-import { migrateChatSelection, migrateLegacyLocalModels, type LegacyLocalModelPicks } from './lib/localModelsMigrate';
+import { migrateChatSelection, migrateLegacyLocalModels } from './lib/localModelsMigrate';
 import type { ProviderKind } from './lib/types';
 
 export interface SandboxDataset {
@@ -75,7 +75,8 @@ export const DEFAULT_TOOL_LOOP_TOKENS = 100_000;
 const DEFAULT_SETTINGS: Settings = {
   provider: 'openrouter',
   openrouterApiKey: '',
-  groqApiKey: '',
+  nimApiKey: '',
+  nimBaseUrl: '',
   apiKey: '', // legacy field for migration
   webSearchProvider: 'duckduckgo',
   serperApiKey: '',
@@ -94,6 +95,115 @@ const DEFAULT_SETTINGS: Settings = {
     chatModel: '',
   },
 };
+
+type PersistedSettings = Partial<Settings> & {
+  embeddingApiKey?: unknown;
+  groqApiKey?: unknown;
+  nimProxyUrl?: unknown;
+};
+
+const DEPRECATED_PROVIDER_KINDS = new Set(['groq']);
+
+function hasOwn(obj: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function hasOwnString(obj: object, key: PropertyKey): boolean {
+  return hasOwn(obj, key) && typeof (obj as Record<PropertyKey, unknown>)[key] === 'string';
+}
+
+function isRegisteredProviderName(provider: string): boolean {
+  return !DEPRECATED_PROVIDER_KINDS.has(provider) && hasOwn(PROVIDER_REGISTRY, provider);
+}
+
+function clearProviderScopedModelState(settings: Settings): Settings {
+  return {
+    ...settings,
+    pickedModelsOverride: { chatModel: '' },
+  };
+}
+
+function clearModelCatalogState() {
+  return {
+    availableModels: [],
+    modelsLoading: false,
+    modelsError: null,
+    modelsFetchedAt: 0,
+  };
+}
+
+function activeCloudApiKeyChanged(settings: Settings, patch: Partial<Settings>): boolean {
+  if (settings.provider === 'openrouter') {
+    return patch.openrouterApiKey !== undefined && patch.openrouterApiKey !== settings.openrouterApiKey;
+  }
+  if (settings.provider === 'nim') {
+    return patch.nimApiKey !== undefined && patch.nimApiKey !== settings.nimApiKey;
+  }
+  return false;
+}
+
+function activeNimBaseUrlChanged(settings: Settings, patch: Partial<Settings>): boolean {
+  return settings.provider === 'nim'
+    && patch.nimBaseUrl !== undefined
+    && patch.nimBaseUrl !== settings.nimBaseUrl;
+}
+
+function normalizePersistedSettings(
+  persistedSettings: PersistedSettings | undefined,
+  baseSettings: Settings,
+): Settings {
+  const persisted = persistedSettings ?? {};
+  const providerWasRegistered =
+    typeof persisted.provider === 'string' && isRegisteredProviderName(persisted.provider);
+  const provider = sanitizeProvider(persisted.provider);
+  const providerChanged = persisted.provider !== undefined && persisted.provider !== provider;
+
+  const {
+    apiKey: _legacyApiKey,
+    embeddingApiKey: _legacyEmbeddingKey,
+    groqApiKey: _legacyGroqApiKey,
+    nimProxyUrl: _legacyNimProxyUrl,
+    ...persistedRest
+  } = persisted;
+
+  const mergedSettings: Settings = {
+    ...baseSettings,
+    ...persistedRest,
+    apiKey: '',
+    localModels: migrateLegacyLocalModels(persisted.localModels),
+    pickedModelsOverride: migrateChatSelection(persisted.pickedModelsOverride),
+    provider,
+  };
+
+  if (!hasOwnString(persisted, 'openrouterApiKey')) {
+    mergedSettings.openrouterApiKey = baseSettings.openrouterApiKey;
+  }
+
+  if (!hasOwnString(persisted, 'nimApiKey')) {
+    mergedSettings.nimApiKey = baseSettings.nimApiKey;
+  }
+
+  if (!hasOwnString(persisted, 'nimBaseUrl')) {
+    mergedSettings.nimBaseUrl = baseSettings.nimBaseUrl;
+    if (typeof persisted.nimProxyUrl === 'string') {
+      const legacyProxyRoot = persisted.nimProxyUrl.trim().replace(/\/+$/, '');
+      if (legacyProxyRoot) {
+        mergedSettings.nimBaseUrl = `${legacyProxyRoot}/nim-api/v1`;
+      }
+    }
+  }
+
+  if (providerWasRegistered && typeof persisted.apiKey === 'string') {
+    if (provider === 'openrouter' && !hasOwnString(persisted, 'openrouterApiKey')) {
+      mergedSettings.openrouterApiKey = persisted.apiKey;
+    }
+    if (provider === 'nim' && !hasOwnString(persisted, 'nimApiKey')) {
+      mergedSettings.nimApiKey = persisted.apiKey;
+    }
+  }
+
+  return providerChanged ? clearProviderScopedModelState(mergedSettings) : mergedSettings;
+}
 
 function trimMessage(msg: ChatMessage): ChatMessage {
   if (!msg.workflow) return msg;
@@ -121,7 +231,7 @@ function deriveTitle(msg: ChatMessage): string {
 
 export function sanitizeProvider(provider: unknown): ProviderKind {
   const candidate = typeof provider === 'string' ? provider : 'openrouter';
-  return candidate in PROVIDER_REGISTRY ? (candidate as ProviderKind) : 'openrouter';
+  return isRegisteredProviderName(candidate) ? (candidate as ProviderKind) : 'openrouter';
 }
 
 export const useAppStore = create<AppState>()(
@@ -141,14 +251,30 @@ export const useAppStore = create<AppState>()(
         updateSettings: patch =>
           set(state => {
             const next = { ...state.settings, ...patch };
-            if (
-              patch.provider !== undefined &&
-              patch.provider !== state.settings.provider &&
-              state.settings.provider === 'local' &&
-              patch.provider !== 'local'
-            ) {
-              next.localCatalog = [];
-              next.localCatalogFetchedAt = 0;
+            const providerChanged = patch.provider !== undefined && patch.provider !== state.settings.provider;
+            if (providerChanged) {
+              next.pickedModelsOverride = { chatModel: '' };
+              if (state.settings.provider === 'local' && patch.provider !== 'local') {
+                next.localCatalog = [];
+                next.localCatalogFetchedAt = 0;
+              }
+              return {
+                settings: next,
+                ...clearModelCatalogState(),
+              };
+            }
+            if (activeNimBaseUrlChanged(state.settings, patch)) {
+              next.pickedModelsOverride = { chatModel: '' };
+              return {
+                settings: next,
+                ...clearModelCatalogState(),
+              };
+            }
+            if (activeCloudApiKeyChanged(state.settings, patch)) {
+              return {
+                settings: next,
+                ...clearModelCatalogState(),
+              };
             }
             return { settings: next };
           }),
@@ -280,54 +406,33 @@ export const useAppStore = create<AppState>()(
     },
     {
       name: 'clay-settings-v1',
-      version: 6,
+      version: 7,
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<{
-          settings: Partial<Settings>;
+          settings: PersistedSettings;
         }>;
+        const settings = normalizePersistedSettings(persisted.settings, currentState.settings);
+        const providerChanged = persisted.settings?.provider !== undefined && persisted.settings.provider !== settings.provider;
         return {
           ...currentState,
           ...persisted,
-          settings: {
-            ...currentState.settings,
-            ...persisted.settings,
-            provider: sanitizeProvider(persisted.settings?.provider),
-            pickedModelsOverride: migrateChatSelection(persisted.settings?.pickedModelsOverride),
-          },
+          settings,
+          ...(providerChanged
+            ? clearModelCatalogState()
+            : {}),
         };
       },
       migrate: (persistedState, _version) => {
         const state = (persistedState ?? {}) as Partial<{
-          settings: Partial<Settings>;
+          settings: PersistedSettings;
           messages: ChatMessage[];
           conversations: Conversation[];
           activeConversationId: string | null;
           sandboxDatasets: SandboxDataset[];
           sandboxDocuments: SandboxDocument[];
         }>;
-        const persistedLocalModels = (state.settings as {
-          localModels?: Partial<LegacyLocalModelPicks>;
-        } | undefined)?.localModels;
         const persistedSettings = state.settings ?? {};
-
-        // Migrate legacy single apiKey to provider-specific key
-        const legacyApiKey = persistedSettings.apiKey as string | undefined;
-        const provider = sanitizeProvider(persistedSettings.provider);
-
-        // v6: drop the removed embedding selection fields from older persisted state
-        const { embeddingApiKey: _legacyEmbeddingKey, ...persistedRest } =
-          persistedSettings as Partial<Settings> & { embeddingApiKey?: string };
-
-        const mergedSettings: Settings = {
-          ...DEFAULT_SETTINGS,
-          // Explicitly set the provider-specific API key from legacy apiKey
-          openrouterApiKey: provider === 'openrouter' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.openrouterApiKey,
-          groqApiKey: provider === 'groq' ? (legacyApiKey ?? '') : DEFAULT_SETTINGS.groqApiKey,
-          ...(persistedRest ?? {}),
-          localModels: migrateLegacyLocalModels(persistedLocalModels),
-          pickedModelsOverride: migrateChatSelection(persistedSettings.pickedModelsOverride),
-          provider,
-        };
+        const mergedSettings = normalizePersistedSettings(persistedSettings, DEFAULT_SETTINGS);
 
         let conversations: Conversation[] = [];
         let activeId: string | null = null;

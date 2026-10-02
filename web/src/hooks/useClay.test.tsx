@@ -55,7 +55,7 @@ async function flush(n = 3) {
 const baseSettings = {
   provider: 'openrouter' as const,
   openrouterApiKey: '',
-  groqApiKey: '',
+  nimApiKey: '',
   apiKey: '',
   webSearchProvider: 'duckduckgo' as const,
   serperApiKey: '',
@@ -121,7 +121,7 @@ describe('useClay', () => {
     expect(r.current.pickedModels.chat).toBeUndefined();
   });
 
-  it('fetches NIM catalog when apiKey is set', async () => {
+  it('fetches the selected cloud catalog when its key is set', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
       data: [
         { id: 'mistral-small-24b-instruct', created: 1, owned_by: 'mistralai' },
@@ -132,7 +132,7 @@ describe('useClay', () => {
     globalThis.fetch = fetchMock as never;
 
     useAppStore.setState({
-      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+      settings: { ...baseSettings, openrouterApiKey: 'sk-or-test' } as never,
     });
 
     const r = render();
@@ -144,11 +144,11 @@ describe('useClay', () => {
     expect(r.current.pickedModels.chat).toBeUndefined();
   });
 
-  it('handles NIM fetch failure gracefully (initializes, sets modelsError)', async () => {
+  it('handles cloud catalog failure gracefully (initializes, sets modelsError)', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' }) as never;
 
     useAppStore.setState({
-      settings: { ...baseSettings, apiKey: 'bad' } as never,
+      settings: { ...baseSettings, openrouterApiKey: 'bad' } as never,
     });
 
     const r = render();
@@ -227,7 +227,7 @@ describe('useClay', () => {
     globalThis.fetch = fetchMock as never;
 
     useAppStore.setState({
-      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+      settings: { ...baseSettings, openrouterApiKey: 'sk-or-test' } as never,
     });
     const r = render();
     await flush(6);
@@ -259,7 +259,7 @@ describe('useClay', () => {
     globalThis.fetch = fetchMock as never;
 
     useAppStore.setState({
-      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+      settings: { ...baseSettings, openrouterApiKey: 'sk-or-test' } as never,
     });
     const r = render();
     await flush(6);
@@ -288,7 +288,7 @@ describe('useClay', () => {
     globalThis.fetch = fetchMock as never;
 
     useAppStore.setState({
-      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+      settings: { ...baseSettings, openrouterApiKey: 'sk-or-test' } as never,
     });
     const r = render();
     await flush(6);
@@ -318,7 +318,7 @@ describe('useClay', () => {
     globalThis.fetch = fetchMock as never;
 
     useAppStore.setState({
-      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+      settings: { ...baseSettings, openrouterApiKey: 'sk-or-test' } as never,
     });
     const r = render();
     await flush(6);
@@ -384,7 +384,7 @@ describe('useClay', () => {
     globalThis.fetch = fetchMock as never;
 
     useAppStore.setState({
-      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+      settings: { ...baseSettings, openrouterApiKey: 'sk-or-test' } as never,
     });
     const r = render();
     await flush(6);
@@ -429,7 +429,7 @@ describe('useClay', () => {
     globalThis.fetch = fetchMock as never;
 
     useAppStore.setState({
-      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+      settings: { ...baseSettings, openrouterApiKey: 'sk-or-test' } as never,
     });
     const r = render();
     await flush(6);
@@ -455,14 +455,14 @@ describe('useClay', () => {
     expect(listSandboxTableNames()).not.toContain('people');
   });
 
-  it('refreshModels with NIM API key triggers a models fetch', async () => {
+  it('refreshModels with a cloud API key triggers a models fetch', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponseLike({
       data: [{ id: 'mistral-small', created: 1, owned_by: 'mistralai' }],
     }));
     globalThis.fetch = fetchMock as never;
 
     useAppStore.setState({
-      settings: { ...baseSettings, apiKey: 'nvapi-test' } as never,
+      settings: { ...baseSettings, openrouterApiKey: 'sk-or-test' } as never,
     });
     const r = render();
     await flush(8);

@@ -4,6 +4,13 @@ Notable changes to Clay. Unreleased changes are not a tagged release.
 
 ## Unreleased
 
+### Providers and model policy
+
+- Provider choices are now OpenRouter, NVIDIA NIM, and local servers. Groq settings migrate without reusing its key or model selection for another provider.
+- Cloud selection is limited to two approved models per provider. OpenRouter requires exact free variants, live zero pricing, supported tools, and zero-price routing caps; local servers retain their installed-model choices.
+- Added a deployable NIM relay with origin, endpoint, model, authentication, and request-size checks. Both catalog discovery and chat use the same relay; the relay streams responses and preserves rate-limit timing.
+- NIM's missing-relay setup is explicit. Local ingestion remains usable while model setup is incomplete, and stale catalog requests cannot overwrite the current provider.
+
 ### Fixed
 
 - File uploads and chat now share the same application services and document index, so new documents can be queried without reloading.
@@ -32,7 +39,7 @@ Notable changes to Clay. Unreleased changes are not a tagged release.
 - IndexedDB persistence, a shared embedding cache, lazy PDF and worker loading, and worker cleanup when services are replaced.
 - HNSW search for larger document indexes; exact cosine search for smaller indexes.
 - Retry handling that preserves successful source context, tool-call linkage, and actionable provider errors.
-- Removed the NVIDIA NIM provider and Netlify deployment; GitHub Pages is the documented deployment target.
+- Moved static deployment from Netlify to GitHub Pages.
 
 ## 0.3.0 — 2026-08-06
 

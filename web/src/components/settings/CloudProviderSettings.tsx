@@ -1,12 +1,8 @@
 import { useState } from 'react';
-import { getProviderConfig, getProviderApiKeyField, type ProviderApiKeyField } from '../../lib/providers';
-import { modelClass } from '../../lib/models';
+import { getProviderConfig, getProviderApiKeyField, resolveProviderEndpoint, type ProviderApiKeyField } from '../../lib/providers';
+import { getCloudModelLabel, getCloudModelOptions } from '../../lib/modelPolicy';
 import type { Settings, ModelInfo } from '../../lib/types';
 import type { PickedModels } from '../../lib/models';
-
-const apiProviderTaskDisplay: Array<{ key: 'chatModel'; label: string; hint: string }> = [
-  { key: 'chatModel', label: 'Chat model', hint: 'Used for routing, code generation, answer, and evaluation' },
-];
 
 interface Props {
   settings: Settings;
@@ -28,10 +24,16 @@ export function CloudProviderSettings({
   refreshModels,
 }: Props) {
   const [showKey, setShowKey] = useState(false);
+  const provider = settings.provider;
+  if (provider === 'local') return null;
 
-  const config = getProviderConfig(settings.provider);
+  const config = getProviderConfig(provider);
   const apiKeyField = getProviderApiKeyField(settings.provider);
   const currentApiKey = apiKeyField !== undefined ? settings[apiKeyField] : '';
+  const endpoint = resolveProviderEndpoint(settings);
+  const modelOptions = getCloudModelOptions(provider, availableModels);
+  const selectedModel = settings.pickedModelsOverride.chatModel ?? '';
+  const selectionUnavailable = !!selectedModel && !modelOptions.some(model => model.id === selectedModel);
 
   return (
     <>
@@ -39,16 +41,40 @@ export function CloudProviderSettings({
         <div className="flex items-center gap-2">
           <span className="font-semibold text-sm">{config.displayName}</span>
           <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400">
-            {config.freeTier ? 'Free tier' : 'Paid'}
+            {settings.provider === 'nim' ? 'Developer credits' : 'Free models'}
           </span>
           <span className="text-[10px] text-ink-400 ml-auto">
-            {availableModels.length > 0 ? `${availableModels.length} models` : 'not loaded'}
+            {availableModels.length > 0 ? `${modelOptions.length} approved models` : 'not loaded'}
           </span>
         </div>
         <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1">
-          All LLM calls go to {config.baseUrl}. One API key — one chat model for all tasks (routing, code gen, answer, eval). Embeddings run locally in your browser.
+          {endpoint.configurationError ? 'Connect your relay to enable NIM requests.' : `Model requests go to ${endpoint.baseUrl}.`}
+          {' '}One chat model handles routing, analysis, and answers. Embeddings run locally in your browser.
         </p>
       </div>
+
+      {settings.provider === 'nim' && (
+        <div className="space-y-2">
+          <label className="block text-xs font-semibold text-ink-600 dark:text-ink-300" htmlFor="nim-relay-base-url">NIM relay base URL</label>
+          <input
+            id="nim-relay-base-url"
+            aria-label="NIM relay base URL"
+            type="url"
+            value={settings.nimBaseUrl ?? ''}
+            onChange={e => updateSettings({ nimBaseUrl: e.target.value })}
+            placeholder={import.meta.env.VITE_NIM_BASE_URL || (import.meta.env.DEV ? '/nim-api/v1 (development proxy)' : 'https://your-relay.workers.dev/v1')}
+            aria-describedby="nim-relay-help"
+            aria-invalid={!!endpoint.configurationError}
+            className="w-full px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none"
+          />
+          <p id="nim-relay-help" className="text-xs text-ink-500 dark:text-ink-400">
+            NVIDIA blocks direct browser requests. Use a relay you control; your key and model requests pass through it.
+            {' '}<a href="https://github.com/3bdrahman/clay/blob/master/docs/nim-relay.md" target="_blank" rel="noopener noreferrer" className="text-brand-600 dark:text-brand-400 underline">Relay setup</a>
+          </p>
+          {endpoint.configurationError && <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">{endpoint.configurationError}</p>}
+          <p className="text-xs text-ink-500 dark:text-ink-400">NVIDIA developer credits and account limits apply. Clay cannot verify your remaining credits.</p>
+        </div>
+      )}
 
       <div>
         <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
@@ -56,6 +82,7 @@ export function CloudProviderSettings({
         </label>
         <div className="relative">
           <input
+            aria-label={`${config.displayName} API key`}
             type={showKey ? 'text' : 'password'}
             value={currentApiKey}
             onChange={e => {
@@ -87,7 +114,9 @@ export function CloudProviderSettings({
           </button>
         </div>
         <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5">
-          Stored locally in your browser only. Never sent anywhere except {config.displayName}.
+          {settings.provider === 'nim'
+            ? 'Stored in this browser. Sent through your configured relay to NVIDIA.'
+            : `Stored in this browser. Sent only to ${config.displayName}.`}
         </p>
         {config.apiKeyUrl && (
           <a
@@ -124,12 +153,14 @@ export function CloudProviderSettings({
               Model selection
             </div>
             <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-0.5">
-              Choose one chat model from {config.displayName}, or enter its model ID.
+              {provider === 'openrouter'
+                ? 'Two approved free choices. Live prices are checked and paid routing is blocked.'
+                : 'Two approved developer-access choices. NVIDIA credits and account limits apply.'}
             </p>
           </div>
           <button
             onClick={refreshModels}
-            disabled={!currentApiKey || modelsLoading}
+            disabled={!currentApiKey || modelsLoading || !!endpoint.configurationError}
             className="px-2 py-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
             type="button"
             title={`Fetch latest model catalog from ${config.displayName}`}
@@ -151,73 +182,45 @@ export function CloudProviderSettings({
           </button>
         </div>
 
-        {modelsError && (
+        {modelsError && modelsError !== endpoint.configurationError && (
           <div className="text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 rounded px-2 py-1.5">
             {modelsError}
           </div>
         )}
 
-        {availableModels.length === 0 && !modelsLoading && !modelsError && (
+        {availableModels.length === 0 && !modelsLoading && !modelsError && !endpoint.configurationError && (
           <div className="text-[11px] text-ink-500 dark:text-ink-400 italic px-1">
             Add an API key to load the catalog.
           </div>
         )}
 
+        {availableModels.length > 0 && modelOptions.length === 0 && !modelsLoading && (
+          <p role="status" className="text-xs text-amber-700 dark:text-amber-300">No approved models are currently available. Refresh the catalog later or choose another provider.</p>
+        )}
+
         <div className="space-y-3">
-          {apiProviderTaskDisplay.map(t => (
-            <div key={t.key}>
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-1">
-                {t.label}
-                <span className="ml-1 normal-case text-ink-400">— {t.hint}</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  aria-label={t.label}
-                  list={`provider-models-${t.key}`}
-                  placeholder="Choose or enter a chat model"
-                  value={settings.pickedModelsOverride[t.key] || ''}
-                  onChange={e => updateSettings({
-                    pickedModelsOverride: { chatModel: e.target.value }
-                  })}
-                  className="flex-1 px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none font-mono"
-                />
-                <datalist id={`provider-models-${t.key}`}>
-                  {availableModels.map((m: ModelInfo) => (
-                    <option key={m.id} value={m.id} />
-                  ))}
-                </datalist>
-                {settings.pickedModelsOverride[t.key] && (
-                  <button
-                    onClick={() => updateSettings({
-                      pickedModelsOverride: { chatModel: '' }
-                    })}
-                    className="px-2 py-1 text-[10px] text-ink-500 hover:text-ink-700 dark:hover:text-ink-300"
-                    type="button"
-                    title="Clear selection"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-              <p className="text-[10px] text-ink-500 dark:text-ink-400 mt-0.5">
-                Current: <span className="font-mono text-ink-700 dark:text-ink-200">
-                  {pickedModels.chat || 'Choose a chat model'}
-                </span>
-              </p>
-            </div>
-          ))}
+          <div>
+            <label htmlFor="cloud-chat-model" className="block text-xs font-semibold text-ink-500 dark:text-ink-400 mb-1">Chat model</label>
+            <select
+              id="cloud-chat-model"
+              aria-label="Chat model"
+              value={selectedModel || pickedModels.chat || ''}
+              onChange={e => updateSettings({ pickedModelsOverride: { chatModel: e.target.value } })}
+              disabled={modelOptions.length === 0 || modelsLoading || !!endpoint.configurationError}
+              className="w-full px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none disabled:opacity-50"
+            >
+              <option value="" disabled>Choose an approved model</option>
+              {selectionUnavailable && <option value={selectedModel} disabled>Previous selection unavailable</option>}
+              {modelOptions.map(model => <option key={model.id} value={model.id}>{getCloudModelLabel(provider, model.id)}</option>)}
+            </select>
+            {selectionUnavailable && <p role="status" className="mt-2 text-xs text-amber-700 dark:text-amber-300">Your previous selection is outside the current approved list. Choose one of the available models.</p>}
+            <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">Used for routing, analysis, answers, and evaluation.</p>
+          </div>
           <p className="text-[10px] text-ink-500 dark:text-ink-400">
             Embeddings run locally in your browser (transformers.js) — nothing to pick.
           </p>
         </div>
 
-        {pickedModels.chat && (
-          <div className="pt-2 mt-1 border-t border-ink-200 dark:border-ink-700 text-[10px] text-ink-500 dark:text-ink-400">
-            <span>Class: {modelClass(pickedModels.chat)}</span>
-          </div>
-        )}
       </div>
     </>
   );

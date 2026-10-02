@@ -1,4 +1,5 @@
-import type { LLMRequest, LLMResponse } from './types';
+import type { LLMRequest, LLMResponse, ProviderKind } from './types';
+import { OPENROUTER_FREE_ROUTING } from './modelPolicy';
 import {
   ProviderUnreachableError,
   InvalidApiKeyError,
@@ -17,6 +18,8 @@ export interface StreamConfig {
   providerLabel: string;
   defaultTemperature: number;
   timeoutMs: number;
+  providerKind?: ProviderKind;
+  supportsJsonMode?: boolean;
 }
 
 function createAbortControllerWithTimeout(timeoutMs: number): {
@@ -92,7 +95,8 @@ export async function streamOpenAICompatible(
     stream: true,
   };
   if (req.maxTokens) body.max_tokens = req.maxTokens;
-  if (req.jsonMode) body.response_format = { type: 'json_object' };
+  if (req.jsonMode && config.supportsJsonMode !== false) body.response_format = { type: 'json_object' };
+  if (config.providerKind === 'openrouter') body.provider = OPENROUTER_FREE_ROUTING;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',

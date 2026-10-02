@@ -1,5 +1,6 @@
 import { getProviderConfig, type ProviderKind } from './providers';
 import type { ModelInfo, Settings, LocalModelPicks } from './types';
+import { getCloudModelOptions } from './modelPolicy';
 import {
   ProviderUnreachableError,
   InvalidApiKeyError,
@@ -20,9 +21,9 @@ export interface PickedModels {
 
 /**
  * Fetch the model catalog from any supported provider.
- * @param provider - Provider kind (openrouter, groq, local)
+ * @param provider - Provider kind (openrouter, nim, local)
  * @param apiKey - API key for providers that require it
- * @param baseUrl - Optional custom base URL (for local)
+ * @param baseUrl - Resolved endpoint (including a configured NIM relay or local server)
  * @returns Array of model info objects with id, ownedBy, created
  * @throws ModelCatalogEmptyError if catalog is empty
  * @throws InvalidApiKeyError if API key is invalid (401/403)
@@ -84,11 +85,29 @@ export async function listModels(
     throw new ModelCatalogEmptyError(config.displayName);
   }
 
-  return data.map((m: { id: string; object?: string; created?: number; owned_by?: string }) => ({
-    id: m.id,
-    ownedBy: m.owned_by ?? '',
-    created: m.created ?? 0,
-  }));
+  return data.map((m: {
+    id: string;
+    object?: string;
+    created?: number;
+    owned_by?: string;
+    pricing?: Record<string, string | number | null>;
+    supported_parameters?: string[];
+  }) => {
+    const pricing = m.pricing
+      ? Object.fromEntries(
+        Object.entries(m.pricing)
+          .filter((entry): entry is [string, string | number] => entry[1] !== null)
+          .map(([key, value]) => [key, String(value)]),
+      )
+      : undefined;
+    return {
+      id: m.id,
+      ownedBy: m.owned_by ?? '',
+      created: m.created ?? 0,
+      ...(pricing ? { pricing } : {}),
+      ...(m.supported_parameters ? { supportedParameters: m.supported_parameters } : {}),
+    };
+  });
 }
 
 export async function listLocalCatalog(baseUrl: string, apiKey: string): Promise<ModelInfo[]> {
@@ -140,12 +159,29 @@ export function resolveModels(
     return { catalog: settings.localCatalog, picked, warnings };
   }
 
+  const cloudCatalog = getCloudModelOptions(provider, catalog);
+  const selected = settings.pickedModelsOverride.chatModel?.trim() || undefined;
+  const warnings: string[] = [];
+
+  if (selected) {
+    const selectedModel = cloudCatalog.find((model) => model.id === selected);
+    if (!selectedModel) {
+      warnings.push(
+        `${selected} is not available for ${provider}. Choose one of the approved free models in Settings.`,
+      );
+      return { catalog: cloudCatalog, picked: { chat: undefined }, warnings };
+    }
+    return { catalog: cloudCatalog, picked: { chat: selectedModel.id }, warnings };
+  }
+
+  const recommended = cloudCatalog[0]?.id;
+  if (!recommended) {
+    warnings.push(`No approved ${provider} models are available in the fetched catalog.`);
+  }
   return {
-    catalog,
-    picked: {
-      chat: settings.pickedModelsOverride.chatModel?.trim() || undefined,
-    },
-    warnings: [],
+    catalog: cloudCatalog,
+    picked: { chat: recommended },
+    warnings,
   };
 }
 

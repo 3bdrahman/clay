@@ -4,13 +4,15 @@
  */
 
 import type { Settings } from './types';
-import { getProviderConfig } from './providers';
+import { getProviderConfig, resolveProviderEndpoint } from './providers';
 import {
   NoProviderError,
   ModelCatalogEmptyError,
   ModelNotFoundError,
   LocalServerUrlMissingError,
   RagErrorCode,
+  ProviderUnreachableError,
+  type RagError,
 } from './errors';
 
 export interface ValidationResult {
@@ -30,29 +32,35 @@ export function validateSettings(
 ): ValidationResult {
   const errors: Array<{ code: RagErrorCode; message: string; providerKind?: 'local' }> = [];
   const warnings: string[] = [];
+  let firstError: RagError | undefined;
+  const addError = (error: RagError, providerKind?: 'local') => {
+    firstError ??= error;
+    errors.push({ code: error.code, message: error.message, ...(providerKind ? { providerKind } : {}) });
+  };
 
   // 1. Provider configuration
   if (settings.provider === 'local') {
     if (!settings.localServerUrl || !settings.localServerUrl.trim()) {
       const err = new LocalServerUrlMissingError();
-      errors.push({ code: err.code, message: err.message, providerKind: 'local' });
+      addError(err, 'local');
     }
 
     // Local models must be picked
     if (!settings.localModels?.chat || !settings.localModels.chat.trim()) {
       const err = new ModelNotFoundError('chat', settings.localCatalog?.map((m) => m.id) ?? []);
-      errors.push({ code: err.code, message: err.message, providerKind: 'local' });
+      addError(err, 'local');
     }
   } else {
-    const apiKeyField = {
-      openrouter: 'openrouterApiKey',
-      groq: 'groqApiKey',
-    }[settings.provider];
-
-    const apiKey = (settings as unknown as Record<string, string>)[apiKeyField];
-    if (!apiKey || !apiKey.trim()) {
+    const endpoint = resolveProviderEndpoint(settings);
+    if (!endpoint.apiKey) {
       const err = new NoProviderError(settings.provider);
-      errors.push({ code: err.code, message: err.message });
+      addError(err);
+    }
+    if (endpoint.configurationError) {
+      addError(new ProviderUnreachableError(endpoint.providerLabel, undefined, {
+        message: endpoint.configurationError,
+        retryable: false,
+      }));
     }
   }
 
@@ -66,49 +74,23 @@ export function validateSettings(
       const catalogIds = new Set(settings.localCatalog.map((m) => m.id));
       if (settings.localModels?.chat && !catalogIds.has(settings.localModels.chat)) {
         const err = new ModelNotFoundError(settings.localModels.chat, Array.from(catalogIds));
-        errors.push({ code: err.code, message: err.message, providerKind: 'local' });
+        addError(err, 'local');
       }
     }
   }
 
   // 3. Web search configuration
   if (settings.webSearchProvider === 'serper' && (!settings.serperApiKey || !settings.serperApiKey.trim())) {
-    warnings.push('Serper API key not configured. Web search will fall back to DuckDuckGo.');
+    warnings.push('Add a Serper API key to enable web search.');
   }
 
   const valid = errors.length === 0;
 
-  if (options.throwOnError && !valid) {
-    // Throw the first error
-    const firstError = errors[0];
-    throw createErrorFromCode(firstError.code, firstError.message);
+  if (options.throwOnError && firstError) {
+    throw firstError;
   }
 
   return { valid, errors, warnings };
-}
-
-/**
- * Creates a RagError instance from code and message.
- * Used for throwing from validation.
- */
-function createErrorFromCode(
-  code: RagErrorCode,
-  message: string
-): Error {
-  switch (code) {
-    case RagErrorCode.NO_PROVIDER_CONFIGURED:
-      return new NoProviderError('local', undefined);
-    case RagErrorCode.MODEL_CATALOG_EMPTY:
-      return new ModelCatalogEmptyError('local', undefined);
-    case RagErrorCode.MODEL_NOT_FOUND:
-      return new ModelNotFoundError('', []);
-    case RagErrorCode.LOCAL_SERVER_URL_MISSING:
-      return new LocalServerUrlMissingError();
-    default:
-      const err = new Error(message);
-      err.name = 'RagError';
-      return err;
-  }
 }
 
 /**
@@ -132,16 +114,10 @@ export function getSettingsStatus(settings: Settings): {
   const result = validateSettings(settings);
   const issues = [...result.errors.map((e) => e.message), ...result.warnings];
 
-  const apiKeyField = {
-    openrouter: 'openrouterApiKey',
-    groq: 'groqApiKey',
-    local: '',
-  }[settings.provider];
-
   return {
     configured: result.valid,
     provider: getProviderConfig(settings.provider).displayName,
-    hasApiKey: settings.provider === 'local' ? !!settings.localServerUrl : !!(settings as unknown as Record<string, string>)[apiKeyField],
+    hasApiKey: settings.provider === 'local' ? !!settings.localServerUrl.trim() : !!resolveProviderEndpoint(settings).apiKey,
     modelCount: settings.provider === 'local' ? settings.localCatalog?.length ?? 0 : 0,
     issues,
   };

@@ -34,6 +34,28 @@ const fakeModels: ModelInfo[] = [
   { id: 'meta/llama-guard-3-8b', ownedBy: 'meta', created: 0 },
 ];
 
+const approvedOpenRouterCatalog: ModelInfo[] = [
+  {
+    id: 'nvidia/nemotron-3-super-120b-a12b:free',
+    ownedBy: 'nvidia',
+    created: 0,
+    pricing: { prompt: '0', completion: '0', request: '0' },
+    supportedParameters: ['tools', 'tool_choice', 'response_format'],
+  },
+  {
+    id: 'qwen/qwen3.8-27b:free',
+    ownedBy: 'qwen',
+    created: 0,
+    pricing: { prompt: '0', completion: '0', request: '0' },
+    supportedParameters: ['tools', 'tool_choice', 'structured_outputs'],
+  },
+];
+
+const approvedNimCatalog: ModelInfo[] = [
+  { id: 'nvidia/nemotron-3-super-120b-a12b', ownedBy: 'nvidia', created: 0 },
+  { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', ownedBy: 'nvidia', created: 0 },
+];
+
 describe('modelClass', () => {
   it('classifies tiny models', () => {
     expect(modelClass('meta/llama-3.2-1b-instruct')).toBe('tiny');
@@ -164,6 +186,37 @@ describe('listModels', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('keeps OpenRouter pricing and supported parameter metadata', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: 'nvidia/nemotron-3-super-120b-a12b:free',
+              owned_by: 'nvidia',
+              created: 123,
+              pricing: { prompt: '0', completion: '0', request: 0, internal_reasoning: null },
+              supported_parameters: ['tools', 'tool_choice', 'response_format'],
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    try {
+      const models = await listModels('openrouter', 'test-key');
+      expect(models[0]).toEqual({
+        id: 'nvidia/nemotron-3-super-120b-a12b:free',
+        ownedBy: 'nvidia',
+        created: 123,
+        pricing: { prompt: '0', completion: '0', request: '0' },
+        supportedParameters: ['tools', 'tool_choice', 'response_format'],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe('listLocalCatalog', () => {
@@ -277,7 +330,7 @@ describe('resolveModels', () => {
   const baseSettings: Settings = {
     provider: 'openrouter',
     openrouterApiKey: 'k',
-    groqApiKey: '',
+    nimApiKey: '',
     apiKey: '',
     webSearchProvider: 'duckduckgo',
     serperApiKey: '',
@@ -293,24 +346,67 @@ describe('resolveModels', () => {
     },
   };
 
-  it('preserves an explicit chat model and leaves chat unset when that choice is cleared', () => {
+  it('preserves an approved explicit cloud model and auto-picks the first approved model when cleared', () => {
     const selectedSettings: Settings = {
       ...baseSettings,
-      pickedModelsOverride: { chatModel: 'user/chosen-model' },
+      pickedModelsOverride: { chatModel: 'qwen/qwen3.8-27b:free' },
     };
-    expect(resolveModels(selectedSettings, fakeModels).picked.chat).toBe('user/chosen-model');
+    expect(resolveModels(selectedSettings, approvedOpenRouterCatalog).picked.chat).toBe(
+      'qwen/qwen3.8-27b:free',
+    );
 
     const clearedSettings: Settings = {
       ...selectedSettings,
       pickedModelsOverride: { chatModel: '' },
     };
-    expect(resolveModels(clearedSettings, fakeModels).picked.chat).toBeUndefined();
+    expect(resolveModels(clearedSettings, approvedOpenRouterCatalog).picked.chat).toBe(
+      'nvidia/nemotron-3-super-120b-a12b:free',
+    );
   });
 
-  it('never auto-picks a chat model — the choice stays with the user', () => {
-    const out = resolveModels(baseSettings, fakeModels);
+  it('uses the second approved cloud model when the first is unavailable and selection is blank', () => {
+    const out = resolveModels(baseSettings, [approvedOpenRouterCatalog[1]]);
+    expect(out.picked.chat).toBe('qwen/qwen3.8-27b:free');
+    expect(out.catalog.map((model) => model.id)).toEqual(['qwen/qwen3.8-27b:free']);
+    expect(out.warnings).toEqual([]);
+  });
+
+  it('does not silently override an explicit invalid or malicious cloud model', () => {
+    const out = resolveModels(
+      {
+        ...baseSettings,
+        pickedModelsOverride: { chatModel: 'attacker/paid-model' },
+      },
+      approvedOpenRouterCatalog,
+    );
     expect(out.picked.chat).toBeUndefined();
-    expect(out.catalog).toBe(fakeModels);
+    expect(out.catalog.map((model) => model.id)).toEqual([
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'qwen/qwen3.8-27b:free',
+    ]);
+    expect(out.warnings[0]).toContain('attacker/paid-model');
+  });
+
+  it('rejects approved OpenRouter ids when catalog metadata shows paid or missing eligibility', () => {
+    const out = resolveModels(baseSettings, [
+      { ...approvedOpenRouterCatalog[0], pricing: { prompt: '0', completion: '0.01', request: '0' } },
+      { ...approvedOpenRouterCatalog[1], supportedParameters: ['tools', 'tool_choice'] },
+    ]);
+    expect(out.picked.chat).toBeUndefined();
+    expect(out.catalog).toEqual([]);
+    expect(out.warnings[0]).toContain('No approved openrouter models');
+  });
+
+  it('restricts NIM to the approved catalog models', () => {
+    const out = resolveModels(
+      { ...baseSettings, provider: 'nim', nimApiKey: 'nvapi-test' },
+      [
+        { id: 'nvidia/not-approved', ownedBy: 'nvidia', created: 0 },
+        approvedNimCatalog[1],
+      ],
+    );
+    expect(out.picked.chat).toBe('nvidia/nemotron-3.5-lightning-30b-a3b');
+    expect(out.catalog).toEqual([approvedNimCatalog[1]]);
   });
 
   it('uses pickLocalModels and the local catalog when provider=local', () => {
