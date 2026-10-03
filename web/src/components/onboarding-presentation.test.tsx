@@ -94,6 +94,37 @@ describe('LandingHero onboarding presentation', () => {
     unmount();
   });
 
+  it('does not warn about unavailable search on the keyless default provider', () => {
+    const unmount = render(
+      <LandingHero
+        onLoadSample={async () => {}}
+        onAddData={() => {}}
+        onOpenSettings={() => {}}
+      />,
+    );
+
+    expect(document.querySelector('[data-testid="landing-configure-web"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('DuckDuckGo is unavailable');
+    expect(document.body.textContent).not.toContain('Add a Serper API key');
+    unmount();
+  });
+
+  it('offers stable web research examples when keyless search is available', () => {
+    useAppStore.setState({
+      sandboxDocuments: [{ id: 'doc-1', fileName: 'notes.txt', source: 'notes.txt', chunkCount: 1, loadedAt: 1 }],
+    });
+    const unmount = render(
+      <LandingHero
+        onLoadSample={async () => {}}
+        onAddData={() => {}}
+      />,
+    );
+
+    expect(document.body.textContent).toContain('What does independent web indexing mean for search quality?');
+    expect(document.body.textContent).not.toContain('Latest AI trends for business');
+    unmount();
+  });
+
   it('states the model setup requirement and what context is sent to the LLM', () => {
     const unmount = render(
       <LandingHero
@@ -175,6 +206,24 @@ describe('DataSandbox sample loading feedback', () => {
 });
 
 describe('WebSearchSetting accessibility and guidance', () => {
+  it('offers Mwmbl as the keyless default and explains its public index limits', () => {
+    const updateSettings = vi.fn();
+    const unmount = render(
+      <WebSearchSetting
+        settings={currentSettings({ webSearchProvider: 'mwmbl' })}
+        updateSettings={updateSettings}
+      />,
+    );
+
+    expect(document.querySelector('select')?.getAttribute('aria-label')).toBe('Web search provider');
+    expect(document.body.textContent).toContain('Mwmbl (no key)');
+    expect(document.body.textContent).not.toContain('DuckDuckGo');
+    expect(document.querySelector('input[type="password"]')).toBeNull();
+    expect(document.body.textContent).toContain('public independent index');
+    expect(document.body.textContent).toContain('coverage and freshness vary');
+    unmount();
+  });
+
   it('labels provider and key inputs and explains current unavailable configuration', () => {
     const updateSettings = vi.fn();
     const unmount = render(

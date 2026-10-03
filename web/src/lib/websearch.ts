@@ -1,16 +1,15 @@
-// Web search client — Serper API (Google) and DuckDuckGo (no key)
-
+// Web search client: keyless Mwmbl JSON API or explicitly configured Serper.
 import type { Settings, WebResult } from './types';
 import { WebSearchProviderError } from './errors';
 
-// DuckDuckGo HTML returns no CORS headers, so the dev server proxies /ddg
-// to html.duckduckgo.com. In production, VITE_WEBSEARCH_BASE_URL should point at
-// an edge proxy. Direct production requests are blocked by CORS.
-function resolveWebSearchBaseUrl(): string {
-  const envUrl = (import.meta.env.VITE_WEBSEARCH_BASE_URL as string | undefined)?.trim();
-  if (envUrl) return envUrl.replace(/\/+$/, '');
-  if (import.meta.env.DEV) return '/ddg';
-  return '';
+type SearchProvider = Exclude<Settings['webSearchProvider'], 'none'>;
+const MWMBL_SEARCH_URL = 'https://mwmbl.org/api/v2/search/';
+const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
+const DEFAULT_WEB_SEARCH_K = 5;
+const WEB_SEARCH_TIMEOUT_MS = 15_000;
+
+export interface WebSearchClient {
+  search(query: string, k?: number, signal?: AbortSignal): Promise<WebResult[]>;
 }
 
 export function getWebSearchAvailability(
@@ -24,159 +23,128 @@ export function getWebSearchAvailability(
       ? { available: true, message: 'Serper API key configured. Search queries are sent to Serper.' }
       : { available: false, message: 'Add a Serper API key in Settings to enable web search.' };
   }
-  return resolveWebSearchBaseUrl()
-    ? { available: true, message: 'DuckDuckGo search is available through the configured proxy.' }
-    : { available: false, message: 'DuckDuckGo is unavailable on this site. Choose Serper and add its API key in Settings, or use your loaded files.' };
+  return {
+    available: true,
+    message: 'Keyless search uses Mwmbl’s public index. Queries are sent directly to Mwmbl; coverage and freshness vary.',
+  };
 }
 
-/**
- * Default result count for web search when the caller omits `k`. Mirrors the
- * orchestrator's `WEB_SEARCH_RESULT_COUNT` — kept independent because the
- * websearch module is reusable from non-orchestrator call sites (e.g. evals).
- */
-const DEFAULT_WEB_SEARCH_K = 5;
-
-export interface WebSearchClient {
-  search(query: string, k?: number): Promise<WebResult[]>;
+function invalidResponse(provider: SearchProvider): WebSearchProviderError {
+  return new WebSearchProviderError(provider, 'The search service returned an invalid result format', undefined, { retryable: false });
 }
 
-/**
- * Decode common HTML entities to plain text.
- * Order matters: the ampersand entity must be decoded last so entity text
- * produced by an earlier decode is never double-decoded.
- */
-export function decodeHtmlEntities(s: string): string {
-  return s
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&');
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Extract the real destination URL from a DuckDuckGo redirect link.
- * If parsing fails, returns the original URL.
- */
-export function extractRealUrl(ddgUrl: string): string {
-  try {
-    const u = new URL(ddgUrl);
-    const uddg = u.searchParams.get('uddg');
-    return uddg || ddgUrl;
-  } catch (e) {
-    if (import.meta.env.DEV) {
-      console.warn('[websearch] extractRealUrl: malformed URL (returning input as-is):', e);
-    }
-    return ddgUrl;
-  }
-}
+function parseResults(provider: SearchProvider, data: unknown, k: number): WebResult[] {
+  if (!isRecord(data)) throw invalidResponse(provider);
+  const items = provider === 'mwmbl' ? data.results : data.organic;
+  if (!Array.isArray(items)) throw invalidResponse(provider);
 
-/**
- * Parse DuckDuckGo HTML search results into WebResult array.
- * An empty response yields no sources; configuration notices are not citations.
- * @param html - Raw HTML from DuckDuckGo
- * @param k - Maximum number of results to return
- * @returns Array of WebResult objects
- */
-export function parseDuckDuckGoHtml(html: string, k: number): WebResult[] {
   const results: WebResult[] = [];
-  const resultRegex =
-    /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-
-  let m: RegExpExecArray | null;
-  while ((m = resultRegex.exec(html)) !== null && results.length < k) {
-    const url = m[1];
-    const title = m[2];
-    const snippetRaw = m[3];
-    const snippet = snippetRaw.replace(/<[^>]*>/g, '').trim();
-    results.push({
-      type: 'web_search',
-      title: decodeHtmlEntities(title.trim()),
-      content: decodeHtmlEntities(snippet),
-      url: extractRealUrl(url),
-    });
+  const urls = new Set<string>();
+  for (const item of items) {
+    if (!isRecord(item)) throw invalidResponse(provider);
+    const title = item.title;
+    const content = provider === 'mwmbl' ? item.content : (item.snippet ?? '');
+    const rawUrl = provider === 'mwmbl' ? item.url : item.link;
+    if (typeof title !== 'string' || !title.trim() || typeof content !== 'string' || typeof rawUrl !== 'string') {
+      throw invalidResponse(provider);
+    }
+    if (!URL.canParse(rawUrl)) continue;
+    const url = new URL(rawUrl);
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || urls.has(url.href)) continue;
+    urls.add(url.href);
+    results.push({ type: 'web_search', title: title.trim(), content: content.trim(), url: url.href });
+    if (results.length >= k) break;
+  }
+  if (items.length > 0 && results.length === 0) {
+    throw new WebSearchProviderError(provider, 'The search service returned no usable source URLs', undefined, { retryable: false });
   }
   return results;
 }
 
-/**
- * Create a web search client based on settings (Serper or DuckDuckGo).
- * @param settings - App settings with provider choice and API keys
- * @returns WebSearchClient with search(query, k?) method
- * @throws WebSearchProviderError on provider failures
- */
+async function requestJson(
+  provider: SearchProvider,
+  url: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const cancelled = () => new WebSearchProviderError(provider, 'Search was cancelled', undefined, { retryable: false });
+  if (signal?.aborted) throw cancelled();
+
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, WEB_SEARCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      ...init,
+      credentials: 'omit',
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        const reason = provider === 'serper' ? 'Invalid API key' : 'The public search service refused the request';
+        throw new WebSearchProviderError(provider, `${reason} (${response.status})`, undefined, { retryable: false });
+      }
+      if (response.status === 429) {
+        // A public keyless service should not be hit by automatic rate-limit retries.
+        throw new WebSearchProviderError(provider, 'Rate limited (429); try again later', undefined, { retryable: provider === 'serper' });
+      }
+      throw new WebSearchProviderError(provider, `HTTP ${response.status}: ${response.statusText}`, undefined, { retryable: response.status >= 500 });
+    }
+    // Keep the deadline active while reading the response, not just its headers.
+    return await response.json();
+  } catch (error) {
+    if (signal?.aborted) throw cancelled();
+    if (timedOut) {
+      throw new WebSearchProviderError(provider, 'The search request timed out; try again', undefined, { retryable: true });
+    }
+    if (error instanceof WebSearchProviderError) throw error;
+    if (isRecord(error) && error.name === 'SyntaxError') throw invalidResponse(provider);
+    const cause = error instanceof Error ? error : new Error(String(error));
+    throw new WebSearchProviderError(provider, 'Could not reach the search service', cause, { retryable: true });
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 export function createWebSearchClient(settings: Settings): WebSearchClient {
-  async function searchSerper(query: string, k: number): Promise<WebResult[]> {
-    let resp: Response;
-    try {
-      resp = await fetch('https://google.serper.dev/search', {
-        method: 'POST',
-        headers: {
-          'X-API-KEY': settings.serperApiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ q: query, num: k }),
-      });
-    } catch (e) {
-      const error = e instanceof Error ? e : new Error(String(e));
-      throw new WebSearchProviderError('serper', `Network error: ${error.message}`, error, { retryable: true });
-    }
-
-    if (!resp.ok) {
-      if (resp.status === 401 || resp.status === 403) {
-        throw new WebSearchProviderError('serper', `Invalid API key (${resp.status})`, undefined, { retryable: false });
+  return {
+    async search(query, k = DEFAULT_WEB_SEARCH_K, signal) {
+      const provider = settings.webSearchProvider;
+      const trimmedQuery = query.trim();
+      if (provider === 'none' || !trimmedQuery || !Number.isFinite(k) || k < 1) return [];
+      const availability = getWebSearchAvailability(settings);
+      if (!availability.available) {
+        throw new WebSearchProviderError(provider, availability.message, undefined, { retryable: false });
       }
-      if (resp.status === 429) {
-        throw new WebSearchProviderError('serper', `Rate limited (${resp.status})`, undefined, { retryable: true });
+      const limit = Math.floor(k);
+      // Only the explicitly selected service receives this query. A failure
+      // never triggers another provider or forwards unrelated credentials.
+      if (provider === 'serper') {
+        const data = await requestJson(provider, SERPER_SEARCH_URL, {
+          method: 'POST',
+          headers: { 'X-API-KEY': settings.serperApiKey.trim(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q: trimmedQuery, num: limit }),
+        }, signal);
+        return parseResults(provider, data, limit);
       }
-      throw new WebSearchProviderError('serper', `HTTP ${resp.status}: ${resp.statusText}`, undefined, { retryable: resp.status >= 500 });
-    }
-
-    const data = await resp.json();
-    const organic = data.organic || [];
-    return organic.slice(0, k).map((r: { title?: string; snippet?: string; link?: string }) => ({
-      type: 'web_search' as const,
-      title: r.title || 'Untitled',
-      content: r.snippet || '',
-      url: r.link,
-    }));
-  }
-
-  async function searchDuckDuckGo(query: string, k: number): Promise<WebResult[]> {
-    const url = `${resolveWebSearchBaseUrl()}/html/?q=${encodeURIComponent(query)}`;
-    let resp: Response;
-    try {
-      resp = await fetch(url, {
-        method: 'GET',
-        headers: { Accept: 'text/html' },
-      });
-    } catch (e) {
-      const error = e instanceof Error ? e : new Error(String(e));
-      throw new WebSearchProviderError('duckduckgo', `Could not reach the search proxy: ${error.message}`, error, {
-        retryable: true,
-      });
-    }
-
-    if (!resp.ok) {
-      throw new WebSearchProviderError('duckduckgo', `HTTP ${resp.status}: ${resp.statusText}`, undefined, { retryable: resp.status >= 500 });
-    }
-
-    const html = await resp.text();
-    return parseDuckDuckGoHtml(html, k);
-  }
-
-  async function search(query: string, k = DEFAULT_WEB_SEARCH_K): Promise<WebResult[]> {
-    const provider = settings.webSearchProvider;
-    if (provider === 'none') return [];
-    const availability = getWebSearchAvailability(settings);
-    if (!availability.available) {
-      throw new WebSearchProviderError(provider, availability.message, undefined, { retryable: false });
-    }
-    // The selected provider owns this request, including its failures. Never
-    // send the user's query to a second provider without their selection.
-    return provider === 'serper' ? searchSerper(query, k) : searchDuckDuckGo(query, k);
-  }
-
-  return { search };
+      const url = new URL(MWMBL_SEARCH_URL);
+      url.searchParams.set('q', trimmedQuery);
+      const data = await requestJson(provider, url.href, {
+        method: 'GET', headers: { Accept: 'application/json' },
+      }, signal);
+      return parseResults(provider, data, limit);
+    },
+  };
 }

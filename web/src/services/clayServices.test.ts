@@ -49,7 +49,7 @@ function baseSettings(overrides: Partial<Settings>): Settings {
     provider: 'openrouter',
     openrouterApiKey: '',
     apiKey: '',
-    webSearchProvider: 'duckduckgo',
+    webSearchProvider: 'mwmbl',
     serperApiKey: '',
     temperature: 0.2,
     maxRetries: 2,

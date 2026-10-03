@@ -76,7 +76,7 @@ const DEFAULT_SETTINGS: Settings = {
   provider: 'openrouter',
   openrouterApiKey: '',
   apiKey: '', // legacy field for migration
-  webSearchProvider: 'duckduckgo',
+  webSearchProvider: 'mwmbl',
   serperApiKey: '',
   temperature: 0,
   maxRetries: 3,
@@ -94,8 +94,11 @@ const DEFAULT_SETTINGS: Settings = {
   },
 };
 
-type PersistedSettings = Partial<Omit<Settings, 'provider'>> & {
+type WebSearchProvider = Settings['webSearchProvider'];
+
+type PersistedSettings = Partial<Omit<Settings, 'provider' | 'webSearchProvider'>> & {
   provider?: unknown;
+  webSearchProvider?: unknown;
   embeddingApiKey?: unknown;
   groqApiKey?: unknown;
   nimApiKey?: unknown;
@@ -113,6 +116,18 @@ function hasOwnString(obj: object, key: PropertyKey): boolean {
 
 function isRegisteredProviderName(provider: string): boolean {
   return hasOwn(PROVIDER_REGISTRY, provider);
+}
+
+function sanitizeWebSearchProvider(provider: unknown): WebSearchProvider {
+  switch (provider) {
+    case 'mwmbl':
+    case 'serper':
+    case 'none':
+      return provider;
+    case 'duckduckgo':
+    default:
+      return 'mwmbl';
+  }
 }
 
 function clearProviderScopedModelState(settings: Settings): Settings {
@@ -164,6 +179,7 @@ function normalizePersistedSettings(
     apiKey: '',
     localModels: migrateLegacyLocalModels(persisted.localModels),
     pickedModelsOverride: migrateChatSelection(persisted.pickedModelsOverride),
+    webSearchProvider: sanitizeWebSearchProvider(persisted.webSearchProvider),
     provider,
   };
 
@@ -374,7 +390,7 @@ export const useAppStore = create<AppState>()(
     },
     {
       name: 'clay-settings-v1',
-      version: 8,
+      version: 9,
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<{
           settings: PersistedSettings;

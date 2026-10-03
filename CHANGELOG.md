@@ -12,6 +12,7 @@ Notable changes to Clay. Unreleased changes are not a tagged release.
 
 ### Fixed
 
+- Replaced the retired DuckDuckGo/proxy search path with Mwmbl's public keyless search API. Serper remains available as an explicit keyed provider, and Disabled still turns search off.
 - File uploads and chat now share the same application services and document index, so new documents can be queried without reloading.
 - Local file ingestion no longer requires a model API key. Answer generation still requires a configured provider and model.
 - Citation excerpts remain accessible in saved answers after a reload.

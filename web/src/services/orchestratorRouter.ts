@@ -45,8 +45,7 @@ export function buildRouterContext(deps: OrchestratorDeps): string {
 }
 
 export function nextUntriedSource(tried: SourceType[]): SourceType {
-  // Prefer the richest untried source: the real data beats documents beats
-  // the open web, and web search is CORS-degraded in production deployments.
+  // Prefer loaded structured data, then documents, then the open web.
   const richness: SourceType[] = ['python', 'vectorstore', 'websearch'];
   for (const s of richness) {
     if (!tried.includes(s)) return s;

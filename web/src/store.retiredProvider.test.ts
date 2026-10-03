@@ -11,6 +11,8 @@ const retiredSettings = {
   nimBaseUrl: 'https://retired-relay.example/v1',
   nimProxyUrl: 'https://older-relay.example',
   pickedModelsOverride: { chatModel: 'nvidia/nemotron-3-super-120b-a12b' },
+  webSearchProvider: 'duckduckgo',
+  serperApiKey: 'saved-serper-key',
   localServerUrl: 'http://localhost:1234/v1',
   localModels: { chat: 'my-installed-model' },
 };
@@ -22,6 +24,8 @@ function expectRetiredSettingsRemoved(state: State) {
   expect(state.settings).not.toHaveProperty('nimBaseUrl');
   expect(state.settings).not.toHaveProperty('nimProxyUrl');
   expect(state.settings.pickedModelsOverride).toEqual({ chatModel: '' });
+  expect(state.settings.webSearchProvider).toBe('mwmbl');
+  expect(state.settings.serperApiKey).toBe('saved-serper-key');
   expect(state.availableModels).toEqual([]);
   expect(state.modelsFetchedAt).toBe(0);
   expect(state.modelsLoading).toBe(false);
@@ -31,7 +35,7 @@ function expectRetiredSettingsRemoved(state: State) {
 beforeEach(() => useAppStore.getState().resetAll());
 
 describe('retired provider persistence', () => {
-  it.each([0, 6, 7])('discards NVIDIA credentials and model state from saved version %s', async version => {
+  it.each([0, 6, 7, 8])('discards NVIDIA credentials and model state from saved version %s', async version => {
     const migrate = useAppStore.persist.getOptions().migrate!;
     const state = await migrate({
       settings: retiredSettings,
@@ -60,7 +64,7 @@ describe('retired provider persistence', () => {
       settings: { ...retiredSettings, openrouterApiKey: 'sk-or-own-key' },
       conversations: [conversation],
       activeConversationId: conversation.id,
-    }, 7) as State;
+    }, 8) as State;
 
     expectRetiredSettingsRemoved(state);
     expect(resolveProviderEndpoint(state.settings).apiKey).toBe('sk-or-own-key');
@@ -119,7 +123,7 @@ describe('retired provider persistence', () => {
   it('rewrites saved version 7 without obsolete keys when the browser rehydrates', async () => {
     const storage = useAppStore.persist.getOptions().storage!;
     await storage.setItem('clay-settings-v1', {
-      version: 7,
+      version: 8,
       state: { settings: retiredSettings } as unknown as State,
     });
 
@@ -129,6 +133,7 @@ describe('retired provider persistence', () => {
     const saved = await storage.getItem('clay-settings-v1');
     expect(saved?.version).toBe(useAppStore.persist.getOptions().version);
     expect(saved?.state.settings.provider).toBe('openrouter');
+    expect(saved?.state.settings.webSearchProvider).toBe('mwmbl');
     expect(saved?.state.settings).not.toHaveProperty('nimApiKey');
     expect(saved?.state.settings).not.toHaveProperty('nimBaseUrl');
     expect(saved?.state.settings).not.toHaveProperty('nimProxyUrl');

@@ -18,7 +18,11 @@ const CAPABILITIES = [
   },
 ];
 
-const WEB_QUERIES = ['Latest AI trends for business', 'Best practices for RAG', 'Compare cloud ML platforms'];
+const WEB_QUERIES = [
+  'What does independent web indexing mean for search quality?',
+  'Find practical RAG evaluation methods',
+  'Compare open-source vector databases',
+];
 
 export function LandingHero({
   onLoadSample,

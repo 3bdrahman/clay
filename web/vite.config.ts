@@ -1,23 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { defineConfig, type Plugin, type ProxyOptions } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-
-// DuckDuckGo HTML search returns no CORS headers. Proxying lets the in-browser
-// app reach it. Production needs an edge proxy.
-const DDG_PROXY_PREFIX = '/ddg';
-
-// In dev, browser-to-localhost requests are allowed by the CSP above and most
-// local servers (LM Studio, vLLM) set permissive CORS. If a user runs a
-// stricter local server they can point localServerUrl at any origin they want;
-const proxyConfig: Record<string, ProxyOptions> = {
-  [DDG_PROXY_PREFIX]: {
-    target: 'https://html.duckduckgo.com',
-    changeOrigin: true,
-    secure: true,
-    rewrite: (path: string) => path.replace(new RegExp(`^${DDG_PROXY_PREFIX}`), ''),
-  },
-};
 
 // GitHub Pages deployment: set BASE_PATH=/<repo-name> at build time
 // For user.github.io repo, use BASE_PATH=/
@@ -47,11 +31,12 @@ function cspPlugin() {
 
       const connectSrc = [
         "'self'",
+        // Local model servers such as LM Studio and vLLM commonly run on
+        // loopback origins and handle CORS themselves.
         'http://localhost:*',
         'http://127.0.0.1:*',
         'https://openrouter.ai',
-        'https://duckduckgo.com',
-        'https://*.duckduckgo.com',
+        'https://mwmbl.org',
         'https://google.serper.dev',
         // Local embeddings (transformers.js): model weights + ONNX WASM from CDN
         'https://huggingface.co',
@@ -131,12 +116,6 @@ function base404Plugin() {
 
 export default defineConfig(() => ({
   plugins: [react(), cspPlugin(), base404Plugin()],
-  server: {
-    proxy: proxyConfig,
-  },
-  preview: {
-    proxy: proxyConfig,
-  },
   build: {
     chunkSizeWarningLimit: 1000,
     sourcemap: true,

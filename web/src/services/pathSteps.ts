@@ -155,7 +155,7 @@ export async function runWebSearchStep(
   ctx.beginStep('web_search', NODE_LABELS.web_search);
   try {
     const effectiveQuestion = questionOverride ?? ctx.question;
-    const results = await ctx.withRetry('webSearch-search', () => ctx.deps.webSearch.search(effectiveQuestion, WEB_SEARCH_RESULT_COUNT), signal);
+    const results = await ctx.withRetry('webSearch-search', () => ctx.deps.webSearch.search(effectiveQuestion, WEB_SEARCH_RESULT_COUNT, signal), signal);
     ctx.state.webResults = results;
     ctx.endStep('web_search', { detail: `${results.length} results` });
   } catch (e) {

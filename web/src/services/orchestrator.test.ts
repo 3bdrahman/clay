@@ -43,7 +43,7 @@ const mockAnalyzer: DataAnalyzer = {
 
 const testSettings: Settings = {
   apiKey: 'test-key',
-  webSearchProvider: 'duckduckgo',
+  webSearchProvider: 'mwmbl',
   serperApiKey: '',
   temperature: 0,
   maxRetries: 3,
@@ -139,7 +139,7 @@ describe('createWorkflowOrchestrator', () => {
     expect(state.dataAnalysis?.result).toBe(10);
   });
 
-  it('routes to websearch for general knowledge questions', async () => {
+  it('routes to websearch and forwards the caller cancellation signal', async () => {
     (mockLLM.invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       content: JSON.stringify({ datasource: 'websearch' }),
     });
@@ -152,8 +152,10 @@ describe('createWorkflowOrchestrator', () => {
       model: 'answer-model',
     });
 
-    const state = await orchestrator.run();
+    const controller = new AbortController();
+    const state = await orchestrator.run(controller.signal);
 
+    expect(mockWebSearch.search).toHaveBeenCalledWith('test question', expect.any(Number), controller.signal);
     expect(state.routing).toBe('websearch');
     expect(state.webResults).toHaveLength(1);
   });
@@ -1932,7 +1934,7 @@ describe('createWorkflowOrchestrator — router confidence + multi-source fallba
       { id: '1', content: 'doc content', source: 'test.pdf', score: 0.9 },
     ]);
     (mockWebSearch.search as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error('DuckDuckGo search failed: Network error: Failed to fetch.'),
+      new Error('Mwmbl search failed: Network error: Failed to fetch.'),
     );
     (mockLLM.stream as ReturnType<typeof vi.fn>).mockResolvedValue({
       content: 'Answer based on doc',

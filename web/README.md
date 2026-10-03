@@ -10,6 +10,6 @@ npm run dev
 npm run verify
 ```
 
-Use OpenRouter's approved free models or models installed on a local OpenAI-compatible server. Document embeddings run locally using a fixed model; API credentials are not needed to load files.
+Use OpenRouter's approved free models or models installed on a local OpenAI-compatible server. Document embeddings run locally using a fixed model, and web search can use Mwmbl's public keyless API; API credentials are not needed to load files.
 
 See the [project README](../README.md) for the demo walkthrough, architecture, data handling, verification, and deployment configuration.

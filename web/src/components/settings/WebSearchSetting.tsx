@@ -9,7 +9,9 @@ interface Props {
 export function WebSearchSetting({ settings, updateSettings }: Props) {
   const availability = getWebSearchAvailability(settings);
   const guidance =
-    settings.webSearchProvider === 'serper' && settings.serperApiKey.trim().length === 0
+    settings.webSearchProvider === 'mwmbl'
+      ? 'Queries go directly to Mwmbl’s public independent index. No API key is needed; coverage and freshness vary by query.'
+      : settings.webSearchProvider === 'serper' && settings.serperApiKey.trim().length === 0
       ? 'Serper is selected, but an API key is required. Add a key to enable live Google results.'
       : availability.message;
 
@@ -30,7 +32,7 @@ export function WebSearchSetting({ settings, updateSettings }: Props) {
         }
         className="w-full px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none"
       >
-        <option value="duckduckgo">DuckDuckGo (no key)</option>
+        <option value="mwmbl">Mwmbl (no key)</option>
         <option value="serper">Serper (Google, requires key)</option>
         <option value="none">Disabled</option>
       </select>

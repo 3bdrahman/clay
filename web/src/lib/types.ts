@@ -29,7 +29,7 @@ export interface Settings {
   openrouterApiKey: string;
   // Legacy field for backward compat (migration)
   apiKey: string;
-  webSearchProvider: 'serper' | 'duckduckgo' | 'none';
+  webSearchProvider: 'mwmbl' | 'serper' | 'none';
   serperApiKey: string;
   temperature: number;
   maxRetries: number;

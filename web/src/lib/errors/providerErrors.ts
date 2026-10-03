@@ -111,12 +111,12 @@ export class CorsBlockedError extends RagError {
 
 export class WebSearchProviderError extends RagError {
   constructor(
-    provider: 'serper' | 'duckduckgo',
+    provider: 'serper' | 'mwmbl',
     reason: string,
     cause?: Error,
     options: { retryable?: boolean } = {}
   ) {
-    const providerName = provider === 'serper' ? 'Serper (Google)' : 'DuckDuckGo';
+    const providerName = provider === 'serper' ? 'Serper (Google)' : 'Mwmbl';
     const message = `${providerName} search failed: ${reason}.`;
 
     super({

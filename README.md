@@ -27,7 +27,7 @@ The demo has no shared API key and does not serve prerecorded answers. OpenRoute
 | --- | --- |
 | CSV | Parses a table, infers column types, and makes it available for filtering, aggregation, joins, statistics, and charts. |
 | PDF, Markdown, text, JSON | Extracts text, chunks it, embeds it locally, and retrieves relevant passages. JSON is treated as document text. |
-| Web search | Uses Serper with your key, or DuckDuckGo through a configured proxy. The hosted demo needs a Serper key for web search. |
+| Web search | Uses Mwmbl's public keyless API by default, Serper when you add a key, or Disabled when you turn search off. |
 
 PDFs need extractable text; OCR is not included. The embedding model downloads on the first document upload, so the first import needs network access and takes longer. File size and analysis capacity depend on the browser and device.
 
@@ -81,7 +81,7 @@ One selected chat model handles routing, analysis, generation, and evaluation. T
 - Files are parsed in the browser. CSV data, document chunks, and vectors are stored in IndexedDB; settings, API keys, and conversation history use localStorage.
 - **Your model receives more than the question.** Requests can include retrieved document passages, dataset names and schemas, sampled rows, analysis results, and previous analysis context. Use data appropriate for the provider you select.
 - Embedding inference runs locally. Model files download from Hugging Face on first use and are cached by the browser.
-- Search queries go to the selected search provider or configured proxy. A provider failure is surfaced rather than silently sending the query to another provider.
+- Search queries go directly to the selected search provider. Mwmbl is keyless and public, with coverage and freshness that can vary; Serper is optional and requires your key. A provider failure is surfaced rather than silently sending the query to another provider.
 - Browser storage is not an encrypted credential vault. Clear keys in Settings on a shared device. **Reset everything** removes the application's settings, conversations, and loaded data; browser-managed model caches are separate.
 
 ## Run locally
@@ -125,8 +125,7 @@ Set build-time variables in the shell or deployment environment:
 | `DEPLOY_TARGET=github-pages` | Uses `/<repository>/` as the asset base path. |
 | `BASE_PATH` | Overrides the base for other static hosts; defaults to `./`. |
 | `VITE_DEPLOY_URL` | Canonical deployment URL for social previews and the CSP origin. |
-| `VITE_WEBSEARCH_BASE_URL` | DuckDuckGo proxy URL. Without a proxy, use Serper for hosted web search. |
-| `VITE_CSP_EXTRA_CONNECT_SRC` | Comma-separated additional origins allowed for connections, such as a search proxy or remote model server. |
+| `VITE_CSP_EXTRA_CONNECT_SRC` | Comma-separated additional origins allowed for connections, such as a remote model server or another explicit integration origin. |
 | `VITE_OPENROUTER_REFERER` | Optional application URL sent to OpenRouter. |
 
 The CSP permits WebAssembly and Arquero's code generation. Generated analysis code runs in its separate QuickJS worker; static hosting alone does not make untrusted inputs safe in every other application boundary.

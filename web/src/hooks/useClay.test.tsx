@@ -56,7 +56,7 @@ const baseSettings = {
   provider: 'openrouter' as const,
   openrouterApiKey: '',
   apiKey: '',
-  webSearchProvider: 'duckduckgo' as const,
+  webSearchProvider: 'mwmbl' as const,
   serperApiKey: '',
   temperature: 0,
   maxRetries: 3,

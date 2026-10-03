@@ -10,7 +10,7 @@ describe('useAppStore.updateSettings', () => {
         provider: 'openrouter',
         openrouterApiKey: '',
         apiKey: '',
-        webSearchProvider: 'duckduckgo',
+        webSearchProvider: 'mwmbl',
         serperApiKey: '',
         temperature: 0,
         maxRetries: 3,
@@ -259,6 +259,39 @@ describe('store persist migrate — LocalModelPicks legacy shape → chat-only',
     ) as { settings: { provider: string } };
     expect(out.settings.provider).toBe('openrouter');
   });
+
+  it('migrates retired DuckDuckGo search selection to Mwmbl without moving keys', () => {
+    const out = migrate()?.(
+      {
+        settings: {
+          webSearchProvider: 'duckduckgo',
+          serperApiKey: 'saved-serper-key',
+          openrouterApiKey: 'sk-or-own-key',
+        },
+      },
+      8,
+    ) as { settings: Record<string, unknown> };
+    expect(out.settings.webSearchProvider).toBe('mwmbl');
+    expect(out.settings.serperApiKey).toBe('saved-serper-key');
+    expect(out.settings.openrouterApiKey).toBe('sk-or-own-key');
+  });
+
+  it('preserves explicit Serper and Disabled search selections during migration', () => {
+    const migrateFn = migrate();
+    const serper = migrateFn?.(
+      { settings: { webSearchProvider: 'serper', serperApiKey: 'saved-serper-key' } },
+      8,
+    ) as { settings: Record<string, unknown> };
+    expect(serper.settings.webSearchProvider).toBe('serper');
+    expect(serper.settings.serperApiKey).toBe('saved-serper-key');
+
+    const disabled = migrateFn?.(
+      { settings: { webSearchProvider: 'none', serperApiKey: 'saved-serper-key' } },
+      8,
+    ) as { settings: Record<string, unknown> };
+    expect(disabled.settings.webSearchProvider).toBe('none');
+    expect(disabled.settings.serperApiKey).toBe('saved-serper-key');
+  });
 });
 
 describe('persisted chat selection', () => {
@@ -312,6 +345,30 @@ describe('persisted chat selection', () => {
     expect(result?.settings.apiKey).toBe('');
     expect(result?.settings.groqApiKey).toBeUndefined();
     expect(result?.settings.pickedModelsOverride).toEqual({ chatModel: '' });
+  });
+
+  it('migrates retired DuckDuckGo selection during same-version rehydration while preserving conversations', () => {
+    const merge = useAppStore.persist.getOptions().merge;
+    const conversation = {
+      id: 'saved-conversation',
+      title: 'Saved search',
+      messages: [{ id: 'saved-message', role: 'user' as const, content: 'Keep this', timestamp: 1 }],
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const result = merge?.({
+      settings: {
+        webSearchProvider: 'duckduckgo',
+        serperApiKey: 'saved-serper-key',
+      },
+      conversations: [conversation],
+      activeConversationId: conversation.id,
+    }, useAppStore.getState()) as { settings: Record<string, unknown>; conversations: unknown[]; activeConversationId: string } | undefined;
+
+    expect(result?.settings.webSearchProvider).toBe('mwmbl');
+    expect(result?.settings.serperApiKey).toBe('saved-serper-key');
+    expect(result?.conversations).toEqual([conversation]);
+    expect(result?.activeConversationId).toBe(conversation.id);
   });
 });
 

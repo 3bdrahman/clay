@@ -235,10 +235,10 @@ describe('RagError subclasses', () => {
       expect(err.provider).toBe('serper');
     });
 
-    it('creates error for duckduckgo with retryable true', () => {
-      const err = new WebSearchProviderError('duckduckgo', 'Network error', undefined, { retryable: true });
+    it('creates error for mwmbl with retryable true', () => {
+      const err = new WebSearchProviderError('mwmbl', 'Network error', undefined, { retryable: true });
       expect(err.retryable).toBe(true);
-      expect(err.provider).toBe('duckduckgo');
+      expect(err.provider).toBe('mwmbl');
     });
   });
 

@@ -1,283 +1,90 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { createWebSearchClient } from './websearch';
-import {
-  decodeHtmlEntities,
-  extractRealUrl,
-  parseDuckDuckGoHtml,
-  getWebSearchAvailability,
-} from './websearch';
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import { createWebSearchClient, getWebSearchAvailability } from './websearch';
+import { useAppStore } from '../store';
 import type { Settings } from './types';
-import { WebSearchProviderError } from './errors';
 
-const baseSettings = (overrides: Partial<Settings> = {}): Settings =>
-  ({
-    provider: 'openrouter',
-    apiKey: '',
-    webSearchProvider: 'duckduckgo',
-    serperApiKey: '',
-    temperature: 0,
-    maxRetries: 3,
-    theme: 'system',
-    localServerUrl: '',
-    localModels: { chat: '' },
-    localCatalog: [],
-    localCatalogFetchedAt: 0,
-    ...overrides,
-  }) as Settings;
-
-describe('decodeHtmlEntities', () => {
-  it('decodes the five basic entities', () => {
-    expect(decodeHtmlEntities('a & b < c > d " e &apos; f')).toBe(
-      "a & b < c > d \" e ' f",
-    );
-  });
-
-  it('does not double-decode ampersands inside entities', () => {
-    expect(decodeHtmlEntities('Tom & Jerry & Friends')).toBe('Tom & Jerry & Friends');
-  });
-
-  it('passes through plain text untouched', () => {
-    expect(decodeHtmlEntities('hello world')).toBe('hello world');
-  });
-
-  it('handles empty string', () => {
-    expect(decodeHtmlEntities('')).toBe('');
-  });
-
-  it('decodes entities produced by previous decoding (no double-decode)', () => {
-    expect(decodeHtmlEntities('<script>alert("x")</script>')).toBe(
-      '<script>alert("x")</script>',
-    );
-  });
-
-  it('decodes ampersand entities', () => {
-    expect(decodeHtmlEntities('AT\u0026amp;T')).toBe('AT\u0026T');
-  });
-
-  it('decodes angle-bracket entities', () => {
-    expect(decodeHtmlEntities('a \u0026lt; b \u0026gt; c')).toBe('a < b > c');
-  });
-
-  it('decodes quote entities', () => {
-    expect(decodeHtmlEntities('\u0026quot;quoted\u0026quot;')).toBe('"quoted"');
-  });
-
-  it('decodes numeric apostrophe entities', () => {
-    expect(decodeHtmlEntities("&#39;apostrophe&#39;")).toBe("'apostrophe'");
-  });
-
-  it('decodes & last so entity text is not double-decoded', () => {
-    expect(decodeHtmlEntities('&lt;')).toBe('<');
-  });
+const baseSettings = (overrides: Partial<Settings> = {}): Settings => ({
+  ...useAppStore.getState().settings,
+  webSearchProvider: 'mwmbl',
+  ...overrides,
 });
 
-describe('extractRealUrl', () => {
-  it('unwraps DuckDuckGo redirect urls to the real destination', () => {
-    const uddg = encodeURIComponent('https://example.com/path?q=1');
-    expect(extractRealUrl(`https://duckduckgo.com/l/?uddg=${uddg}`)).toBe(
-      'https://example.com/path?q=1',
-    );
-  });
+afterEach(() => vi.restoreAllMocks());
 
-  it('returns the original url when there is no uddg param', () => {
-    expect(extractRealUrl('https://example.com/page')).toBe('https://example.com/page');
-  });
-
-  it('returns the original url when it is not a valid url', () => {
-    expect(extractRealUrl('not a url')).toBe('not a url');
-  });
-});
-
-describe('parseDuckDuckGoHtml', () => {
-  const lt = '<';
-  const gt = '>';
-  const slash = '/';
-  const closeA = lt + slash + 'a' + gt;
-
-  it('parses a result block with an html-encoded title and snippet', () => {
-    const html =
-      '<a class="result__a" href="https://example.com/">Foo & Bar' + closeA +
-      '<a class="result__snippet">Hello <world> "hi"' + closeA;
-    const [r] = parseDuckDuckGoHtml(html, 5);
-    expect(r.title).toBe('Foo & Bar');
-    expect(r.content).toBe('Hello  "hi"');
-    expect(r.url).toBe('https://example.com/');
-    expect(r.type).toBe('web_search');
-  });
-
-  it('strips inner tags from snippets', () => {
-    const html =
-      '<a class="result__a" href="https://example.com/">Title' + closeA +
-      '<a class="result__snippet"><b>bold</b> and <i>italic</i>' + closeA;
-    const [r] = parseDuckDuckGoHtml(html, 5);
-    expect(r.content).toBe('bold and italic');
-  });
-
-  it('returns at most k results', () => {
-    const blocks = Array.from({ length: 7 }, (_, i) =>
-      '<a class="result__a" href="https://example.com/' + i + slash + '">Title ' + i + closeA +
-      '<a class="result__snippet">Snippet ' + i + closeA,
-    ).join('');
-    expect(parseDuckDuckGoHtml(blocks, 3)).toHaveLength(3);
-  });
-
-  it('returns no citations when the provider has no results', () => {
-    const r = parseDuckDuckGoHtml(
-      '<html><body>no results here</body' + closeA + 'html' + closeA,
-      5,
-    );
-    expect(r).toEqual([]);
-  });
-});
-
-describe('createWebSearchClient.search', () => {
-  const originalFetch = globalThis.fetch;
-
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    vi.unstubAllEnvs();
-  });
-
-  it('returns empty array when provider is "none"', async () => {
+describe('explicit search provider selection', () => {
+  it('makes no request when search is disabled', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
     const client = createWebSearchClient(baseSettings({ webSearchProvider: 'none' }));
     expect(await client.search('anything')).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('calls serper with the API key when configured', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ organic: [{ title: 'Hi', snippet: 'There', link: 'https://x' }] }),
-    });
-    globalThis.fetch = fetchMock;
-
-    const client = createWebSearchClient(
-      baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }),
-    );
+  it('calls Serper with only its own key when explicitly selected', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      organic: [{ title: 'Hi', snippet: 'There', link: 'https://example.com/result' }],
+    })));
+    const client = createWebSearchClient(baseSettings({
+      webSearchProvider: 'serper', serperApiKey: ' KEY ', openrouterApiKey: 'model-key',
+    }));
     const results = await client.search('hello', 3);
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://google.serper.dev/search',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({ 'X-API-KEY': 'KEY' }),
-      }),
-    );
-    expect(results[0]).toMatchObject({ title: 'Hi', content: 'There', url: 'https://x' });
+    expect(fetchMock).toHaveBeenCalledWith('https://google.serper.dev/search', expect.objectContaining({
+      method: 'POST',
+      headers: { 'X-API-KEY': 'KEY', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: 'hello', num: 3 }),
+      credentials: 'omit',
+      redirect: 'error',
+    }));
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('model-key');
+    expect(results).toEqual([{ type: 'web_search', title: 'Hi', content: 'There', url: 'https://example.com/result' }]);
   });
 
-  it('throws WebSearchProviderError on serper 401', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      text: async () => 'Unauthorized',
-    });
-
-    const client = createWebSearchClient(
-      baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }),
-    );
-    await expect(client.search('hello')).rejects.toThrow(WebSearchProviderError);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    expect(globalThis.fetch).toHaveBeenCalledWith('https://google.serper.dev/search', expect.anything());
-  });
-
-  it('throws WebSearchProviderError on serper 429', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 429,
-      headers: new Map([['retry-after', '60']]),
-      text: async () => 'Rate limited',
-    });
-
-    const client = createWebSearchClient(
-      baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }),
-    );
-    await expect(client.search('hello')).rejects.toThrow(WebSearchProviderError);
-    const error = await client.search('hello').catch(e => e);
-    expect(error.retryable).toBe(true);
-  });
-
-  it('preserves Serper failures without sending the query to another provider', async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: false, status: 500, headers: new Map(), json: async () => ({}) }) // serper
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => `
-          <a class="result__a" href="https://example.com/">DDG Title</a>
-          <a class="result__snippet">DDG snippet</a>
-        `,
-      });
-
-    const client = createWebSearchClient(
-      baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }),
-    );
-    await expect(client.search('hello')).rejects.toMatchObject({
-      message: expect.stringContaining('500'),
-      retryable: true,
-    });
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it('throws WebSearchProviderError on DuckDuckGo 503', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503, text: async () => '' });
-
-    const client = createWebSearchClient(baseSettings());
-    await expect(client.search('hello')).rejects.toThrow(WebSearchProviderError);
-  });
-
-  it('throws WebSearchProviderError on DuckDuckGo network error', async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network'));
-
-    const client = createWebSearchClient(baseSettings());
-    await expect(client.search('hello')).rejects.toThrow(WebSearchProviderError);
-  });
-
-  it('requires the selected Serper key before making any request', async () => {
-    globalThis.fetch = vi.fn();
-    const client = createWebSearchClient(baseSettings({ webSearchProvider: 'serper' }));
+  it('requires a Serper key before making any request', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const client = createWebSearchClient(baseSettings({ webSearchProvider: 'serper', serperApiKey: '' }));
     await expect(client.search('private query')).rejects.toMatchObject({
-      message: expect.stringContaining('Serper API key'),
-      retryable: false,
+      message: expect.stringContaining('Serper API key'), retryable: false,
     });
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects unconfigured production DuckDuckGo before a doomed CORS request', async () => {
-    vi.stubEnv('DEV', false);
-    vi.stubEnv('VITE_WEBSEARCH_BASE_URL', '');
-    globalThis.fetch = vi.fn();
-    const client = createWebSearchClient(baseSettings());
-    await expect(client.search('hello')).rejects.toMatchObject({ retryable: false });
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+  it.each([401, 403, 429, 503])('preserves Serper HTTP %s without sending the query elsewhere', async status => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('Failed', { status }));
+    const client = createWebSearchClient(baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }));
+    await expect(client.search('private query')).rejects.toMatchObject({
+      provider: 'serper', message: expect.stringContaining(String(status)), retryable: status >= 500 || status === 429,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('https://google.serper.dev/search', expect.anything());
   });
 
-  it('uses the configured production search proxy', async () => {
-    vi.stubEnv('DEV', false);
-    vi.stubEnv('VITE_WEBSEARCH_BASE_URL', 'https://search.example.com/');
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, text: async () => '<html></html>' });
-    await expect(createWebSearchClient(baseSettings()).search('a b')).resolves.toEqual([]);
-    expect(globalThis.fetch).toHaveBeenCalledWith('https://search.example.com/html/?q=a%20b', expect.anything());
+  it('returns no citations for a genuine empty Serper result list', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ organic: [] })));
+    const client = createWebSearchClient(baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }));
+    await expect(client.search('nothing indexed')).resolves.toEqual([]);
+  });
+
+  it('keeps a valid Serper source when its optional snippet is omitted', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      organic: [{ title: 'Source title', link: 'https://example.com/' }],
+    })));
+    const client = createWebSearchClient(baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }));
+    await expect(client.search('query')).resolves.toEqual([
+      { type: 'web_search', title: 'Source title', content: '', url: 'https://example.com/' },
+    ]);
+  });
+
+  it('treats a malformed Serper payload as a provider error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ message: 'not results' })));
+    const client = createWebSearchClient(baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' }));
+    await expect(client.search('query')).rejects.toMatchObject({ provider: 'serper', retryable: false });
   });
 });
 
 describe('web search availability', () => {
-  afterEach(() => vi.unstubAllEnvs());
-
-  it('agrees with the selected provider and deployment configuration', () => {
+  it('agrees with the selected provider and credentials', () => {
     expect(getWebSearchAvailability(baseSettings({ webSearchProvider: 'none' })).available).toBe(false);
     expect(getWebSearchAvailability(baseSettings({ webSearchProvider: 'serper', serperApiKey: ' ' })).available).toBe(false);
     expect(getWebSearchAvailability(baseSettings({ webSearchProvider: 'serper', serperApiKey: 'KEY' })).available).toBe(true);
-    vi.stubEnv('DEV', false);
-    vi.stubEnv('VITE_WEBSEARCH_BASE_URL', '');
-    expect(getWebSearchAvailability(baseSettings()).available).toBe(false);
-    vi.stubEnv('VITE_WEBSEARCH_BASE_URL', 'https://search.example.com');
-    expect(getWebSearchAvailability(baseSettings()).available).toBe(true);
-    vi.stubEnv('VITE_WEBSEARCH_BASE_URL', '');
-    vi.stubEnv('DEV', true);
-    expect(getWebSearchAvailability(baseSettings()).available).toBe(true);
+    expect(getWebSearchAvailability(baseSettings({ webSearchProvider: 'mwmbl', serperApiKey: '' })).available).toBe(true);
   });
 });
