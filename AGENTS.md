@@ -1,5 +1,11 @@
 # AGENTS.md — Clay Engineering Doctrine
 
+## Commit attribution
+
+- Preserve genuine author and committer identities.
+- Do not add AI-agent credits, promotional footers, or fabricated co-author trailers to commit messages, pull requests, or repository documentation.
+- Add a `Co-authored-by` trailer only when the user explicitly identifies an actual human co-author. Assistance from a coding tool is not a separate contributor.
+
 ## ZERO STUBS / MOCKS / PROTOTYPES — HARD RULE
 
 **This repository contains NO mocks, stubs, prototypes, hard-coded placeholders, or simulations in production code. Every fix is a complete, real implementation. This is non-negotiable.**
