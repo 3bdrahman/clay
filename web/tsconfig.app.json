@@ -18,6 +18,6 @@
     "noImplicitAny": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "../workers/nim-proxy.ts"],
+  "include": ["src"],
   "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"]
 }

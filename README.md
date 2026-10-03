@@ -10,18 +10,18 @@
 
 Clay is a browser application for document retrieval and structured data analysis. It routes questions to uploaded documents, CSV analysis, or an optional web-search provider, then shows the answer alongside citations and an inspectable execution trace.
 
-React, TypeScript, and Vite power the interface. Local embeddings, IndexedDB, and a worker-isolated analysis engine let the frontend run on a static host. Answer generation uses OpenRouter, NVIDIA NIM through a relay you control, or a local OpenAI-compatible server.
+React, TypeScript, and Vite power the interface. Local embeddings, IndexedDB, and a worker-isolated analysis engine let the frontend run on a static host. Answer generation uses OpenRouter or a local OpenAI-compatible server.
 
 ![Clay workspace with the optional sample datasets loaded](docs/images/workspace.png)
 
 ## Try the demo
 
 1. Open [Clay](https://3bdrahman.github.io/clay/). Load the sample data or open **Data** to add your own files. Loading files requires no model API key.
-2. Open **Settings**, choose **OpenRouter**, and add your key. Clay recommends an available approved free model. For **NVIDIA NIM**, add your key and configure the [included relay](docs/nim-relay.md). Alternatively, connect a running **Local server** and select one of its installed models.
+2. Open **Settings**, choose **OpenRouter**, and add your key. Clay recommends an available approved free model. Alternatively, connect a running **Local server** and select one of its installed models.
 3. With the sample data loaded, ask **“How many employees are in each department?”** Choose a model that supports tools to inspect the data through the analysis tools.
 4. Expand **Show workflow** to inspect routing, tool calls, retries, and timing. The sources panel shows retrieved passages or analysis results; citation excerpts remain available after a reload.
 
-The demo has no shared API key and does not serve prerecorded answers. OpenRouter requests are restricted to approved free variants with zero-price routing limits. NVIDIA access depends on your account's developer credits and quotas. You can explore the interface and load data before connecting a model.
+The demo has no shared API key and does not serve prerecorded answers. OpenRouter requests are restricted to approved free variants with zero-price routing limits. You can explore the interface and load data before connecting a model.
 
 | Input | What Clay does |
 | --- | --- |
@@ -33,17 +33,16 @@ PDFs need extractable text; OCR is not included. The embedding model downloads o
 
 ## Supported models
 
-Cloud providers expose a small approved shortlist, not the full provider catalog or a manual model-ID field. Availability is checked against the live catalog; an unavailable choice is not replaced with an arbitrary model.
+OpenRouter exposes a small approved shortlist, not the full provider catalog or a manual model-ID field. Availability is checked against the live catalog; an unavailable choice is not replaced with an arbitrary model.
 
 | Provider | Recommended | Second choice | Access |
 | --- | --- | --- | --- |
 | OpenRouter | Nemotron 3 Super 120B `:free` | Qwen3.8 27B `:free` | Exact free variants, live zero-price checks, and request-level price ceilings of zero. |
-| NVIDIA NIM | Nemotron 3 Super 120B | Nemotron 3.5 Lightning 30B | NVIDIA developer access and available credits; a browser-accessible relay is required. |
 | Local | Your installed models | Your installed models | No cloud shortlist; the server's model catalog is used. |
 
-These choices target tool use, code generation, and long-context analysis. The ordered IDs live in [`providerModels.config.json`](web/src/lib/providerModels.config.json), shared by the application and NIM relay. The first eligible model is recommended unless you explicitly select another approved option.
+These choices target tool use, code generation, and long-context analysis. The ordered OpenRouter IDs live in [`providerModels.config.json`](web/src/lib/providerModels.config.json). The first eligible model is recommended unless you explicitly select another approved option.
 
-OpenRouter free variants have [rate limits](https://openrouter.ai/docs/api_reference/limits); [zero-price provider routing](https://openrouter.ai/docs/guides/routing/provider-selection) prevents paid fallback. NVIDIA's [developer access](https://docs.api.nvidia.com/nim/docs/product) is credit/quota dependent, not an unconditional free production tier. Qwen's current catalog does not advertise `response_format`, so Clay uses prompted JSON with parsing/validation for that model instead of sending an unsupported parameter.
+OpenRouter free variants have [rate limits](https://openrouter.ai/docs/api_reference/limits); [zero-price provider routing](https://openrouter.ai/docs/guides/routing/provider-selection) prevents paid fallback. Qwen's current catalog does not advertise `response_format`, so Clay uses prompted JSON with parsing/validation for that model instead of sending an unsupported parameter.
 
 ## Architecture
 
@@ -83,7 +82,6 @@ One selected chat model handles routing, analysis, generation, and evaluation. T
 - **Your model receives more than the question.** Requests can include retrieved document passages, dataset names and schemas, sampled rows, analysis results, and previous analysis context. Use data appropriate for the provider you select.
 - Embedding inference runs locally. Model files download from Hugging Face on first use and are cached by the browser.
 - Search queries go to the selected search provider or configured proxy. A provider failure is surfaced rather than silently sending the query to another provider.
-- NIM keys and model context pass through the relay you configure before reaching NVIDIA. Use a relay you control. The included relay has no server-side API key and does not log or store request contents.
 - Browser storage is not an encrypted credential vault. Clear keys in Settings on a shared device. **Reset everything** removes the application's settings, conversations, and loaded data; browser-managed model caches are separate.
 
 ## Run locally
@@ -100,8 +98,6 @@ npm run dev
 Open the URL printed by Vite, normally `http://localhost:5173`. Provider keys are entered in the app; do not put secrets in `VITE_*` variables, which are exposed to the client bundle.
 
 For a local model, enter the server's OpenAI-compatible `/v1` URL in Settings, click **Discover**, and select a model. The server must allow requests from Clay's origin. A locally served Clay instance is the most straightforward option when browser restrictions prevent the hosted HTTPS demo from reaching an HTTP model server.
-
-For NIM in development, Vite provides a same-origin `/nim-api/v1` proxy to NVIDIA. A static deployment such as GitHub Pages needs the separately deployed [NIM relay](docs/nim-relay.md); it cannot run that server code itself.
 
 ## Verify and build
 
@@ -132,7 +128,6 @@ Set build-time variables in the shell or deployment environment:
 | `VITE_WEBSEARCH_BASE_URL` | DuckDuckGo proxy URL. Without a proxy, use Serper for hosted web search. |
 | `VITE_CSP_EXTRA_CONNECT_SRC` | Comma-separated additional origins allowed for connections, such as a search proxy or remote model server. |
 | `VITE_OPENROUTER_REFERER` | Optional application URL sent to OpenRouter. |
-| `VITE_NIM_BASE_URL` | Optional deployment-wide NIM relay base URL ending in `/v1`; otherwise users configure their own in Settings. Never put a key here. |
 
 The CSP permits WebAssembly and Arquero's code generation. Generated analysis code runs in its separate QuickJS worker; static hosting alone does not make untrusted inputs safe in every other application boundary.
 

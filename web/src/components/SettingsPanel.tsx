@@ -146,7 +146,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
           <div className="pt-4 border-t border-ink-200 dark:border-ink-700 text-xs text-ink-500 dark:text-ink-400 space-y-1.5">
             <p className="font-semibold">Clay — RAG Assistant</p>
             <p>
-              The workspace runs in your browser. Provider keys are stored here; NIM keys also pass through the relay you configure.
+              The workspace runs in your browser. Provider keys are stored here and sent only to the provider you select.
             </p>
             <p className="text-[10px] opacity-70">
               Built for static deployment on GitHub Pages or any static host.

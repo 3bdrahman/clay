@@ -75,8 +75,6 @@ export const DEFAULT_TOOL_LOOP_TOKENS = 100_000;
 const DEFAULT_SETTINGS: Settings = {
   provider: 'openrouter',
   openrouterApiKey: '',
-  nimApiKey: '',
-  nimBaseUrl: '',
   apiKey: '', // legacy field for migration
   webSearchProvider: 'duckduckgo',
   serperApiKey: '',
@@ -96,13 +94,14 @@ const DEFAULT_SETTINGS: Settings = {
   },
 };
 
-type PersistedSettings = Partial<Settings> & {
+type PersistedSettings = Partial<Omit<Settings, 'provider'>> & {
+  provider?: unknown;
   embeddingApiKey?: unknown;
   groqApiKey?: unknown;
+  nimApiKey?: unknown;
+  nimBaseUrl?: unknown;
   nimProxyUrl?: unknown;
 };
-
-const DEPRECATED_PROVIDER_KINDS = new Set(['groq']);
 
 function hasOwn(obj: object, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
@@ -113,7 +112,7 @@ function hasOwnString(obj: object, key: PropertyKey): boolean {
 }
 
 function isRegisteredProviderName(provider: string): boolean {
-  return !DEPRECATED_PROVIDER_KINDS.has(provider) && hasOwn(PROVIDER_REGISTRY, provider);
+  return hasOwn(PROVIDER_REGISTRY, provider);
 }
 
 function clearProviderScopedModelState(settings: Settings): Settings {
@@ -136,16 +135,7 @@ function activeCloudApiKeyChanged(settings: Settings, patch: Partial<Settings>):
   if (settings.provider === 'openrouter') {
     return patch.openrouterApiKey !== undefined && patch.openrouterApiKey !== settings.openrouterApiKey;
   }
-  if (settings.provider === 'nim') {
-    return patch.nimApiKey !== undefined && patch.nimApiKey !== settings.nimApiKey;
-  }
   return false;
-}
-
-function activeNimBaseUrlChanged(settings: Settings, patch: Partial<Settings>): boolean {
-  return settings.provider === 'nim'
-    && patch.nimBaseUrl !== undefined
-    && patch.nimBaseUrl !== settings.nimBaseUrl;
 }
 
 function normalizePersistedSettings(
@@ -162,6 +152,8 @@ function normalizePersistedSettings(
     apiKey: _legacyApiKey,
     embeddingApiKey: _legacyEmbeddingKey,
     groqApiKey: _legacyGroqApiKey,
+    nimApiKey: _legacyNimApiKey,
+    nimBaseUrl: _legacyNimBaseUrl,
     nimProxyUrl: _legacyNimProxyUrl,
     ...persistedRest
   } = persisted;
@@ -179,26 +171,9 @@ function normalizePersistedSettings(
     mergedSettings.openrouterApiKey = baseSettings.openrouterApiKey;
   }
 
-  if (!hasOwnString(persisted, 'nimApiKey')) {
-    mergedSettings.nimApiKey = baseSettings.nimApiKey;
-  }
-
-  if (!hasOwnString(persisted, 'nimBaseUrl')) {
-    mergedSettings.nimBaseUrl = baseSettings.nimBaseUrl;
-    if (typeof persisted.nimProxyUrl === 'string') {
-      const legacyProxyRoot = persisted.nimProxyUrl.trim().replace(/\/+$/, '');
-      if (legacyProxyRoot) {
-        mergedSettings.nimBaseUrl = `${legacyProxyRoot}/nim-api/v1`;
-      }
-    }
-  }
-
   if (providerWasRegistered && typeof persisted.apiKey === 'string') {
     if (provider === 'openrouter' && !hasOwnString(persisted, 'openrouterApiKey')) {
       mergedSettings.openrouterApiKey = persisted.apiKey;
-    }
-    if (provider === 'nim' && !hasOwnString(persisted, 'nimApiKey')) {
-      mergedSettings.nimApiKey = persisted.apiKey;
     }
   }
 
@@ -258,13 +233,6 @@ export const useAppStore = create<AppState>()(
                 next.localCatalog = [];
                 next.localCatalogFetchedAt = 0;
               }
-              return {
-                settings: next,
-                ...clearModelCatalogState(),
-              };
-            }
-            if (activeNimBaseUrlChanged(state.settings, patch)) {
-              next.pickedModelsOverride = { chatModel: '' };
               return {
                 settings: next,
                 ...clearModelCatalogState(),
@@ -406,7 +374,7 @@ export const useAppStore = create<AppState>()(
     },
     {
       name: 'clay-settings-v1',
-      version: 7,
+      version: 8,
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<{
           settings: PersistedSettings;

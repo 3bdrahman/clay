@@ -8,15 +8,5 @@
       "id": "qwen/qwen3.8-27b:free",
       "label": "Qwen3.8 27B (free)"
     }
-  ],
-  "nim": [
-    {
-      "id": "nvidia/nemotron-3-super-120b-a12b",
-      "label": "Nemotron 3 Super 120B"
-    },
-    {
-      "id": "nvidia/nemotron-3.5-lightning-30b-a3b",
-      "label": "Nemotron 3.5 Lightning 30B"
-    }
   ]
 }

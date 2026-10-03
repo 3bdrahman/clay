@@ -1,7 +1,7 @@
 import providerModelsConfig from './providerModels.config.json';
 import type { ModelInfo } from './types';
 
-export type CloudProviderKind = 'openrouter' | 'nim';
+export type CloudProviderKind = 'openrouter';
 
 interface ApprovedModelConfig {
   id: string;
@@ -35,7 +35,7 @@ export function getCloudModelOptions(provider: CloudProviderKind, catalog: Model
   return CLOUD_MODEL_CONFIG[provider].flatMap((entry) => {
     const model = byId.get(entry.id);
     if (!model) return [];
-    if (provider === 'openrouter' && !isEligibleOpenRouterFreeModel(model)) return [];
+    if (!isEligibleOpenRouterFreeModel(model)) return [];
     return [model];
   });
 }

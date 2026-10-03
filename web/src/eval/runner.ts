@@ -11,7 +11,6 @@ import type { DataAnalyzer, DatasetMeta } from '../services/analyzer';
 import { createWorkflowOrchestrator } from '../services/orchestrator';
 import { listModels, listLocalCatalog, type PickedModels } from '../lib/models';
 import { resolveProviderEndpoint } from '../lib/providers';
-import { ProviderUnreachableError } from '../lib/errors';
 import type { Settings } from '../lib/types';
 import type { DatasetSummary, DocumentSummary } from '../lib/exampleQueries';
 import { generateEvalQuestions } from './dynamicQuestions';
@@ -41,9 +40,6 @@ async function createServices(settings: Settings): Promise<{
   datasetMetadata: DatasetMeta;
 }> {
   const endpoint = resolveProviderEndpoint(settings);
-  if (endpoint.configurationError) {
-    throw new ProviderUnreachableError(endpoint.providerLabel, undefined, { message: endpoint.configurationError, retryable: false });
-  }
   const catalog =
     settings.provider === 'local'
       ? await listLocalCatalog(endpoint.baseUrl, '')

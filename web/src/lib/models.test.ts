@@ -51,11 +51,6 @@ const approvedOpenRouterCatalog: ModelInfo[] = [
   },
 ];
 
-const approvedNimCatalog: ModelInfo[] = [
-  { id: 'nvidia/nemotron-3-super-120b-a12b', ownedBy: 'nvidia', created: 0 },
-  { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', ownedBy: 'nvidia', created: 0 },
-];
-
 describe('modelClass', () => {
   it('classifies tiny models', () => {
     expect(modelClass('meta/llama-3.2-1b-instruct')).toBe('tiny');
@@ -330,7 +325,6 @@ describe('resolveModels', () => {
   const baseSettings: Settings = {
     provider: 'openrouter',
     openrouterApiKey: 'k',
-    nimApiKey: '',
     apiKey: '',
     webSearchProvider: 'duckduckgo',
     serperApiKey: '',
@@ -395,18 +389,6 @@ describe('resolveModels', () => {
     expect(out.picked.chat).toBeUndefined();
     expect(out.catalog).toEqual([]);
     expect(out.warnings[0]).toContain('No approved openrouter models');
-  });
-
-  it('restricts NIM to the approved catalog models', () => {
-    const out = resolveModels(
-      { ...baseSettings, provider: 'nim', nimApiKey: 'nvapi-test' },
-      [
-        { id: 'nvidia/not-approved', ownedBy: 'nvidia', created: 0 },
-        approvedNimCatalog[1],
-      ],
-    );
-    expect(out.picked.chat).toBe('nvidia/nemotron-3.5-lightning-30b-a3b');
-    expect(out.catalog).toEqual([approvedNimCatalog[1]]);
   });
 
   it('uses pickLocalModels and the local catalog when provider=local', () => {

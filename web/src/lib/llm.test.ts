@@ -11,18 +11,6 @@ import {
 } from './errors';
 
 describe('createLLMClient', () => {
-  it('rejects incomplete provider setup for invoke and stream before transmitting a key', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch');
-    const client = createLLMClient({
-      baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'nvapi-test',
-      providerLabel: 'NVIDIA NIM', configurationError: 'Configure a NIM relay first.',
-    });
-    const request = { model: 'test-chat', messages: [{ role: 'user' as const, content: 'Hello' }] };
-    await expect(client.invoke(request)).rejects.toMatchObject({ message: 'Configure a NIM relay first.', retryable: false });
-    await expect(client.stream(request, () => {})).rejects.toMatchObject({ message: 'Configure a NIM relay first.', retryable: false });
-    expect(fetchMock).not.toHaveBeenCalled();
-    fetchMock.mockRestore();
-  });
 
   it('blocks an unapproved cloud model before either request path can incur cost', async () => {
     const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'test-key', providerKind: 'openrouter' });
@@ -75,7 +63,7 @@ describe('createLLMClient', () => {
     expect(() => createLLMClient({ baseUrl: 'http://localhost:11434/v1', apiKey: '' })).not.toThrow();
   });
 
-  it('targets the configured baseUrl (not NIM)', async () => {
+  it('targets the configured baseUrl', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
@@ -109,11 +97,11 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'nvapi-abc' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk-or-own-key' });
     await client.invoke({ messages: [{ role: 'user', content: 'hi' }] });
 
     const callHeaders = (mockFetch.mock.calls[0][1] as { headers: Record<string, string> }).headers;
-    expect(callHeaders.Authorization).toBe('Bearer nvapi-abc');
+    expect(callHeaders.Authorization).toBe('Bearer sk-or-own-key');
   });
 
   it('strips trailing slashes from baseUrl', async () => {
@@ -138,7 +126,7 @@ describe('createLLMClient', () => {
       }),
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'test-key', temperature: 0.3 });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'test-key', temperature: 0.3 });
     const resp = await client.invoke({
       system: 'You are helpful',
       messages: [{ role: 'user', content: 'Hi' }],
@@ -164,7 +152,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [{ message: { content: 'Hi' } }] }),
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', temperature: 0.7 });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key', temperature: 0.7 });
     await client.invoke({ messages: [{ role: 'user', content: 'Hi' }] });
 
     const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
@@ -177,7 +165,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [{ message: { content: '{"key": "value"}' } }] }),
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     await client.invoke({
       messages: [{ role: 'user', content: 'Output JSON' }],
       jsonMode: true,
@@ -193,7 +181,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [{ message: { content: 'Hi' } }] }),
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     await client.invoke({
       messages: [{ role: 'user', content: 'Hi' }],
       maxTokens: 100,
@@ -217,7 +205,7 @@ describe('createLLMClient', () => {
       body: mockStream,
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     await client.stream({
       messages: [{ role: 'user', content: 'Hi' }],
       maxTokens: 50,
@@ -237,9 +225,9 @@ describe('createLLMClient', () => {
       text: async () => 'Invalid API key',
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key', providerLabel: 'OpenRouter' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(InvalidApiKeyError);
-    await expect(client.invoke({ messages: [] })).rejects.toThrow('Invalid API key for NVIDIA NIM');
+    await expect(client.invoke({ messages: [] })).rejects.toThrow('Invalid API key for OpenRouter');
   });
 
   it('throws InvalidApiKeyError on 403 response (forbidden)', async () => {
@@ -250,7 +238,7 @@ describe('createLLMClient', () => {
       text: async () => 'Forbidden',
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key', providerLabel: 'OpenRouter' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(InvalidApiKeyError);
     await expect(client.invoke({ messages: [] })).rejects.toThrow('API key rejected');
   });
@@ -264,7 +252,7 @@ describe('createLLMClient', () => {
       text: async () => 'Rate limited',
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key', providerLabel: 'OpenRouter' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(RateLimitError);
     await expect(client.invoke({ messages: [] })).rejects.toThrow('rate limit exceeded');
   });
@@ -277,7 +265,7 @@ describe('createLLMClient', () => {
       text: async () => 'Server error',
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key', providerLabel: 'OpenRouter' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(ProviderUnreachableError);
     await expect(client.invoke({ messages: [] })).rejects.toThrow('Cannot reach');
   });
@@ -290,7 +278,7 @@ describe('createLLMClient', () => {
       text: async () => 'Unavailable',
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key', providerLabel: 'OpenRouter' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(ProviderUnreachableError);
     const error = await client.invoke({ messages: [] }).catch(e => e);
     expect(error.retryable).toBe(true);
@@ -304,7 +292,7 @@ describe('createLLMClient', () => {
       text: async () => 'Model not found',
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key', providerLabel: 'OpenRouter' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(ModelNotFoundError);
   });
 
@@ -316,14 +304,14 @@ describe('createLLMClient', () => {
       text: async () => 'Bad request',
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key', providerLabel: 'NVIDIA NIM' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key', providerLabel: 'OpenRouter' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(GenerationFailedError);
   });
 
   it('throws ProviderUnreachableError on network error', async () => {
     mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(ProviderUnreachableError);
   });
 
@@ -331,7 +319,7 @@ describe('createLLMClient', () => {
     const abortError = new DOMException('Aborted', 'AbortError');
     mockFetch.mockRejectedValue(abortError);
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     await expect(client.stream({ messages: [] }, () => {})).rejects.toThrow(StreamInterruptedError);
   });
 
@@ -339,7 +327,7 @@ describe('createLLMClient', () => {
     const controller = new AbortController();
     controller.abort();
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     await expect(client.stream({ messages: [] }, () => {}, controller.signal)).rejects.toThrow(StreamInterruptedError);
   });
 
@@ -349,7 +337,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [] }),
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     await expect(client.invoke({ messages: [] })).rejects.toThrow(GenerationFailedError);
   });
 
@@ -374,7 +362,7 @@ describe('createLLMClient', () => {
       }),
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     const resp = await client.invoke({
       model: 'm',
       messages: [{ role: 'user', content: 'q' }],
@@ -393,7 +381,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     await client.invoke({
       model: 'm',
       messages: [{ role: 'user', content: 'q' }],
@@ -412,7 +400,7 @@ describe('createLLMClient', () => {
       json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
     });
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     await client.invoke({
       model: 'm',
       messages: [
@@ -432,7 +420,7 @@ describe('createLLMClient', () => {
     const controller = new AbortController();
     controller.abort();
 
-    const client = createLLMClient({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'key' });
+    const client = createLLMClient({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'key' });
     await expect(client.invoke({ messages: [{ role: 'user', content: 'hi' }] }, controller.signal)).rejects.toThrow();
   });
 

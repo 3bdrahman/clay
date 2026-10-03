@@ -8,7 +8,7 @@ export default defineConfig({
     environment: 'happy-dom',
     globals: false,
     setupFiles: ['./vitest.setup.ts'],
-    include: ['src/**/*.{test,spec}.{ts,tsx}', '../workers/**/*.test.ts'],
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['node_modules', 'dist'],
     testTimeout: 30000,
     pool: 'vmThreads',

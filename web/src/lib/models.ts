@@ -21,9 +21,9 @@ export interface PickedModels {
 
 /**
  * Fetch the model catalog from any supported provider.
- * @param provider - Provider kind (openrouter, nim, local)
+ * @param provider - Provider kind (openrouter, local)
  * @param apiKey - API key for providers that require it
- * @param baseUrl - Resolved endpoint (including a configured NIM relay or local server)
+ * @param baseUrl - Resolved OpenRouter endpoint or local server
  * @returns Array of model info objects with id, ownedBy, created
  * @throws ModelCatalogEmptyError if catalog is empty
  * @throws InvalidApiKeyError if API key is invalid (401/403)

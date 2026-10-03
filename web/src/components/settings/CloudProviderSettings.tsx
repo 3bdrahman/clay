@@ -41,40 +41,17 @@ export function CloudProviderSettings({
         <div className="flex items-center gap-2">
           <span className="font-semibold text-sm">{config.displayName}</span>
           <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400">
-            {settings.provider === 'nim' ? 'Developer credits' : 'Free models'}
+            Free models
           </span>
           <span className="text-[10px] text-ink-400 ml-auto">
             {availableModels.length > 0 ? `${modelOptions.length} approved models` : 'not loaded'}
           </span>
         </div>
         <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1">
-          {endpoint.configurationError ? 'Connect your relay to enable NIM requests.' : `Model requests go to ${endpoint.baseUrl}.`}
+          Model requests go to {endpoint.baseUrl}.
           {' '}One chat model handles routing, analysis, and answers. Embeddings run locally in your browser.
         </p>
       </div>
-
-      {settings.provider === 'nim' && (
-        <div className="space-y-2">
-          <label className="block text-xs font-semibold text-ink-600 dark:text-ink-300" htmlFor="nim-relay-base-url">NIM relay base URL</label>
-          <input
-            id="nim-relay-base-url"
-            aria-label="NIM relay base URL"
-            type="url"
-            value={settings.nimBaseUrl ?? ''}
-            onChange={e => updateSettings({ nimBaseUrl: e.target.value })}
-            placeholder={import.meta.env.VITE_NIM_BASE_URL || (import.meta.env.DEV ? '/nim-api/v1 (development proxy)' : 'https://your-relay.workers.dev/v1')}
-            aria-describedby="nim-relay-help"
-            aria-invalid={!!endpoint.configurationError}
-            className="w-full px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none"
-          />
-          <p id="nim-relay-help" className="text-xs text-ink-500 dark:text-ink-400">
-            NVIDIA blocks direct browser requests. Use a relay you control; your key and model requests pass through it.
-            {' '}<a href="https://github.com/3bdrahman/clay/blob/master/docs/nim-relay.md" target="_blank" rel="noopener noreferrer" className="text-brand-600 dark:text-brand-400 underline">Relay setup</a>
-          </p>
-          {endpoint.configurationError && <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">{endpoint.configurationError}</p>}
-          <p className="text-xs text-ink-500 dark:text-ink-400">NVIDIA developer credits and account limits apply. Clay cannot verify your remaining credits.</p>
-        </div>
-      )}
 
       <div>
         <label className="block text-xs font-semibold uppercase tracking-wide text-ink-500 dark:text-ink-400 mb-2">
@@ -114,9 +91,7 @@ export function CloudProviderSettings({
           </button>
         </div>
         <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5">
-          {settings.provider === 'nim'
-            ? 'Stored in this browser. Sent through your configured relay to NVIDIA.'
-            : `Stored in this browser. Sent only to ${config.displayName}.`}
+          Stored in this browser. Sent only to {config.displayName}.
         </p>
         {config.apiKeyUrl && (
           <a
@@ -153,14 +128,12 @@ export function CloudProviderSettings({
               Model selection
             </div>
             <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-0.5">
-              {provider === 'openrouter'
-                ? 'Two approved free choices. Live prices are checked and paid routing is blocked.'
-                : 'Two approved developer-access choices. NVIDIA credits and account limits apply.'}
+              Two approved free choices. Live prices are checked and paid routing is blocked.
             </p>
           </div>
           <button
             onClick={refreshModels}
-            disabled={!currentApiKey || modelsLoading || !!endpoint.configurationError}
+            disabled={!currentApiKey || modelsLoading}
             className="px-2 py-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
             type="button"
             title={`Fetch latest model catalog from ${config.displayName}`}
@@ -182,13 +155,13 @@ export function CloudProviderSettings({
           </button>
         </div>
 
-        {modelsError && modelsError !== endpoint.configurationError && (
+        {modelsError && (
           <div className="text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 rounded px-2 py-1.5">
             {modelsError}
           </div>
         )}
 
-        {availableModels.length === 0 && !modelsLoading && !modelsError && !endpoint.configurationError && (
+        {availableModels.length === 0 && !modelsLoading && !modelsError && (
           <div className="text-[11px] text-ink-500 dark:text-ink-400 italic px-1">
             Add an API key to load the catalog.
           </div>
@@ -206,7 +179,7 @@ export function CloudProviderSettings({
               aria-label="Chat model"
               value={selectedModel || pickedModels.chat || ''}
               onChange={e => updateSettings({ pickedModelsOverride: { chatModel: e.target.value } })}
-              disabled={modelOptions.length === 0 || modelsLoading || !!endpoint.configurationError}
+              disabled={modelOptions.length === 0 || modelsLoading}
               className="w-full px-3 py-2 border border-ink-200 dark:border-ink-700 rounded-lg bg-white dark:bg-ink-800 text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-900 outline-none disabled:opacity-50"
             >
               <option value="" disabled>Choose an approved model</option>

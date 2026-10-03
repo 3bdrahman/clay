@@ -22,7 +22,6 @@ export { _resetWriteQueue } from './vectorWriteQueue';
  * These can be overridden via VectorStoreConfig at creation time.
  * 
  * - DEFAULT_TOP_K: 8 results balances precision/recall for typical RAG queries.
- *   Chosen based on empirical testing with NIM embedding models.
  * - DEFAULT_SCORE_THRESHOLD: 0 (no threshold) - cosine similarity can be negative
  *   for orthogonal vectors; filtering at 0 keeps relevant but allows borderline.
  * - DEFAULT_MMR_LAMBDA: 0.5 - equal weight to relevance and diversity.

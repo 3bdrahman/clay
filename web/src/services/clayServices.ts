@@ -81,7 +81,6 @@ export function createClayServiceBundle(input: ClayServiceBundleInput): ClayServ
     providerKind: settings.provider,
     supportsJsonMode: settings.provider !== 'openrouter'
       || catalog.find(model => model.id === picked.chat)?.supportedParameters?.includes('response_format') === true,
-    ...(endpoint.configurationError ? { configurationError: endpoint.configurationError } : {}),
   });
 
   const datasets = new Map<string, unknown>(analyzerTables);

@@ -55,7 +55,6 @@ async function flush(n = 3) {
 const baseSettings = {
   provider: 'openrouter' as const,
   openrouterApiKey: '',
-  nimApiKey: '',
   apiKey: '',
   webSearchProvider: 'duckduckgo' as const,
   serperApiKey: '',

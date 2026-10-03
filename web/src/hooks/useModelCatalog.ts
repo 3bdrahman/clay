@@ -32,10 +32,6 @@ export function useFetchCloudModels(deps: ModelCatalogDeps) {
         return current.provider === provider && currentEndpoint.baseUrl === endpoint.baseUrl && currentEndpoint.apiKey === key;
       };
       if (!matchesCurrentSettings()) return [];
-      if (endpoint.configurationError) {
-        setModelsError(endpoint.configurationError);
-        return [];
-      }
       const cached = fetchedEndpointRef.current;
       if (
         !force &&

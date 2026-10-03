@@ -5,7 +5,6 @@ import type { Settings } from './types';
 const baseSettings: Settings = {
   provider: 'openrouter',
   openrouterApiKey: '',
-  nimApiKey: '',
   apiKey: '',
   webSearchProvider: 'duckduckgo',
   serperApiKey: '',
@@ -24,8 +23,8 @@ const baseSettings: Settings = {
 describe('resolveProviderEndpoint', () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it('offers exactly OpenRouter, NVIDIA NIM, and local', () => {
-    expect(Object.keys(PROVIDER_REGISTRY)).toEqual(['openrouter', 'nim', 'local']);
+  it('offers exactly OpenRouter and local', () => {
+    expect(Object.keys(PROVIDER_REGISTRY)).toEqual(['openrouter', 'local']);
   });
 
   it('returns local server URL and empty key for local provider', () => {
@@ -64,55 +63,8 @@ describe('resolveProviderEndpoint', () => {
     expect(out.providerLabel).toBe('OpenRouter');
   });
 
-  it('routes NIM through its configured gateway with only its own API key', () => {
-    const out = resolveProviderEndpoint({
-      ...baseSettings, provider: 'nim', nimApiKey: 'nvapi-test', openrouterApiKey: 'sk-or-other',
-      nimBaseUrl: ' https://my-nim.example/v1/ ',
-    });
-    expect(out.baseUrl).toBe('https://my-nim.example/v1');
-    expect(out.apiKey).toBe('nvapi-test');
-    expect(out.providerLabel).toBe('NVIDIA NIM');
-    expect(out.configurationError).toBeUndefined();
-  });
-
   it('never sends an ambiguous legacy key to a cloud provider', () => {
     expect(resolveProviderEndpoint({ ...baseSettings, apiKey: 'old-provider-key' }).apiKey).toBe('');
   });
 
-  it('uses the real same-origin NIM proxy during development', () => {
-    vi.stubEnv('DEV', true);
-    vi.stubEnv('VITE_NIM_BASE_URL', '');
-    const out = resolveProviderEndpoint({ ...baseSettings, provider: 'nim' });
-    expect(out.baseUrl).toBe('/nim-api/v1');
-    expect(out.configurationError).toBeUndefined();
-  });
-
-  it('requires a relay in production instead of advertising a blocked direct request', () => {
-    vi.stubEnv('DEV', false);
-    vi.stubEnv('VITE_NIM_BASE_URL', '');
-    const out = resolveProviderEndpoint({ ...baseSettings, provider: 'nim', nimApiKey: 'nvapi-test' });
-    expect(out.configurationError).toMatch(/relay/i);
-  });
-
-  it('supports a deployment-configured NIM relay without embedding a key', () => {
-    vi.stubEnv('DEV', false);
-    vi.stubEnv('VITE_NIM_BASE_URL', 'https://clay-nim.workers.dev/v1/');
-    const out = resolveProviderEndpoint({ ...baseSettings, provider: 'nim' });
-    expect(out.baseUrl).toBe('https://clay-nim.workers.dev/v1');
-    expect(out.apiKey).toBe('');
-    expect(out.configurationError).toBeUndefined();
-  });
-
-  it.each([
-    'https://integrate.api.nvidia.com/v1',
-    'javascript:alert(1)',
-    'https://user:password@relay.example/v1',
-    'https://relay.example/v1?key=secret',
-    'https://relay.example/v1#fragment',
-    'http://remote.example/v1',
-    'https://relay.example',
-  ])('rejects an unusable or unsafe NIM base URL: %s', nimBaseUrl => {
-    const out = resolveProviderEndpoint({ ...baseSettings, provider: 'nim', nimBaseUrl });
-    expect(out.configurationError).toBeTruthy();
-  });
 });

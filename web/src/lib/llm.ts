@@ -21,7 +21,6 @@ export interface LLMClientConfig {
   temperature?: number;
   providerLabel?: string;
   timeoutMs?: number;
-  configurationError?: string;
   providerKind?: ProviderKind;
   supportsJsonMode?: boolean;
 }
@@ -46,13 +45,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
     });
   }
 
-  function requireConfiguredEndpoint(req: LLMRequest): void {
-    if (config.configurationError) {
-      throw new ProviderUnreachableError(providerLabel, undefined, {
-        message: config.configurationError,
-        retryable: false,
-      });
-    }
+  function requireApprovedModel(req: LLMRequest): void {
     const provider = config.providerKind;
     if (provider && provider !== 'local' && !isApprovedCloudModel(provider, req.model ?? '')) {
       throw new ModelNotFoundError(req.model ?? '', getApprovedCloudModelIds(provider));
@@ -266,11 +259,11 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
 
   return {
     async invoke(req: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
-      requireConfiguredEndpoint(req);
+      requireApprovedModel(req);
       return callOpenAICompatible(req, signal);
     },
     async stream(req: LLMRequest, onToken: (token: string) => void, signal?: AbortSignal): Promise<LLMResponse> {
-      requireConfiguredEndpoint(req);
+      requireApprovedModel(req);
       return streamOpenAICompatible({ ...streamConfig, supportsJsonMode: jsonModeSupported }, req, onToken, signal);
     },
   };

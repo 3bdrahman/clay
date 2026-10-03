@@ -5,4 +5,3 @@ faiss_index
 .codegraph/
 *.local
 node_modules/
-.wrangler/

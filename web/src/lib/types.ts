@@ -17,7 +17,7 @@ export interface LocalModelPicks {
   chat: string;
 }
 
-export type ProviderKind = 'openrouter' | 'nim' | 'local';
+export type ProviderKind = 'openrouter' | 'local';
 
 export interface PickedModelsOverride {
   chatModel?: string;
@@ -25,11 +25,8 @@ export interface PickedModelsOverride {
 
 export interface Settings {
   provider: ProviderKind;
-  // Provider API keys - each provider has its own key
+  // OpenRouter credentials are never sent to a local server.
   openrouterApiKey: string;
-  nimApiKey: string;
-  // Full browser-accessible NIM relay base URL, including /v1.
-  nimBaseUrl?: string;
   // Legacy field for backward compat (migration)
   apiKey: string;
   webSearchProvider: 'serper' | 'duckduckgo' | 'none';

@@ -11,7 +11,6 @@ import {
   ModelNotFoundError,
   LocalServerUrlMissingError,
   RagErrorCode,
-  ProviderUnreachableError,
   type RagError,
 } from './errors';
 
@@ -55,12 +54,6 @@ export function validateSettings(
     if (!endpoint.apiKey) {
       const err = new NoProviderError(settings.provider);
       addError(err);
-    }
-    if (endpoint.configurationError) {
-      addError(new ProviderUnreachableError(endpoint.providerLabel, undefined, {
-        message: endpoint.configurationError,
-        retryable: false,
-      }));
     }
   }
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   RagErrorCode,
   NoProviderError,
@@ -98,11 +98,11 @@ describe('RagError subclasses', () => {
 
   describe('ProviderUnreachableError', () => {
     it('creates error for network failure', () => {
-      const err = new ProviderUnreachableError('NVIDIA NIM');
+      const err = new ProviderUnreachableError('OpenRouter');
       expect(err.code).toBe(RagErrorCode.PROVIDER_UNREACHABLE);
-      expect(err.message).toContain('Cannot reach NVIDIA NIM');
+      expect(err.message).toContain('Cannot reach OpenRouter');
       expect(err.retryable).toBe(true);
-      expect(err.provider).toBe('NVIDIA NIM');
+      expect(err.provider).toBe('OpenRouter');
     });
 
     it('creates error for timeout', () => {
@@ -121,11 +121,11 @@ describe('RagError subclasses', () => {
 
   describe('InvalidApiKeyError', () => {
     it('creates error for 401', () => {
-      const err = new InvalidApiKeyError('NVIDIA NIM', 401);
+      const err = new InvalidApiKeyError('OpenRouter', 401);
       expect(err.code).toBe(RagErrorCode.INVALID_API_KEY);
       expect(err.message).toContain('Invalid API key');
       expect(err.retryable).toBe(false);
-      expect(err.provider).toBe('NVIDIA NIM');
+      expect(err.provider).toBe('OpenRouter');
       expect(err.context?.statusCode).toBe(401);
     });
 
@@ -312,41 +312,38 @@ describe('RagError subclasses', () => {
 
   describe('CorsBlockedError', () => {
     it('creates error with correct code and message', () => {
-      const err = new CorsBlockedError('NVIDIA NIM');
+      const err = new CorsBlockedError('OpenRouter');
       expect(err.code).toBe(RagErrorCode.CORS_BLOCKED);
       expect(err.message).toContain('CORS');
-      expect(err.message).toContain('NVIDIA NIM');
+      expect(err.message).toContain('OpenRouter');
       expect(err.retryable).toBe(false);
-      expect(err.provider).toBe('NVIDIA NIM');
+      expect(err.provider).toBe('OpenRouter');
       expect(err.context?.blockedBy).toBe('browser-cors');
     });
 
     it('includes short message in context', () => {
-      const err = new CorsBlockedError('NVIDIA NIM');
+      const err = new CorsBlockedError('OpenRouter');
       expect(err.context?.shortMessage).toContain('does not allow requests from this origin');
-      expect(err.context?.shortMessage).not.toContain('build.nvidia.com');
     });
 
     it('toUserMessage returns short message', () => {
-      const err = new CorsBlockedError('NVIDIA NIM');
+      const err = new CorsBlockedError('OpenRouter');
       expect(err.toUserMessage()).toBe(err.context?.shortMessage);
     });
 
     it('accepts custom message', () => {
-      const err = new CorsBlockedError('NVIDIA NIM', undefined, 'Custom CORS message');
+      const err = new CorsBlockedError('OpenRouter', undefined, 'Custom CORS message');
       expect(err.message).toBe('Custom CORS message');
     });
 
     it('includes cause', () => {
       const cause = new TypeError('Failed to fetch');
-      const err = new CorsBlockedError('NVIDIA NIM', cause);
+      const err = new CorsBlockedError('OpenRouter', cause);
       expect(err.cause).toBe(cause);
     });
 
-    it('default message references CSP and local-server solutions, not NIM-era proxies', () => {
+    it('default message references CSP and local-server solutions', () => {
       const err = new CorsBlockedError('OpenRouter');
-      expect(err.message).not.toContain('build.nvidia.com');
-      expect(err.message).not.toContain('VITE_NIM_BASE_URL');
       expect(err.message).not.toContain('Netlify');
       expect(err.message).toContain('VITE_CSP_EXTRA_CONNECT_SRC');
       expect(err.message).toContain('Switch to Local server in Settings');
@@ -354,20 +351,24 @@ describe('RagError subclasses', () => {
   });
 
   describe('isLikelyCorsBlock', () => {
-    it('returns true for fetch TypeError to NIM in production', () => {
-      const error = new TypeError('Failed to fetch');
-      expect(typeof isLikelyCorsBlock(error, 'NVIDIA NIM')).toBe('boolean');
+    it('returns true for fetch TypeError to OpenRouter in production', () => {
+      vi.stubEnv('DEV', false);
+      try {
+        expect(isLikelyCorsBlock(new TypeError('Failed to fetch'), 'OpenRouter')).toBe(true);
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
 
     it('returns false for non-TypeError', () => {
-      expect(isLikelyCorsBlock(new Error('generic'), 'NVIDIA NIM')).toBe(false);
+      expect(isLikelyCorsBlock(new Error('generic'), 'OpenRouter')).toBe(false);
     });
 
     it('returns false for TypeError without fetch in message', () => {
-      expect(isLikelyCorsBlock(new TypeError('other error'), 'NVIDIA NIM')).toBe(false);
+      expect(isLikelyCorsBlock(new TypeError('other error'), 'OpenRouter')).toBe(false);
     });
 
-    it('returns false for non-NIM provider', () => {
+    it('returns false for local provider', () => {
       const error = new TypeError('Failed to fetch');
       expect(isLikelyCorsBlock(error, 'local')).toBe(false);
     });

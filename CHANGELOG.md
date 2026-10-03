@@ -6,10 +6,9 @@ Notable changes to Clay. Unreleased changes are not a tagged release.
 
 ### Providers and model policy
 
-- Provider choices are now OpenRouter, NVIDIA NIM, and local servers. Groq settings migrate without reusing its key or model selection for another provider.
-- Cloud selection is limited to two approved models per provider. OpenRouter requires exact free variants, live zero pricing, supported tools, and zero-price routing caps; local servers retain their installed-model choices.
-- Added a deployable NIM relay with origin, endpoint, model, authentication, and request-size checks. Both catalog discovery and chat use the same relay; the relay streams responses and preserves rate-limit timing.
-- NIM's missing-relay setup is explicit. Local ingestion remains usable while model setup is incomplete, and stale catalog requests cannot overwrite the current provider.
+- Provider choices are now OpenRouter and local servers. Retired Groq and NIM settings migrate without reusing their keys, relay URLs, or model selections for another provider.
+- Cloud selection is limited to OpenRouter's approved free-model shortlist. OpenRouter requires exact free variants, live zero pricing, supported tools, and zero-price routing caps; local servers retain their installed-model choices.
+- Removed the NIM relay from the current product surface. Local ingestion remains usable while model setup is incomplete, and stale catalog requests cannot overwrite the current provider.
 
 ### Fixed
 

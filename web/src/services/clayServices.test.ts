@@ -48,7 +48,6 @@ function baseSettings(overrides: Partial<Settings>): Settings {
   return {
     provider: 'openrouter',
     openrouterApiKey: '',
-    nimApiKey: '',
     apiKey: '',
     webSearchProvider: 'duckduckgo',
     serperApiKey: '',

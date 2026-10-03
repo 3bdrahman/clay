@@ -27,9 +27,8 @@ describe('modelPolicy', () => {
   it('externalizes exact approved cloud model ids and labels', () => {
     expect(isApprovedCloudModel('openrouter', 'nvidia/nemotron-3-super-120b-a12b:free')).toBe(true);
     expect(isApprovedCloudModel('openrouter', 'nvidia/nemotron-3-super-120b-a12b')).toBe(false);
-    expect(isApprovedCloudModel('nim', 'nvidia/nemotron-3.5-lightning-30b-a3b')).toBe(true);
-    expect(getCloudModelLabel('nim', 'nvidia/nemotron-3-super-120b-a12b')).toBe(
-      'Nemotron 3 Super 120B',
+    expect(getCloudModelLabel('openrouter', 'nvidia/nemotron-3-super-120b-a12b:free')).toBe(
+      'Nemotron 3 Super 120B (free)',
     );
   });
 
@@ -72,18 +71,6 @@ describe('modelPolicy', () => {
       { ...openRouterNemotron, supportedParameters: ['tools', 'response_format'] },
       { ...openRouterQwen, supportedParameters: ['tools', 'tool_choice'] },
     ])).toEqual([]);
-  });
-
-  it('keeps NIM to the approved model ids that are present in the catalog', () => {
-    const options = getCloudModelOptions('nim', [
-      { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', ownedBy: 'nvidia', created: 0 },
-      { id: 'nvidia/not-approved', ownedBy: 'nvidia', created: 0 },
-      { id: 'nvidia/nemotron-3-super-120b-a12b', ownedBy: 'nvidia', created: 0 },
-    ]);
-    expect(options.map((model) => model.id)).toEqual([
-      'nvidia/nemotron-3-super-120b-a12b',
-      'nvidia/nemotron-3.5-lightning-30b-a3b',
-    ]);
   });
 
   it('exports the OpenRouter free routing guard used by request code', () => {

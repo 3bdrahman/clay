@@ -104,9 +104,8 @@ export function useClay(): UseClayResult {
 
         const endpoint = resolveProviderEndpoint(settings);
         const isLocal = settings.provider === 'local';
-        const needsChatConfiguration = !!endpoint.configurationError || endpoint.baseUrl.length === 0 || (!isLocal && endpoint.apiKey.trim().length === 0);
+        const needsChatConfiguration = endpoint.baseUrl.length === 0 || (!isLocal && endpoint.apiKey.trim().length === 0);
         setNeedsConfiguration(needsChatConfiguration);
-        if (endpoint.configurationError) setModelsError(endpoint.configurationError);
 
         let catalog = availableModels;
         if (settings.provider === 'local') {
@@ -115,7 +114,7 @@ export function useClay(): UseClayResult {
             const local = await fetchLocalModels(url);
             if (local.length > 0) catalog = local;
           }
-        } else if (endpoint.apiKey && !endpoint.configurationError) {
+        } else if (endpoint.apiKey) {
           const fresh = await fetchCloudModels(endpoint.apiKey);
           if (fresh.length > 0) catalog = fresh;
         }
