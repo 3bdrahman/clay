@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { ChatMessage, Settings, ModelInfo } from './lib/types';
 import { PROVIDER_REGISTRY, LOCAL_DEFAULT_BASE_URL } from './lib/providers';
 import { migrateChatSelection, migrateLegacyLocalModels } from './lib/localModelsMigrate';
+import { inspectLocalServerUrl } from './lib/localEndpoint';
 import type { ProviderKind } from './lib/types';
 
 export interface SandboxDataset {
@@ -59,7 +60,7 @@ interface AppState {
   setModels: (models: ModelInfo[]) => void;
   setModelsLoading: (loading: boolean) => void;
   setModelsError: (err: string | null) => void;
-  setLocalCatalog: (models: ModelInfo[]) => void;
+  setLocalCatalog: (models: ModelInfo[], baseUrl?: string) => void;
   addSandboxDataset: (d: SandboxDataset) => void;
   addSandboxDocument: (d: SandboxDocument) => void;
   removeSandboxDataset: (name: string) => void;
@@ -88,6 +89,7 @@ const DEFAULT_SETTINGS: Settings = {
     chat: '',
   },
   localCatalog: [],
+  localCatalogBaseUrl: '',
   localCatalogFetchedAt: 0,
   pickedModelsOverride: {
     chatModel: '',
@@ -146,6 +148,33 @@ function clearModelCatalogState() {
   };
 }
 
+function normalizedLocalBaseUrl(value: string): string | null {
+  const inspected = inspectLocalServerUrl(value);
+  return inspected.error ? null : inspected.baseUrl;
+}
+
+function clearLocalCatalogState(settings: Settings, clearPick: boolean): Settings {
+  return {
+    ...settings,
+    localCatalog: [],
+    localCatalogBaseUrl: '',
+    localCatalogFetchedAt: 0,
+    ...(clearPick ? { localModels: { chat: '' } } : {}),
+  };
+}
+
+function resetLocalCatalogForUnprovenIdentity(settings: Settings): Settings {
+  if (settings.localCatalog.length === 0) return settings;
+  const currentBaseUrl = normalizedLocalBaseUrl(settings.localServerUrl);
+  if (!settings.localCatalogBaseUrl) {
+    return clearLocalCatalogState(settings, false);
+  }
+  if (currentBaseUrl !== settings.localCatalogBaseUrl) {
+    return clearLocalCatalogState(settings, true);
+  }
+  return settings;
+}
+
 function activeCloudApiKeyChanged(settings: Settings, patch: Partial<Settings>): boolean {
   if (settings.provider === 'openrouter') {
     return patch.openrouterApiKey !== undefined && patch.openrouterApiKey !== settings.openrouterApiKey;
@@ -193,7 +222,8 @@ function normalizePersistedSettings(
     }
   }
 
-  return providerChanged ? clearProviderScopedModelState(mergedSettings) : mergedSettings;
+  const localIdentityChecked = resetLocalCatalogForUnprovenIdentity(mergedSettings);
+  return providerChanged ? clearProviderScopedModelState(localIdentityChecked) : localIdentityChecked;
 }
 
 function trimMessage(msg: ChatMessage): ChatMessage {
@@ -243,24 +273,36 @@ export const useAppStore = create<AppState>()(
           set(state => {
             const next = { ...state.settings, ...patch };
             const providerChanged = patch.provider !== undefined && patch.provider !== state.settings.provider;
+            const localUrlChanged = patch.localServerUrl !== undefined && patch.localServerUrl !== state.settings.localServerUrl;
+            const currentLocalBaseUrl = normalizedLocalBaseUrl(state.settings.localServerUrl);
+            const nextLocalBaseUrl = normalizedLocalBaseUrl(next.localServerUrl);
+            const localEndpointChanged = localUrlChanged && currentLocalBaseUrl !== nextLocalBaseUrl;
+            const settings = localEndpointChanged ? clearLocalCatalogState(next, true) : next;
             if (providerChanged) {
-              next.pickedModelsOverride = { chatModel: '' };
+              settings.pickedModelsOverride = { chatModel: '' };
               if (state.settings.provider === 'local' && patch.provider !== 'local') {
-                next.localCatalog = [];
-                next.localCatalogFetchedAt = 0;
+                settings.localCatalog = [];
+                settings.localCatalogBaseUrl = '';
+                settings.localCatalogFetchedAt = 0;
               }
               return {
-                settings: next,
+                settings,
                 ...clearModelCatalogState(),
               };
             }
             if (activeCloudApiKeyChanged(state.settings, patch)) {
               return {
-                settings: next,
+                settings,
                 ...clearModelCatalogState(),
               };
             }
-            return { settings: next };
+            if (localEndpointChanged && state.settings.provider === 'local') {
+              return {
+                settings,
+                ...clearModelCatalogState(),
+              };
+            }
+            return { settings };
           }),
         createConversation: () => {
           const conv = makeConversation();
@@ -338,12 +380,13 @@ export const useAppStore = create<AppState>()(
         setModels: models => set({ availableModels: models, modelsFetchedAt: Date.now() }),
         setModelsLoading: loading => set({ modelsLoading: loading }),
         setModelsError: err => set({ modelsError: err }),
-        setLocalCatalog: models =>
+        setLocalCatalog: (models, baseUrl) =>
           set(state => ({
             settings: {
               ...state.settings,
               localCatalog: models,
-              localCatalogFetchedAt: Date.now(),
+              localCatalogBaseUrl: baseUrl ?? normalizedLocalBaseUrl(state.settings.localServerUrl) ?? '',
+              localCatalogFetchedAt: models.length > 0 ? Date.now() : 0,
             },
           })),
         addSandboxDataset: d =>

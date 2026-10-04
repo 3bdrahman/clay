@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import type { ChatMessage } from '../lib/types';
+import { RagErrorCode } from '../lib/errors';
 import { CitationPanel } from './CitationPanel';
 import { WorkflowGraph } from './WorkflowGraph';
 
@@ -19,9 +20,7 @@ export function MessageBubble({ message }: Props) {
   const isError = !!message.error;
   const workflowError = message.workflow?.error;
   const isWorkflowError = !!workflowError;
-  const isCorsError = isWorkflowError && 
-    (workflowError.code === 'CORS_BLOCKED' || 
-     String(workflowError.message).includes('CORS'));
+  const isCorsError = isWorkflowError && workflowError.code === RagErrorCode.CORS_BLOCKED;
   const wf = message.workflow;
   const hasSources = !!wf && ((wf.citations?.length ?? 0) > 0 || (wf.documents?.length ?? 0) > 0 || (wf.webResults?.length ?? 0) > 0 || !!wf.dataAnalysis);
   const hasSteps = (wf?.steps?.length ?? 0) > 0;

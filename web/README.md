@@ -12,4 +12,6 @@ npm run verify
 
 Use OpenRouter's approved free models or models installed on a local OpenAI-compatible server. Document embeddings run locally using a fixed model, and web search can use Mwmbl's public keyless API; API credentials are not needed to load files.
 
+For local models, use the server's `/v1` base URL in Settings and allow CORS for the exact page origin shown there. The full setup guide is in [docs/local-models.md](../docs/local-models.md).
+
 See the [project README](../README.md) for the demo walkthrough, architecture, data handling, verification, and deployment configuration.

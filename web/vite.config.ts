@@ -35,6 +35,8 @@ function cspPlugin() {
         // loopback origins and handle CORS themselves.
         'http://localhost:*',
         'http://127.0.0.1:*',
+        'https://localhost:*',
+        'https://127.0.0.1:*',
         'https://openrouter.ai',
         'https://mwmbl.org',
         'https://google.serper.dev',

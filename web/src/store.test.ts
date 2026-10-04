@@ -18,6 +18,7 @@ describe('useAppStore.updateSettings', () => {
         localServerUrl: LOCAL_DEFAULT_BASE_URL,
         localModels: { chat: '' },
         localCatalog: [],
+        localCatalogBaseUrl: '',
         localCatalogFetchedAt: 0,
         pickedModelsOverride: { chatModel: '' },
       },
@@ -30,6 +31,7 @@ describe('useAppStore.updateSettings', () => {
         ...useAppStore.getState().settings,
         provider: 'local',
         localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
+        localCatalogBaseUrl: 'http://localhost:11434/v1',
         localCatalogFetchedAt: 12345,
       },
     });
@@ -37,6 +39,7 @@ describe('useAppStore.updateSettings', () => {
     const after = useAppStore.getState().settings;
     expect(after.provider).toBe('openrouter');
     expect(after.localCatalog).toEqual([]);
+    expect(after.localCatalogBaseUrl).toBe('');
     expect(after.localCatalogFetchedAt).toBe(0);
   });
 
@@ -46,6 +49,7 @@ describe('useAppStore.updateSettings', () => {
         ...useAppStore.getState().settings,
         provider: 'local',
         localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
+        localCatalogBaseUrl: 'http://localhost:11434/v1',
         localCatalogFetchedAt: 12345,
       },
     });
@@ -53,21 +57,58 @@ describe('useAppStore.updateSettings', () => {
     const after = useAppStore.getState().settings;
     expect(after.provider).toBe('local');
     expect(after.localCatalog.length).toBe(1);
+    expect(after.localCatalogBaseUrl).toBe('http://localhost:11434/v1');
     expect(after.localCatalogFetchedAt).toBe(12345);
   });
 
-  it('updates localServerUrl without clearing the catalog', () => {
+  it('keeps local catalog and pick when localServerUrl has the same normalized endpoint', () => {
     useAppStore.setState({
       settings: {
         ...useAppStore.getState().settings,
         provider: 'local',
+        localServerUrl: 'http://localhost:11434/v1/',
+        localModels: { chat: 'llama3.1:8b' },
         localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
+        localCatalogBaseUrl: 'http://localhost:11434/v1',
+        localCatalogFetchedAt: 12345,
       },
     });
-    useAppStore.getState().updateSettings({ localServerUrl: 'http://localhost:1234/v1' });
+    useAppStore.getState().updateSettings({ localServerUrl: 'http://localhost:11434' });
     const after = useAppStore.getState().settings;
-    expect(after.localServerUrl).toBe('http://localhost:1234/v1');
+    expect(after.localServerUrl).toBe('http://localhost:11434');
     expect(after.localCatalog.length).toBe(1);
+    expect(after.localCatalogBaseUrl).toBe('http://localhost:11434/v1');
+    expect(after.localCatalogFetchedAt).toBe(12345);
+    expect(after.localModels.chat).toBe('llama3.1:8b');
+  });
+
+  it('clears local catalog, stamp, and pick when localServerUrl changes server identity', () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        provider: 'local',
+        localServerUrl: 'http://localhost:11434/v1',
+        localModels: { chat: 'llama3.1:8b' },
+        localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
+        localCatalogBaseUrl: 'http://localhost:11434/v1',
+        localCatalogFetchedAt: 12345,
+      },
+      availableModels: [{ id: 'stale-cloud', ownedBy: 'openrouter', created: 1 }],
+      modelsFetchedAt: 12345,
+      modelsError: 'old local request failed',
+      modelsLoading: true,
+    });
+    useAppStore.getState().updateSettings({ localServerUrl: 'http://localhost:1234/v1' });
+    const state = useAppStore.getState();
+    expect(state.settings.localServerUrl).toBe('http://localhost:1234/v1');
+    expect(state.settings.localCatalog).toEqual([]);
+    expect(state.settings.localCatalogBaseUrl).toBe('');
+    expect(state.settings.localCatalogFetchedAt).toBe(0);
+    expect(state.settings.localModels.chat).toBe('');
+    expect(state.availableModels).toEqual([]);
+    expect(state.modelsFetchedAt).toBe(0);
+    expect(state.modelsError).toBeNull();
+    expect(state.modelsLoading).toBe(false);
   });
 
   it('clears cloud model state when switching to Local while preserving the OpenRouter key and local picks', () => {
@@ -202,6 +243,45 @@ describe('store persist migrate — LocalModelPicks legacy shape → chat-only',
     };
     const out = migrate()?.(persisted, 5) as { settings: { localModels: LocalModelPicks } };
     expect(out.settings.localModels).toEqual({ chat: 'llama3.1:8b' });
+  });
+
+  it('drops persisted local catalog without endpoint identity while preserving manual local pick', () => {
+    const out = migrate()?.(
+      {
+        settings: {
+          provider: 'local',
+          localServerUrl: 'http://localhost:11434/v1',
+          localModels: { chat: 'llama3.1:8b' },
+          localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
+          localCatalogFetchedAt: 12345,
+        },
+      },
+      8,
+    ) as { settings: Record<string, unknown> };
+    expect(out.settings.localModels).toEqual({ chat: 'llama3.1:8b' });
+    expect(out.settings.localCatalog).toEqual([]);
+    expect(out.settings.localCatalogBaseUrl).toBe('');
+    expect(out.settings.localCatalogFetchedAt).toBe(0);
+  });
+
+  it('drops persisted local catalog and pick when endpoint identity proves the server changed', () => {
+    const out = migrate()?.(
+      {
+        settings: {
+          provider: 'local',
+          localServerUrl: 'http://localhost:1234/v1',
+          localModels: { chat: 'llama3.1:8b' },
+          localCatalog: [{ id: 'llama3.1:8b', ownedBy: 'ollama', created: 0 }],
+          localCatalogBaseUrl: 'http://localhost:11434/v1',
+          localCatalogFetchedAt: 12345,
+        },
+      },
+      9,
+    ) as { settings: Record<string, unknown> };
+    expect(out.settings.localModels).toEqual({ chat: '' });
+    expect(out.settings.localCatalog).toEqual([]);
+    expect(out.settings.localCatalogBaseUrl).toBe('');
+    expect(out.settings.localCatalogFetchedAt).toBe(0);
   });
 
   it('falls back to openrouter when persisted provider is no longer registered', () => {

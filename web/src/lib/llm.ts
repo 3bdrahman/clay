@@ -12,6 +12,7 @@ import {
 import { buildMessages } from './llmMessages';
 import { streamOpenAICompatible } from './llmStream';
 import { getApprovedCloudModelIds, isApprovedCloudModel, OPENROUTER_FREE_ROUTING } from './modelPolicy';
+import { getLocalRequestOptions, localConnectionError, normalizeLocalServerUrl } from './localEndpoint';
 
 export { ProviderUnreachableError } from './errors';
 
@@ -33,7 +34,9 @@ export interface LLMClientConfig {
  * @throws Error if baseUrl is empty
  */
 export function createLLMClient(config: LLMClientConfig): LLMClient {
-  const baseUrl = config.baseUrl.replace(/\/+$/, '');
+  const baseUrl = config.providerKind === 'local'
+    ? normalizeLocalServerUrl(config.baseUrl)
+    : config.baseUrl.replace(/\/+$/, '');
   const apiKey = config.apiKey;
   const providerLabel = config.providerLabel ?? 'provider';
   const defaultTemperature = config.temperature ?? 0;
@@ -144,6 +147,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
       let resp: Response;
       try {
         resp = await fetch(`${baseUrl}/chat/completions`, {
+          ...(config.providerKind === 'local' ? getLocalRequestOptions(baseUrl) : {}),
           method: 'POST',
           headers,
           body: JSON.stringify(body),
@@ -160,6 +164,7 @@ export function createLLMClient(config: LLMClientConfig): LLMClient {
         if (e instanceof DOMException) {
           throw new StreamInterruptedError(providerLabel, '', e instanceof Error ? e : new Error(String(e)));
         }
+        if (config.providerKind === 'local') throw localConnectionError(baseUrl, e);
         throw classifyError(e, providerLabel, 'invoke');
       }
 

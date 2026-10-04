@@ -9,24 +9,7 @@ import { CloudProviderSettings } from './settings/CloudProviderSettings';
 import { WebSearchSetting } from './settings/WebSearchSetting';
 import { ThemeSetting } from './settings/ThemeSetting';
 import { GenerationTuning } from './settings/GenerationTuning';
-
-function validateLocalServerUrl(url: string): string | null {
-  const trimmed = url.trim();
-  if (!trimmed) return 'Server URL is required.';
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    return 'Not a valid URL. Include the scheme, e.g. http://localhost:11434/v1';
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return 'URL must use http:// or https://';
-  }
-  if (!parsed.hostname) {
-    return 'URL is missing a hostname.';
-  }
-  return null;
-}
+import { inspectLocalServerUrl } from '../lib/localEndpoint';
 
 type LocalModelKey = keyof LocalModelPicks;
 
@@ -63,10 +46,11 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
     }
   };
 
-  const urlValidationError = settings.provider === 'local'
-    ? validateLocalServerUrl(settings.localServerUrl)
-    : null;
   const isLocal = settings.provider === 'local';
+  const localEndpoint = isLocal
+    ? inspectLocalServerUrl(settings.localServerUrl)
+    : { baseUrl: '', error: null };
+  const urlValidationError = localEndpoint.error;
 
   function setLocalModel(key: LocalModelKey, value: string) {
     updateSettings({ localModels: { ...settings.localModels, [key]: value } });
@@ -112,6 +96,7 @@ export function SettingsPanel({ open, onClose, refreshModels, pickedModels, rese
               modelsLoading={modelsLoading}
               modelsError={modelsError}
               urlValidationError={urlValidationError}
+              normalizedBaseUrl={localEndpoint.baseUrl}
               updateSettings={updateSettings}
               refreshModels={refreshModels}
               setLocalModel={setLocalModel}

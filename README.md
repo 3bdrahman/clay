@@ -97,7 +97,7 @@ npm run dev
 
 Open the URL printed by Vite, normally `http://localhost:5173`. Provider keys are entered in the app; do not put secrets in `VITE_*` variables, which are exposed to the client bundle.
 
-For a local model, enter the server's OpenAI-compatible `/v1` URL in Settings, click **Discover**, and select a model. The server must allow requests from Clay's origin. A locally served Clay instance is the most straightforward option when browser restrictions prevent the hosted HTTPS demo from reaching an HTTP model server.
+For a local model, enter the server's OpenAI-compatible `/v1` URL in Settings, click **Discover**, and select a model. The server must allow requests from Clay's exact origin; Settings shows that origin and the normalized catalog URL before discovery. See the [local model setup guide](docs/local-models.md) for Ollama, LM Studio, Linux systemd, macOS, Windows, and browser local-network permission notes.
 
 ## Verify and build
 

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { MessageBubble } from './MessageBubble';
 import { useAppStore } from '../store';
 import type { ChatMessage } from '../lib/types';
+import { RagErrorCode } from '../lib/errors';
 
 let root: ReturnType<typeof createRoot> | undefined;
 const container = document.createElement('div');
@@ -41,5 +42,65 @@ describe('saved answer sources', () => {
     expect(sources).toBeDefined();
     act(() => sources!.click());
     expect(container.textContent).not.toContain('handbook.txt');
+  });
+});
+
+describe('workflow error display', () => {
+  function render(message: ChatMessage) {
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root?.render(<MessageBubble message={message} />));
+  }
+
+  it('does not badge a provider error as CORS just because the message mentions CORS', () => {
+    render({
+      id: 'local-fetch-error',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      workflow: {
+        question: 'Hello',
+        documents: [],
+        webResults: [],
+        citations: [],
+        retryCount: 0,
+        steps: [],
+        startedAt: 1,
+        error: {
+          code: RagErrorCode.PROVIDER_UNREACHABLE,
+          message: 'Cannot connect to http://127.0.0.1:11434/v1. Check CORS settings allow this origin.',
+          retryable: false,
+        },
+      },
+    });
+
+    expect(container.textContent).toContain('Check CORS settings allow this origin.');
+    expect(container.textContent).not.toContain('CORS blocked');
+  });
+
+  it('badges typed CORS errors', () => {
+    render({
+      id: 'typed-cors-error',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      workflow: {
+        question: 'Hello',
+        documents: [],
+        webResults: [],
+        citations: [],
+        retryCount: 0,
+        steps: [],
+        startedAt: 1,
+        error: {
+          code: RagErrorCode.CORS_BLOCKED,
+          message: 'Browser blocked request to OpenRouter (CORS).',
+          retryable: false,
+        },
+      },
+    });
+
+    expect(container.textContent).toContain('CORS blocked');
+    expect(container.textContent).toContain('Browser blocked request to OpenRouter');
   });
 });

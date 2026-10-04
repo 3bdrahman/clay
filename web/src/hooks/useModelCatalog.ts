@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react';
 import { listModels, listLocalCatalog, type ModelInfo } from '../lib/models';
 import { resolveProviderEndpoint } from '../lib/providers';
+import { inspectLocalServerUrl } from '../lib/localEndpoint';
 import type { Settings } from '../lib/types';
 
 const MODEL_TTL_MS = 60 * 60 * 1000;
@@ -13,7 +14,7 @@ export interface ModelCatalogDeps {
   setModels: (models: ModelInfo[]) => void;
   setModelsLoading: (loading: boolean) => void;
   setModelsError: (error: string | null) => void;
-  setLocalCatalog: (models: ModelInfo[]) => void;
+  setLocalCatalog: (models: ModelInfo[], baseUrl?: string) => void;
   getSettings: () => Settings;
 }
 
@@ -28,8 +29,9 @@ export function useFetchCloudModels(deps: ModelCatalogDeps) {
       const endpoint = resolveProviderEndpoint(settings);
       const matchesCurrentSettings = () => {
         const current = getSettings();
+        if (current.provider !== provider) return false;
         const currentEndpoint = resolveProviderEndpoint(current);
-        return current.provider === provider && currentEndpoint.baseUrl === endpoint.baseUrl && currentEndpoint.apiKey === key;
+        return currentEndpoint.baseUrl === endpoint.baseUrl && currentEndpoint.apiKey === key;
       };
       if (!matchesCurrentSettings()) return [];
       const cached = fetchedEndpointRef.current;
@@ -64,30 +66,72 @@ export function useFetchCloudModels(deps: ModelCatalogDeps) {
 }
 
 export function useFetchLocalModels(deps: ModelCatalogDeps) {
-  const { settings, setLocalCatalog, setModelsLoading, setModelsError } = deps;
+  const requestIdRef = useRef(0);
+  const { settings, setLocalCatalog, setModelsLoading, setModelsError, getSettings } = deps;
 
   return useCallback(
     async (baseUrl: string, force = false): Promise<ModelInfo[]> => {
+      const currentAtStart = getSettings();
+      if (currentAtStart.provider !== 'local') return [];
+      const inspected = inspectLocalServerUrl(baseUrl);
+      if (inspected.error) {
+        if (currentAtStart.localServerUrl.trim() === baseUrl.trim()) {
+          ++requestIdRef.current;
+          setModelsError(inspected.error);
+          setModelsLoading(false);
+        }
+        return [];
+      }
+      const normalizedBaseUrl = inspected.baseUrl;
+
+      const matchesCurrentSettings = () => {
+        const current = getSettings();
+        if (current.provider !== 'local') return false;
+        const endpoint = inspectLocalServerUrl(current.localServerUrl);
+        return !endpoint.error && endpoint.baseUrl === normalizedBaseUrl;
+      };
+      if (!matchesCurrentSettings()) return [];
+
       const stamp = settings.localCatalogFetchedAt;
       const existing = settings.localCatalog;
-      if (!force && existing.length > 0 && Date.now() - stamp < LOCAL_CATALOG_TTL_MS) {
+      if (
+        !force &&
+        existing.length > 0 &&
+        settings.localCatalogBaseUrl === normalizedBaseUrl &&
+        Date.now() - stamp < LOCAL_CATALOG_TTL_MS
+      ) {
         return existing;
       }
+      const requestId = ++requestIdRef.current;
+      const isCurrent = () => requestId === requestIdRef.current && matchesCurrentSettings();
       setModelsLoading(true);
       setModelsError(null);
       try {
-        const models = await listLocalCatalog(baseUrl, '');
-        setLocalCatalog(models);
+        const models = await listLocalCatalog(normalizedBaseUrl, '');
+        if (!isCurrent()) return [];
+        setLocalCatalog(models, normalizedBaseUrl);
         return models;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        setModelsError(msg);
+        if (isCurrent()) {
+          const current = getSettings();
+          if (current.localCatalog.length > 0 || current.localCatalogBaseUrl) setLocalCatalog([], '');
+          setModelsError(msg);
+        }
         return [];
       } finally {
-        setModelsLoading(false);
+        if (isCurrent()) setModelsLoading(false);
       }
     },
-    [setLocalCatalog, setModelsLoading, setModelsError, settings.localCatalog, settings.localCatalogFetchedAt],
+    [
+      getSettings,
+      setLocalCatalog,
+      setModelsLoading,
+      setModelsError,
+      settings.localCatalog,
+      settings.localCatalogBaseUrl,
+      settings.localCatalogFetchedAt,
+    ],
   );
 }
 

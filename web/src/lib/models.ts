@@ -3,6 +3,8 @@ import type { ModelInfo, Settings, LocalModelPicks } from './types';
 import { getCloudModelOptions } from './modelPolicy';
 import {
   ProviderUnreachableError,
+  ProviderTimeoutError,
+  RagError,
   InvalidApiKeyError,
   RateLimitError,
   ModelCatalogEmptyError,
@@ -10,6 +12,56 @@ import {
   classifyError,
 } from './errors';
 import { SIZE_PATTERNS } from './modelPatterns';
+import { getLocalRequestOptions, localConnectionError, normalizeLocalServerUrl } from './localEndpoint';
+
+const MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
+
+function invalidCatalog(providerLabel: string): ProviderUnreachableError {
+  return new ProviderUnreachableError(providerLabel, undefined, {
+    message: `${providerLabel} returned an invalid model catalog. Use the server’s OpenAI-compatible API base URL (usually ending in /v1).`,
+    retryable: false,
+  });
+}
+
+async function fetchCatalog(provider: ProviderKind, baseUrl: string, headers: Record<string, string>, signal?: AbortSignal): Promise<unknown> {
+  const config = getProviderConfig(provider);
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  if (signal?.aborted) controller.abort();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, MODEL_DISCOVERY_TIMEOUT_MS);
+  try {
+    if (signal?.aborted) throw new DOMException('Model discovery cancelled', 'AbortError');
+    const resp = await fetch(`${baseUrl}${config.modelsEndpoint}`, {
+      ...(provider === 'local' ? getLocalRequestOptions(baseUrl) : {}),
+      headers,
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      if (resp.status === 401 || resp.status === 403) throw new InvalidApiKeyError(config.displayName, resp.status as 401 | 403);
+      if (resp.status === 429) {
+        const retryAfter = resp.headers.get('retry-after');
+        throw new RateLimitError(config.displayName, retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined);
+      }
+      throw new ProviderUnreachableError(config.displayName, undefined, {
+        message: `Model discovery returned HTTP ${resp.status}. Check the OpenAI-compatible API base URL and that the server exposes /models.`,
+        retryable: resp.status >= 500,
+      });
+    }
+    return await resp.json();
+  } catch (error) {
+    if (timedOut) throw new ProviderTimeoutError(config.displayName, MODEL_DISCOVERY_TIMEOUT_MS);
+    if (signal?.aborted) throw new ProviderUnreachableError(config.displayName, undefined, { message: 'Model discovery was cancelled.', retryable: false });
+    if (error instanceof RagError) throw error;
+    if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'SyntaxError') throw invalidCatalog(config.displayName);
+    if (provider === 'local') throw localConnectionError(baseUrl, error);
+    throw classifyError(error, config.displayName, 'listModels');
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
 
 export type { ModelInfo };
 
@@ -34,9 +86,12 @@ export async function listModels(
   provider: ProviderKind,
   apiKey: string,
   baseUrl?: string,
+  signal?: AbortSignal,
 ): Promise<ModelInfo[]> {
   const config = getProviderConfig(provider);
-  const url = (baseUrl || config.baseUrl).replace(/\/+$/, '');
+  const url = provider === 'local'
+    ? normalizeLocalServerUrl(baseUrl ?? config.baseUrl)
+    : (baseUrl || config.baseUrl).replace(/\/+$/, '');
 
   if (!url) {
     throw new ProviderUnreachableError(provider, undefined, { isTimeout: false });
@@ -54,32 +109,14 @@ export async function listModels(
     headers.Authorization = `Bearer ${apiKey}`;
   }
 
-  const modelsEndpoint = config.modelsEndpoint;
-  let resp: Response;
-  try {
-    resp = await fetch(`${url}${modelsEndpoint}`, { headers });
-  } catch (e) {
-    throw classifyError(e, config.displayName, 'listModels');
+  const json = await fetchCatalog(provider, url, headers, signal);
+  if (!json || typeof json !== 'object' || !('data' in json) || !Array.isArray(json.data)) {
+    throw invalidCatalog(config.displayName);
   }
-
-  if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
-      throw new InvalidApiKeyError(config.displayName, resp.status as 401 | 403);
-    }
-    if (resp.status === 429) {
-      const retryAfter = resp.headers.get('retry-after');
-      const retryAfterMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined;
-      throw new RateLimitError(config.displayName, retryAfterMs);
-    }
-    throw new ProviderUnreachableError(config.displayName, new Error(`${resp.status} ${resp.statusText}`), {
-      retryable: resp.status >= 500,
-    });
+  const data = json.data;
+  if (data.some(model => !model || typeof model !== 'object' || typeof model.id !== 'string' || !model.id.trim())) {
+    throw invalidCatalog(config.displayName);
   }
-
-  const json = await resp.json();
-
-  // Standard OpenAI-compatible format: { data: [{ id, object, created, owned_by }] }
-  const data = json.data || [];
 
   if (data.length === 0) {
     throw new ModelCatalogEmptyError(config.displayName);
@@ -110,8 +147,8 @@ export async function listModels(
   });
 }
 
-export async function listLocalCatalog(baseUrl: string, apiKey: string): Promise<ModelInfo[]> {
-  return listModels('local', apiKey, baseUrl);
+export async function listLocalCatalog(baseUrl: string, apiKey: string, signal?: AbortSignal): Promise<ModelInfo[]> {
+  return listModels('local', apiKey, normalizeLocalServerUrl(baseUrl), signal);
 }
 
 /**

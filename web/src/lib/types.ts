@@ -39,6 +39,7 @@ export interface Settings {
   localServerUrl: string;
   localModels: LocalModelPicks;
   localCatalog: ModelInfo[];
+  localCatalogBaseUrl?: string;
   localCatalogFetchedAt: number;
   // User-overridable model selection (empty = auto-pick):
   // chatModel: single model for routing, codeGen, answer, eval

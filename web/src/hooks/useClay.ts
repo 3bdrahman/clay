@@ -107,12 +107,12 @@ export function useClay(): UseClayResult {
         const needsChatConfiguration = endpoint.baseUrl.length === 0 || (!isLocal && endpoint.apiKey.trim().length === 0);
         setNeedsConfiguration(needsChatConfiguration);
 
-        let catalog = availableModels;
+        let catalog = isLocal ? settings.localCatalog : availableModels;
         if (settings.provider === 'local') {
           const url = settings.localServerUrl.trim();
           if (url) {
             const local = await fetchLocalModels(url);
-            if (local.length > 0) catalog = local;
+            catalog = local;
           }
         } else if (endpoint.apiKey) {
           const fresh = await fetchCloudModels(endpoint.apiKey);

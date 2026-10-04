@@ -11,6 +11,7 @@ import {
   classifyError,
 } from './errors';
 import { buildMessages } from './llmMessages';
+import { getLocalRequestOptions, localConnectionError, normalizeLocalServerUrl } from './localEndpoint';
 
 export interface StreamConfig {
   baseUrl: string;
@@ -84,7 +85,8 @@ export async function streamOpenAICompatible(
   onToken: (token: string) => void,
   signal?: AbortSignal,
 ): Promise<LLMResponse> {
-  const { baseUrl, apiKey, providerLabel, defaultTemperature, timeoutMs } = config;
+  const { apiKey, providerLabel, defaultTemperature, timeoutMs } = config;
+  const baseUrl = config.providerKind === 'local' ? normalizeLocalServerUrl(config.baseUrl) : config.baseUrl;
 
   const messages = buildMessages(req);
 
@@ -132,6 +134,7 @@ export async function streamOpenAICompatible(
     let resp: Response;
     try {
       resp = await fetch(`${baseUrl}/chat/completions`, {
+        ...(config.providerKind === 'local' ? getLocalRequestOptions(baseUrl) : {}),
         method: 'POST',
         headers,
         body: JSON.stringify(body),
@@ -148,6 +151,7 @@ export async function streamOpenAICompatible(
       if (e instanceof DOMException) {
         throw new StreamInterruptedError(providerLabel, '', e instanceof Error ? e : new Error(String(e)));
       }
+      if (config.providerKind === 'local') throw localConnectionError(baseUrl, e);
       throw classifyError(e, providerLabel, 'stream');
     }
 

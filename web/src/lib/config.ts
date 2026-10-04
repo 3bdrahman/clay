@@ -5,11 +5,13 @@
 
 import type { Settings } from './types';
 import { getProviderConfig, resolveProviderEndpoint } from './providers';
+import { inspectLocalServerUrl } from './localEndpoint';
 import {
   NoProviderError,
   ModelCatalogEmptyError,
   ModelNotFoundError,
   LocalServerUrlMissingError,
+  ProviderUnreachableError,
   RagErrorCode,
   type RagError,
 } from './errors';
@@ -42,6 +44,9 @@ export function validateSettings(
     if (!settings.localServerUrl || !settings.localServerUrl.trim()) {
       const err = new LocalServerUrlMissingError();
       addError(err, 'local');
+    } else {
+      const endpoint = inspectLocalServerUrl(settings.localServerUrl);
+      if (endpoint.error) addError(new ProviderUnreachableError('Local server', undefined, { message: endpoint.error, retryable: false }), 'local');
     }
 
     // Local models must be picked
